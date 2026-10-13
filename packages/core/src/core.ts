@@ -10,11 +10,14 @@ import * as jobs from "./db/repos/jobs.js";
 import * as settings from "./db/repos/settings.js";
 import * as palettes from "./db/repos/palettes.js";
 import { artUrl, extractPalette, type ArtPalette } from "./palette/index.js";
-import { JobRunner, type ImportRequest } from "./services/jobRunner.js";
+import { JobRunner, type ImportRequest, type ImportSelectionRequest } from "./services/jobRunner.js";
+import { cachedFetchText } from "./services/pageCache.js";
+import { parseMusicPage } from "./scrape/parseMusic.js";
+import { normalizeBandcampUrl } from "./scrape/url.js";
 import { getFreshStreamUrl, refreshAlbum } from "./services/streamService.js";
 import { vacuumOrphans } from "./services/importService.js";
 import { prunePageCache } from "./services/pageCache.js";
-import type { PlayState, SearchResult } from "./types.js";
+import type { BrowseResult, PlayState, SearchResult } from "./types.js";
 
 export interface CoreDeps {
   db: Db;
@@ -49,6 +52,16 @@ export function createCore(deps: CoreDeps) {
     tracksByIds: (ids: number[]) => tracks.getTracksByIds(db, ids),
     // imports
     import: (req: ImportRequest) => runner.enqueue(req),
+    importSelection: (req: ImportSelectionRequest) => runner.enqueueSelection(req),
+    /** List an artist's or label's releases with library status, without importing anything. */
+    browse: async (input: string): Promise<BrowseResult> => {
+      const n = normalizeBandcampUrl(input);
+      const url = n.kind === "artist" ? n.url : `https://${n.host}/music`;
+      const parsed = parseMusicPage(await cachedFetchText(db, queue, url), `https://${n.host}`);
+      const rows = await db.select<{ id: number; url: string }>("SELECT id, url FROM albums");
+      const byUrl = new Map(rows.map((r) => [r.url, r.id]));
+      return { url, band: parsed.band, items: parsed.items.map((i) => ({ ...i, album_id: byUrl.get(i.url) ?? null })) };
+    },
     jobs: () => jobs.listJobs(db),
     job: (id: number) => jobs.getJob(db, id),
     cancelJob: (id: number) => runner.cancel(id),

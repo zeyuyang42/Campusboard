@@ -73,7 +73,7 @@ export interface PlaylistWithTracks extends Playlist {
   tracks: PlaylistTrack[];
 }
 
-export type JobKind = "album" | "track" | "discography";
+export type JobKind = "album" | "track" | "discography" | "selection";
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 
 export interface JobItem {
@@ -132,4 +132,21 @@ export interface SearchResult {
 
 export interface ApiError {
   error: { code: string; message: string };
+}
+
+/** A release listed on an artist or label page, with library status. */
+export interface BrowseItem {
+  url: string;
+  item_type: ItemType;
+  title: string;
+  art_id: number | null;
+  artist: string | null;
+  /** Library album id when already imported. */
+  album_id: number | null;
+}
+
+export interface BrowseResult {
+  url: string;
+  band: { band_id: number; name: string } | null;
+  items: BrowseItem[];
 }

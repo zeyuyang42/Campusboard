@@ -39,6 +39,8 @@ export async function runSelfTest() {
     out.playState = await core.playState().then((s) => ({ queue: s.queue.length, index: s.queue_index, pos: s.position_sec }));
     const results = await core.search("illuminati hotties");
     out.search = { count: results.length, inLibrary: results.filter((r) => r.in_library).length };
+    const browse = await core.browse("https://illuminatihotties.bandcamp.com");
+    out.browse = { releases: browse.items.length, band: browse.band?.name, inLibrary: browse.items.filter((i) => i.album_id).length, firstTitle: browse.items[0]?.title };
     out.mediaSession = "mediaSession" in navigator;
     out.ok = true;
   } catch (e) {

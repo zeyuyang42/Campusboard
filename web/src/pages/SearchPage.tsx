@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useImport, useJob, useSearch, useInvalidateLibrary } from "../api/queries";
 import type { SearchResult } from "@bc/core";
 import { JobProgress } from "../components/JobProgress";
@@ -52,9 +52,10 @@ function Result({ r }: { r: SearchResult }) {
   const invalidate = useInvalidateLibrary();
   useEffect(() => { if (job && (job.status === "done" || job.status === "failed")) invalidate(); }, [job?.status]); // eslint-disable-line react-hooks/exhaustive-deps
   // Album/track results carry an `img` without the "a" prefix that real art URLs need; derive from art_id instead.
+  const nav = useNavigate();
   const img = r.type === "band" ? r.img : artUrl(r.art_id, 7) ?? r.img;
   const add = async () => { const j = await imp.mutateAsync({ url: r.url }); setJobId(j.id); };
-  const label = r.type === "band" ? "Import discography" : "Add";
+  const label = "Add";
   return (
     <div>
       <div className="result">
@@ -67,12 +68,14 @@ function Result({ r }: { r: SearchResult }) {
             <ExternalLink href={r.url} className="muted">Open on Bandcamp</ExternalLink>
           </div>
         </div>
-        {r.in_library && r.type !== "band" ? (
+        {r.type === "band" ? (
+          <span className="row">
+            <button className="btn sm primary" onClick={() => nav(`/browse?url=${encodeURIComponent(r.url)}`)}>Browse releases</button>
+          </span>
+        ) : r.in_library ? (
           <Link className="btn sm" to="/library">In library</Link>
         ) : (
-          <button className="btn sm primary" onClick={add} disabled={imp.isPending || (!!job && (job.status === "queued" || job.status === "running"))}>
-            {r.in_library ? "Re-import" : label}
-          </button>
+          <button className="btn sm primary" onClick={add} disabled={imp.isPending || (!!job && (job.status === "queued" || job.status === "running"))}>{label}</button>
         )}
       </div>
       {job && <JobProgress job={job} compact />}

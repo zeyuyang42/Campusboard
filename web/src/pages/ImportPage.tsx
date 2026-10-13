@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { normalizeBandcampUrl } from "@bc/core";
 import { useImport, useJobs, useInvalidateLibrary } from "../api/queries";
 import { JobProgress } from "../components/JobProgress";
 import { friendlyError } from "../lib/errors";
@@ -9,6 +11,7 @@ export function ImportPage() {
   const imp = useImport();
   const { data: jobs } = useJobs();
   const invalidate = useInvalidateLibrary();
+  const nav = useNavigate();
 
   // Refresh library views whenever a job finishes.
   const activeCount = jobs?.filter((j) => j.status === "queued" || j.status === "running").length ?? 0;
@@ -21,6 +24,10 @@ export function ImportPage() {
     const urls = url.split(/\s+/).map((s) => s.trim()).filter(Boolean);
     if (!urls.length) return;
     try {
+      // A single artist URL opens the browse page so you can pick releases; everything else imports directly.
+      if (urls.length === 1) {
+        try { if (normalizeBandcampUrl(urls[0]).kind === "artist") { nav(`/browse?url=${encodeURIComponent(urls[0])}`); return; } } catch { /* fall through to the import error */ }
+      }
       for (const u of urls) await imp.mutateAsync({ url: u });
       setUrl("");
     } catch (e) {
@@ -37,7 +44,7 @@ export function ImportPage() {
       </form>
       {err && <div className="notice error" style={{ marginBottom: 16 }}>{err}</div>}
       <p className="muted" style={{ marginTop: -8, marginBottom: 24 }}>
-        Album and track pages import immediately. An artist URL (or <code>/music</code>) imports their whole discography, one page per second. Paste several URLs separated by spaces or newlines to queue them all.
+        Album and track pages import immediately. An artist or label URL opens their releases so you can choose what to import. Paste several album URLs separated by spaces or newlines to queue them all.
       </p>
       {jobs && jobs.length === 0 && <div className="empty">No imports yet.</div>}
       {jobs?.map((j) => <JobProgress key={j.id} job={j} />)}

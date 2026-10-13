@@ -13,7 +13,7 @@ export function JobProgress({ job, compact = false }: { job: Job; compact?: bool
     <div className="job">
       <div className="head">
         <span className={`status ${job.status}`}>{job.status}</span>
-        <span className="muted" style={{ fontSize: 12 }}>{job.kind}</span>
+        <span className="muted" style={{ fontSize: 12 }}>{job.kind === "selection" ? "selected releases" : job.kind}</span>
         <span className="url" title={job.input_url}>{job.input_url.replace(/^https?:\/\//, "")}</span>
         <span className="spacer" />
         {job.total > 0 && <span className="muted" style={{ fontSize: 12 }}>{job.done + job.failed} / {job.total}{job.failed ? ` · ${job.failed} failed` : ""}</span>}

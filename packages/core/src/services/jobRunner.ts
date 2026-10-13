@@ -15,6 +15,13 @@ export interface ImportRequest {
   force?: boolean; // re-import discography items that are already in the library
 }
 
+export interface ImportSelectionRequest {
+  /** Album/track URLs chosen on a browse page. */
+  urls: string[];
+  /** Shown as the job's source, e.g. the artist page URL. */
+  label: string;
+}
+
 /**
  * Processes import jobs one at a time. Lives for the whole app session; on
  * construction it re-queues jobs that were running when the app last closed.
@@ -35,6 +42,16 @@ export class JobRunner {
       ? await jobs.createJob(this.db, "discography", n.url, [])
       : await jobs.createJob(this.db, n.kind, n.url, [n.url]);
     this.forceFlags.set(job.id, !!req.force);
+    this.onChange();
+    void this.kick();
+    return (await jobs.getJob(this.db, job.id))!;
+  }
+
+  /** Import a hand-picked set of album/track URLs as one job. */
+  async enqueueSelection(req: ImportSelectionRequest): Promise<Job> {
+    const urls = [...new Set(req.urls.map((u) => normalizeBandcampUrl(u)).filter((n) => n.kind !== "artist").map((n) => n.url))];
+    if (!urls.length) throw new ScrapeError("invalid_url", "Nothing selected to import");
+    const job = await jobs.createJob(this.db, "selection", req.label, urls);
     this.onChange();
     void this.kick();
     return (await jobs.getJob(this.db, job.id))!;
@@ -65,7 +82,7 @@ export class JobRunner {
         const parsed = parseMusicPage(html, origin);
         const have = await albumUrlsInLibrary(this.db);
         const force = this.forceFlags.get(job.id) ?? false;
-        const urls = parsed.items.filter((u) => force || !have.has(u));
+        const urls = parsed.items.map((i) => i.url).filter((u) => force || !have.has(u));
         await jobs.addJobItems(this.db, job.id, urls);
         if (urls.length === 0) {
           await jobs.setJobStatus(this.db, job.id, "done", parsed.items.length ? "Everything from this artist is already in your library" : "No releases found on this page");

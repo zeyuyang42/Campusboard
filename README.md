@@ -23,10 +23,12 @@ Requires macOS 13.3 or later. Your library lives in
 
 ## Using it
 
-- **Import**: paste `https://artist.bandcamp.com/album/...`, `/track/...`, or an
-  artist URL (imports the whole discography, one page per second). Interrupted
-  imports resume next launch.
-- **Search**: searches Bandcamp directly; "Add" imports a result.
+- **Import**: paste `https://artist.bandcamp.com/album/...` or `/track/...`.
+  An artist or label URL opens a browse page listing every release with
+  checkboxes, so you import only what you want (or everything). Imports run one
+  page per second and resume after a restart.
+- **Search**: searches Bandcamp directly; "Add" imports an album or track,
+  "Browse releases" opens an artist's or label's page.
 - **Playlists**: right-click any track or album, or select several tracks
   (click, Shift-click, Cmd-click) and use the bar that appears. Drag rows to
   reorder.
