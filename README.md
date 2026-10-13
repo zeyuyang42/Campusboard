@@ -1,8 +1,16 @@
-# Bandcamp Player
+<p align="center">
+  <img src="docs/icon.png" width="128" alt="Bandcamp Player icon">
+</p>
 
-A personal Mac app for listening to Bandcamp. Paste an album, track or artist
-link; it lands in your library; curate playlists; play in a player that takes
-its colors from the album art. Themes are small JSON files you can share.
+<h1 align="center">Bandcamp Player</h1>
+
+<p align="center">A personal Mac app for listening to Bandcamp. Paste a link, keep a library, make playlists, and play in a player that takes its colors from the album art.</p>
+
+<p align="center"><a href="https://github.com/zeyuyang42/bandcamp-player/releases/latest"><b>Download the latest release</b></a> (macOS, Apple Silicon)</p>
+
+![Library](docs/library.png)
+
+![Now playing](docs/now-playing.png)
 
 Bandcamp has no public API, so the app reads the JSON that Bandcamp embeds in
 its own album pages (the same data the official player uses) and streams audio
@@ -12,7 +20,7 @@ personal, non-commercial use. Please buy what you keep coming back to.
 
 ## Install (macOS, Apple Silicon)
 
-1. Open the `.dmg` and drag **Bandcamp Player** to Applications.
+1. Download the `.dmg` from the [releases page](https://github.com/zeyuyang42/bandcamp-player/releases/latest), open it, and drag **Bandcamp Player** to Applications.
 2. The app is not signed with an Apple Developer ID, so the first time macOS
    will refuse to open it. Right-click the app, choose **Open**, and confirm.
    If that option is missing, go to System Settings → Privacy & Security and
