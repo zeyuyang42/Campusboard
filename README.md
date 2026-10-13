@@ -1,78 +1,108 @@
 # Bandcamp Player
 
-A personal, local-only web UI for listening to Bandcamp. Paste an album, track or
-artist link; it lands in your library; curate playlists; play in a clean player
-with keyboard shortcuts and Mac media keys.
+A personal Mac app for listening to Bandcamp. Paste an album, track or artist
+link; it lands in your library; curate playlists; play in a player that takes
+its colors from the album art. Themes are small JSON files you can share.
 
-Bandcamp has no public API, so the server reads the JSON that Bandcamp embeds in
+Bandcamp has no public API, so the app reads the JSON that Bandcamp embeds in
 its own album pages (the same data the official player uses) and streams audio
 straight from Bandcamp's CDN at 128 kbps. Nothing is downloaded or re-hosted.
 Every album page keeps a **Buy on Bandcamp** link. Bandcamp's terms allow
 personal, non-commercial use. Please buy what you keep coming back to.
 
-## Run it
+## Install (macOS, Apple Silicon)
 
-Requires Node 22.5+ (uses the built-in `node:sqlite`; developed on Node 25).
+1. Open the `.dmg` and drag **Bandcamp Player** to Applications.
+2. The app is not signed with an Apple Developer ID, so the first time macOS
+   will refuse to open it. Right-click the app, choose **Open**, and confirm.
+   If that option is missing, go to System Settings → Privacy & Security and
+   click **Open Anyway**. You only need to do this once.
 
-```bash
-npm install
-npm run build
-npm start          # http://localhost:3001
-```
-
-Development mode with hot reload (server on 3001, UI on 5173):
-
-```bash
-npm run dev        # open http://localhost:5173
-```
-
-The library lives in `data/library.db` (SQLite). Delete it to start over.
+Requires macOS 13.3 or later. Your library lives in
+`~/Library/Application Support/dev.zeyuyang.bandcamp-player/library.db`.
 
 ## Using it
 
 - **Import**: paste `https://artist.bandcamp.com/album/...`, `/track/...`, or an
-  artist URL (imports the whole discography, one page per second).
+  artist URL (imports the whole discography, one page per second). Interrupted
+  imports resume next launch.
 - **Search**: searches Bandcamp directly; "Add" imports a result.
-- **Playlists**: use the `···` menu on any track or album. Drag rows to reorder.
-- **Queue**: press `Q`. Playback position and queue survive restarts.
+- **Playlists**: right-click any track or album, or select several tracks
+  (click, Shift-click, Cmd-click) and use the bar that appears. Drag rows to
+  reorder.
+- **Now playing**: press `N` or click the artwork in the dock for a full view
+  with queue and lyrics.
+- **Themes**: Settings → pick a preset, adjust colors, fonts, corner radius,
+  density, the album-art wash and an optional background image. Export writes a
+  `.theme.json` you can send to a friend; Import loads one.
 
-Shortcuts: `Space` play/pause · `←`/`→` seek 5 s · `Shift+←`/`→` prev/next ·
-`↑`/`↓` volume · `S` shuffle · `R` repeat · `Q` queue · `/` search.
+Shortcuts: `Space` play/pause · `←`/`→` seek 5 s · `Shift+←`/`→` previous/next ·
+`↑`/`↓` volume · `S` shuffle · `R` repeat · `Q` queue · `N` now playing ·
+`/` search · `Esc` close.
 
-## How it works
+## Theme files
 
+A theme is a JSON file validated on import. Only colors, fonts, numbers and an
+https image URL are accepted; a theme cannot contain CSS or scripts, so a shared
+theme can't break the app. Example:
+
+```json
+{
+  "version": 1,
+  "name": "Dusk",
+  "mode": "dark",
+  "palette": { "surface": "#23262D", "surfaceRaised": "#2C3038", "text": "#F1EEE9",
+               "textMuted": "#9A9AA6", "accent": "#5BB6D1", "danger": "#E06A5E" },
+  "radius": 10,
+  "density": "comfortable",
+  "fonts": { "display": "Bricolage Grotesque Variable", "ui": "Instrument Sans Variable" },
+  "ambient": 0.6,
+  "background": { "source": "none", "value": "", "blur": 12, "dim": 0.5 }
+}
 ```
-web/      Vite + React + zustand + TanStack Query   (the UI)
-server/   Hono + node:sqlite                        (API, scraping, job queue)
-shared/   TypeScript types shared by both
-```
 
-- `server/src/scrape/` parses Bandcamp pages. `parseTralbum.ts` reads the
-  `data-tralbum` attribute on album/track pages; `parseMusic.ts` reads an
-  artist's `/music` page; `search.ts` wraps Bandcamp's autocomplete endpoint.
-  All HTTP goes through `http.ts`, a serial queue limited to one request per
-  second with a normal browser User-Agent.
-- Stream URLs expire about 24 hours after a page is fetched. The `<audio>`
-  element points at `/api/tracks/:id/audio`, which 302-redirects to a fresh CDN
-  URL, re-scraping the album page when needed. The player retries once with
-  `force=1` if a stream errors.
-- Imports run as background jobs (`jobs` / `job_items` tables) so a 100-release
-  discography can trickle in without blocking the UI.
+`accent` is only used when nothing is playing; while a track plays, the accent
+and the backdrop come from its artwork, clamped so text stays readable.
 
-## Checks
+## Development
+
+Requires Node 22.5+, Rust 1.90+ and Xcode command line tools.
 
 ```bash
-npm test             # parser + import tests against saved HTML fixtures (offline)
-npm run smoke        # API smoke test against a running server
-npm run smoke:live   # re-parse a known live page; run this if imports start failing
-npm run scrape -- <bandcamp url>        # print what the parser sees
-npm run fixtures:save -- <url> <name>   # refresh a test fixture after Bandcamp changes markup
+npm install
+npm run dev          # Tauri window with hot reload (Vite on :5173)
+npm run build        # .app and .dmg in src-tauri/target/release/bundle/
+npm test             # parser, data-layer, theme and palette tests (offline)
+npm run typecheck
 ```
 
-If Bandcamp changes its markup, imports fail with `parse_failed` and the server
-log shows which field is missing. Fix the parser, re-save fixtures, re-run tests.
+Browser-only mode for UI work and screenshots (same code, SQLite in WebAssembly,
+Bandcamp pages fetched through a Vite middleware):
 
-## Not in v1 (schema leaves room)
+```bash
+VITE_BROWSER_MODE=1 npm run web:dev   # http://localhost:5173
+```
+
+```
+packages/core/   parsers, async Db interface, repos, services, theme + palette engines
+web/             React UI (Vite); binds core to Tauri's SQLite + HTTP plugins
+src-tauri/       Rust shell: plugins, migrations, capabilities, bundle config
+```
+
+- `packages/core/src/scrape/` parses Bandcamp pages. `parseTralbum.ts` reads the
+  `data-tralbum` attribute on album/track pages; `parseMusic.ts` reads an
+  artist's `/music` page; `search.ts` wraps Bandcamp's autocomplete endpoint.
+  All HTTP goes through `FetchQueue`, serial at one request per second with a
+  normal browser User-Agent.
+- Stream URLs expire about 24 hours after a page is fetched; the player asks
+  core for a fresh URL before each play and retries once on a media error.
+- `npm run scrape -- <url>` prints what the parser sees; `npm run smoke:live`
+  re-parses a known page. If Bandcamp changes its markup, imports fail with
+  `parse_failed`; fix the parser, re-save fixtures with `npm run fixtures:save`,
+  re-run tests.
+
+## Not yet
 
 Syncing purchased items with your Bandcamp login (higher-quality streams),
-offline caching, remote access/PWA, custom artist domains.
+offline caching, Windows/Linux builds, Mac media keys (depends on the webview),
+custom artist domains. Tracked as issues labelled `feature`.

@@ -13,7 +13,7 @@ export function ArtistPage() {
     <>
       <h1 className="page-title">
         {artist.name}
-        <span className="count">{artist.albums.length} release{artist.albums.length === 1 ? "" : "s"}{artist.location ? ` · ${artist.location}` : ""}</span>
+        <span className="count meta"><span>{artist.albums.length} release{artist.albums.length === 1 ? "" : "s"}</span>{artist.location && <span>{artist.location}</span>}</span>
         <span className="spacer" />
         <ExternalLink className="btn sm" href={artist.url}>Bandcamp <ExternalIcon /></ExternalLink>
       </h1>

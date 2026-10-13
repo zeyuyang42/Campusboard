@@ -17,7 +17,7 @@ export function SearchPage() {
   const dq = useDebounced(q, 350);
   const { data, isFetching, error } = useSearch(dq);
   const groups: { title: string; type: SearchResult["type"] }[] = [
-    { title: "Artists & labels", type: "band" },
+    { title: "Artists and labels", type: "band" },
     { title: "Albums", type: "album" },
     { title: "Tracks", type: "track" },
   ];
@@ -60,7 +60,11 @@ function Result({ r }: { r: SearchResult }) {
         {img ? <img src={img} alt="" loading="lazy" /> : <div />}
         <div>
           <div>{r.name}</div>
-          <div className="sub">{r.type === "band" ? (r.location || "artist") : r.artist ?? ""}{r.type !== "band" && r.location ? ` · ${r.location}` : ""} · <ExternalLink href={r.url} className="muted">bandcamp ↗</ExternalLink></div>
+          <div className="sub">
+            <span>{r.type === "band" ? (r.location || "Artist") : r.artist ?? ""}</span>
+            {r.type !== "band" && r.location && <span>{r.location}</span>}
+            <ExternalLink href={r.url} className="muted">Open on Bandcamp</ExternalLink>
+          </div>
         </div>
         {r.in_library && r.type !== "band" ? (
           <Link className="btn sm" to="/library">In library</Link>

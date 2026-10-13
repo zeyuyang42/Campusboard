@@ -1,94 +1,109 @@
 # Working in this repo
 
-Personal, local-only Bandcamp player. Single user, no auth. TypeScript end to end.
-Read `README.md` for what it does; this file is about how to change it safely.
+Personal Bandcamp player, shipped as a Tauri 2 macOS app. Single user, no auth.
+TypeScript for everything except the thin Rust shell. Read `README.md` for what
+it does; this file is about how to change it safely.
 
 ## Commands
 
 ```bash
-npm install                 # once; Node 22.5+ (uses built-in node:sqlite, no native builds)
-npm run dev                 # server :3001 (tsx watch) + Vite :5173 with /api proxy
-npm run build && npm start  # production: one process on :3001 serving web/dist + /api
-npm test                    # vitest, offline, against server/test/fixtures/*.html
-npm run smoke               # curl API script; needs a running server on :3001
-npm run smoke:live          # re-parse one known live Bandcamp page (manual, not CI)
-npm run scrape -- <url>     # print what the parser sees for an album/track/artist URL
-npm run fixtures:save -- <url> <name>   # refresh server/test/fixtures/<name>.html
+npm install                      # Node 22.5+, Rust 1.90+, Xcode CLT
+npm run dev                      # tauri dev: Vite :5173 + the app window (hot reload)
+npm run build                    # tauri build -> src-tauri/target/release/bundle/{macos,dmg}
+npm test                         # vitest in packages/core, offline, uses node:sqlite + saved HTML fixtures
+npm run typecheck                # core + web
+VITE_BROWSER_MODE=1 npm run web:dev   # UI in a normal browser: sql.js + Vite fetch middleware, in-memory data
+VITE_SELFTEST=1 npm run dev      # app runs web/src/selftest.ts and writes results to settings.key='selftest'
+npm run scrape -- <url>          # print what the parser sees (Node)
+npm run fixtures:save -- <url> <name>   # refresh packages/core/test/fixtures/<name>.html
+npm run smoke:live               # re-parse one known live page
 ```
-
-Type-check without building: `npx tsc -p server/tsconfig.json --noEmit` and
-`npx tsc -p web/tsconfig.json --noEmit`.
 
 ## Layout
 
 ```
-shared/src/types.ts        DTOs shared by server and web (import as "@bc/shared", types only)
-server/src/
-  config.ts                ports, paths, rate limit, User-Agent
-  scrape/                  ALL Bandcamp parsing lives here and nowhere else
-    url.ts                 normalizeBandcampUrl -> {kind: album|track|artist, url}
-    http.ts                FetchQueue: serial, 1 req/s, retries; every Bandcamp request goes through it
-    parseTralbum.ts        album/track page -> ParsedTralbum (reads data-tralbum + ld+json)
-    parseMusic.ts          artist /music page -> item URLs (+ data-client-items)
-    search.ts              autocomplete_elastic wrapper
-    schemas.ts             zod schemas; passthrough, strict only on required keys
-  db/                      node:sqlite; migrations embedded in migrations.ts; repos/ hold SQL
-  services/
-    importService.ts       upsertTralbum: idempotent write of a parsed page (one transaction)
-    streamService.ts       getFreshStreamUrl: re-scrape album when stream URL near expiry
-    jobRunner.ts           in-process queue over jobs/job_items (discography imports)
-  routes/                  Hono routes, thin; errors via ScrapeError / HttpError -> {error:{code,message}}
+packages/core/src/
+  types.ts                 DTOs shared by core and web (import "@bc/core")
+  scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, schemas
+  db/Db.ts                 async Db interface {select,get,run}; SQL uses "?" and toDollar() rewrites to $n for the Tauri plugin
+  db/repos/                one module per table; booleans stored 0/1, converted at the repo boundary
+  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner, pageCache
+  theme/                   schema (zod), presets, color math (OKLCH, contrast), apply (CSS variables)
+  palette/                 quantize + pick + extract (canvas) + fitPalette + artUrl
+  core.ts                  createCore({db, fetch, onJobsChange}) -> every function the UI calls
+packages/core/test/        vitest; helpers/nodeDb.ts runs src-tauri/migrations/*.sql on node:sqlite
 web/src/
-  api/                     fetch client + TanStack Query hooks (invalidate via useInvalidateLibrary)
-  player/                  store.ts (zustand) owns the single <audio>; audio.ts, persist.ts,
-                           mediaSession.ts, shortcuts.ts are wiring only
-  pages/, components/      plain CSS in styles.css, no UI framework
+  api/core.ts              getCore() singleton; Tauri plugins, or browserDb.ts when VITE_BROWSER_MODE=1
+  api/queries.ts           TanStack Query hooks and mutations (names are stable; pages depend on them)
+  player/store.ts          zustand store owning the single <audio>; load() asks core for a fresh stream URL
+  theme/store.ts           theme state, persisted in settings.key='theme'; usePalette.ts maps art colors to CSS vars
+  ui/menu.ts + components/MenuHost.tsx   the one context menu / playlist picker for the whole app
+  components/, pages/      plain CSS in styles.css driven by tokens on :root
+src-tauri/
+  src/lib.rs               registers sql/http/dialog/fs/opener plugins and the migrations list
+  migrations/*.sql         schema; every statement is IF NOT EXISTS so an old library.db can be adopted
+  capabilities/default.json  URL scope for http (bandcamp.com, bcbits.com) and fs scope ($APPDATA)
+  tauri.conf.json          window (Overlay title bar), CSP, bundle targets, min macOS 13.3
 ```
 
 ## Facts that shape the design (verified 2026-10-13)
 
 - Bandcamp has no public API. Album/track pages embed `data-tralbum` JSON with
-  `mp3-128` stream URLs. yt-dlp reads the same attribute; treat it as the contract.
-- Stream URLs expire ~24h after fetch (`ts=` query param). Never hand a stored
-  URL to the client directly: `GET /api/tracks/:id/audio` 302-redirects to a fresh
-  one and the browser talks to the CDN itself (Range requests work).
-- Bandcamp pages send no CORS headers, so page fetches must happen server-side.
-- `item_url_path` from search can be absolute or relative; album `img` from search
-  lacks the `a` prefix real art URLs need (derive from `art_id` instead).
-- Art URL: `https://f4.bcbits.com/img/a{art_id padded to 10}_{size}.jpg`
-  (`_7` thumb, `_16` 700px, `_10` 1200px).
-- A `/track/` page imports as an `albums` row with `item_type='track'`; `track_id`
-  is globally unique, so importing the full album later re-parents the track and
-  the pseudo-album is deleted. Importing a `/track/` page whose track already lives
-  in a real album only refreshes stream fields (see importService tests).
+  `mp3-128` stream URLs; yt-dlp reads the same attribute. Treat it as the contract.
+- Stream URLs expire ~24h after fetch (`ts=` query param). `core.getFreshStreamUrl`
+  re-scrapes the album when a URL is within an hour of expiry; the store retries
+  once with `force` on a media error. The `<audio>` element plays the CDN URL
+  directly; no proxying.
+- Bandcamp pages send no CORS headers, so page fetches go through Tauri's HTTP
+  plugin (or the Vite middleware in browser mode). The art CDN also has no CORS,
+  so palette extraction fetches bytes and decodes them, never a tainted `<img>`.
+- Bandcamp's bot check ("Client Challenge" page title) is triggered by requests
+  whose headers look inconsistent (e.g. Chrome `sec-ch-ua` with a Safari UA).
+  Keep requests plain: UA + Accept + Accept-Language.
+- Search `item_url_path` may be absolute or relative; album `img` from search
+  lacks the `a` prefix real art URLs need (derive from `art_id`).
+- The Tauri SQL plugin pools connections and has no transaction API. Writes are
+  single statements or ordered so any interruption leaves a readable library
+  (parents first, deletes last, every step idempotent). Multi-row inserts use
+  `valuesList()`; playlist append computes positions inside one INSERT.
+- WKWebView supports `@property`, `color-mix`, `oklch`, `OffscreenCanvas` from
+  macOS 13.3, hence the minimum version.
 
 ## Rules
 
-- Be polite to Bandcamp: keep the 1 req/s limit, the browser User-Agent, and the
-  10-minute page cache. Do not add parallel fetching.
-- Keep parsing inside `server/src/scrape/`. When Bandcamp markup changes, fix the
-  parser, re-save fixtures, re-run `npm test`. Do not special-case markup in routes
-  or services.
-- Any schema change is a new entry in `server/src/db/migrations.ts` with the next
-  version number; never edit an applied migration. Columns `albums.owned`,
+- Be polite to Bandcamp: keep `FetchQueue` serial at 1 req/s with the browser UA
+  and the 10-minute page cache. Palette art fetches bypass the queue on purpose
+  (static CDN, one small image per track change).
+- Keep parsing inside `packages/core/src/scrape/`. When markup changes: fix the
+  parser, re-save fixtures, `npm test`.
+- Schema changes are a new numbered file in `src-tauri/migrations/` plus an entry
+  in `src/lib.rs`; never edit an applied migration. Columns `albums.owned`,
   `tracks.stream_quality`, `tracks.local_path` are reserved for planned features.
-- Repos return plain objects; booleans are stored as 0/1 and converted at the repo
-  boundary (`rowToAlbum`, `rowToTrack`).
-- `data/` is gitignored; never commit a database or fixtures containing cookies.
-- Node's `node:sqlite` has no `.transaction()` helper; use `tx(db, fn)` from
-  `db/connection.ts`. The `sqlite3` CLI has foreign keys OFF by default; manual
-  deletes can orphan rows and rowid reuse re-attaches them. Prefer the API.
-- The player store is the only thing allowed to touch `audioEl`. UI components
-  call store actions.
+- Theme files are data: `applyTheme` only ever calls `style.setProperty`. Never
+  interpolate theme values into CSS text. New theme fields go through
+  `ThemeSchema` with bounds, and bump `version` only for breaking changes.
+- No `window.prompt`/`confirm`/`alert`: WKWebView handles them badly. Use inline
+  inputs and `ConfirmButton`.
+- The player store is the only code that touches `audioEl`. UI calls store actions.
 - Keep it personal-use: always render the "Buy on Bandcamp" link on album pages.
+- The `sqlite3` CLI has foreign keys OFF by default; prefer the app's own
+  functions over manual deletes in `library.db`.
 
-## Verifying UI changes
+## Verifying changes
 
-There is no browser test in the repo. A Playwright script works well: launch
-Chromium with `--autoplay-policy=no-user-gesture-required`, click a track's
-number button, then read `window.__bcAudio.currentTime` (exposed by
-`web/src/player/audio.ts`). Install Playwright outside the repo (e.g. a temp
-directory), not as a project dependency.
+1. `npm test` and `npm run typecheck`.
+2. UI: run `VITE_BROWSER_MODE=1 npm run web:dev` and drive it with Playwright
+   (installed outside the repo). Launch Chromium with
+   `--autoplay-policy=no-user-gesture-required`; `window.__bcAudio` exposes the
+   audio element. Full-page navigation resets the in-memory database, so navigate
+   through the sidebar links. Vite proxies Bandcamp at `/bc-proxy/<encoded url>`.
+3. Runtime: `VITE_SELFTEST=1 npm run dev`, then read
+   `SELECT value FROM settings WHERE key='selftest'` from
+   `~/Library/Application Support/dev.zeyuyang.bandcamp-player/library.db`.
+   Extend `web/src/selftest.ts` when adding features that touch Tauri plugins.
+4. Screenshots of the real window need Screen Recording permission for the
+   terminal (`screencapture -l <windowid>`); without it, use browser mode.
+5. Release: `npm run build`; open the `.app` from `src-tauri/target/release/bundle/macos/`.
 
 ## Backlog
 

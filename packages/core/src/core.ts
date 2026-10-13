@@ -8,6 +8,8 @@ import * as playlists from "./db/repos/playlists.js";
 import * as playState from "./db/repos/playState.js";
 import * as jobs from "./db/repos/jobs.js";
 import * as settings from "./db/repos/settings.js";
+import * as palettes from "./db/repos/palettes.js";
+import { artUrl, extractPalette, type ArtPalette } from "./palette/index.js";
 import { JobRunner, type ImportRequest } from "./services/jobRunner.js";
 import { getFreshStreamUrl, refreshAlbum } from "./services/streamService.js";
 import { vacuumOrphans } from "./services/importService.js";
@@ -74,6 +76,18 @@ export function createCore(deps: CoreDeps) {
     getSetting: <T>(key: string) => settings.getSetting<T>(db, key),
     setSetting: (key: string, value: unknown) => settings.setSetting(db, key, value),
     vacuumOrphans: () => vacuumOrphans(db),
+    /** Raw colors for a piece of art, cached per art id. Fetched directly (not through the import queue). */
+    getArtPalette: async (artId: number): Promise<ArtPalette | null> => {
+      const cached = await palettes.getCachedPalette(db, artId);
+      if (cached) return cached;
+      const url = artUrl(artId, 2);
+      if (!url) return null;
+      const res = await deps.fetch(url, { headers: { Accept: "image/*" } });
+      if (!res.ok) return null;
+      const p = await extractPalette(await res.arrayBuffer());
+      await palettes.cachePalette(db, artId, p);
+      return p;
+    },
   };
 }
 

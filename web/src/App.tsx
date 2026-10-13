@@ -7,6 +7,7 @@ import { PlaylistsPage } from "./pages/PlaylistsPage";
 import { PlaylistPage } from "./pages/PlaylistPage";
 import { SearchPage } from "./pages/SearchPage";
 import { ImportPage } from "./pages/ImportPage";
+import { SettingsPage } from "./pages/SettingsPage";
 
 export function App() {
   return (
@@ -21,6 +22,7 @@ export function App() {
         <Route path="/playlists/:id" element={<PlaylistPage />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/import" element={<ImportPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/library" replace />} />
       </Route>
     </Routes>

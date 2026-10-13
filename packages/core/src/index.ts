@@ -8,3 +8,4 @@ export { cachedFetchText, prunePageCache } from "./services/pageCache.js";
 export * as repos from "./db/repos/index.js";
 export { createCore, type Core, type CoreDeps } from "./core.js";
 export * from "./theme/index.js";
+export * from "./palette/index.js";

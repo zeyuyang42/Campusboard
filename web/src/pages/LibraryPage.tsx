@@ -26,7 +26,7 @@ function Albums() {
   const { data, isLoading, error } = useAlbums(sort);
   if (error) return <div className="error">{String(error)}</div>;
   if (isLoading) return <div className="empty">Loading…</div>;
-  if (!data?.length) return <div className="empty">Your library is empty. <Link to="/import" style={{ color: "var(--accent-strong)" }}>Import a Bandcamp link</Link> to get started.</div>;
+  if (!data?.length) return <div className="empty">Your library is empty. Paste a Bandcamp album, track or artist link on the Import page to get started.<br /><Link className="btn primary" to="/import">Go to Import</Link></div>;
   return (
     <>
       <div className="toolbar">
@@ -48,13 +48,12 @@ function Albums() {
 function Artists() {
   const { data, isLoading } = useArtists();
   if (isLoading) return <div className="empty">Loading…</div>;
-  if (!data?.length) return <div className="empty">No artists yet.</div>;
+  if (!data?.length) return <div className="empty">No artists yet. They appear here as you import albums.</div>;
   return (
     <div className="artist-list">
       {data.map((a) => (
         <Link key={a.id} to={`/artist/${a.id}`}>
-          <div>{a.name}</div>
-          <div className="sub">{a.album_count} release{a.album_count === 1 ? "" : "s"}{a.location ? ` · ${a.location}` : ""}</div>
+          <div><div>{a.name}</div><div className="sub"><span>{a.album_count} release{a.album_count === 1 ? "" : "s"}</span>{a.location && <span>{a.location}</span>}</div></div>
         </Link>
       ))}
     </div>

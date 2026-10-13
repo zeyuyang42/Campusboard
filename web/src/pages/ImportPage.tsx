@@ -38,9 +38,10 @@ export function ImportPage() {
       <p className="muted" style={{ marginTop: -8, marginBottom: 24 }}>
         Album and track pages import immediately. An artist URL (or <code>/music</code>) imports their whole discography, one page per second. Paste several URLs separated by spaces or newlines to queue them all.
       </p>
+      {jobs && jobs.length === 0 && <div className="empty">No imports yet.</div>}
       {jobs?.map((j) => <JobProgress key={j.id} job={j} />)}
       <div className="kbd-help">
-        Shortcuts: <kbd>Space</kbd> play/pause · <kbd>←</kbd>/<kbd>→</kbd> seek 5s · <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> prev/next · <kbd>↑</kbd>/<kbd>↓</kbd> volume · <kbd>S</kbd> shuffle · <kbd>R</kbd> repeat · <kbd>Q</kbd> queue · <kbd>/</kbd> search
+        <span><kbd>Space</kbd> play/pause</span><span><kbd>←</kbd> <kbd>→</kbd> seek 5s</span><span><kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> previous/next</span><span><kbd>↑</kbd> <kbd>↓</kbd> volume</span><span><kbd>S</kbd> shuffle</span><span><kbd>R</kbd> repeat</span><span><kbd>Q</kbd> queue</span><span><kbd>N</kbd> now playing</span><span><kbd>/</kbd> search</span>
       </div>
     </>
   );

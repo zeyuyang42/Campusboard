@@ -16,3 +16,5 @@ export const CloseIcon = () => <I d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.
 export const UpIcon = () => <I size={16} d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z" />;
 export const DownIcon = () => <I size={16} d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />;
 export const ExternalIcon = () => <I size={14} d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z" />;
+export const ExpandIcon = () => <I d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />;
+export const MenuIcon = () => <I d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />;

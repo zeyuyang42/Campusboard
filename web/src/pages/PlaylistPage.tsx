@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { usePlaylist, usePlaylistMutations } from "../api/queries";
 import { TrackList, PlayPauseAll } from "../components/TrackList";
+import { ConfirmButton } from "../components/ConfirmButton";
+import { PlaylistCover } from "../components/PlaylistCover";
 import { formatTotal } from "../lib/format";
 import { usePlayer } from "../player/store";
 import { ShuffleIcon } from "../components/Icons";
@@ -25,37 +27,34 @@ export function PlaylistPage() {
     ids.splice(to, 0, m);
     reorder.mutate({ id, ids });
   };
-  const del = async () => {
-    if (!window.confirm(`Delete playlist "${pl.name}"?`)) return;
-    await remove.mutateAsync(id);
-    nav("/playlists");
-  };
   const shufflePlay = () => {
     if (!shuffle) toggleShuffle();
-    playTracks(pl.tracks.filter((t) => t.streamable), Math.floor(Math.random() * Math.max(1, pl.tracks.length)));
+    const playable = pl.tracks.filter((t) => t.streamable);
+    playTracks(playable, Math.floor(Math.random() * Math.max(1, playable.length)));
   };
 
   return (
     <>
-      <h1 className="page-title">
+      <div className="page-title">
+        <PlaylistCover artIds={pl.art_ids} />
         {editing !== null ? (
           <form className="inline-edit" onSubmit={(e) => { e.preventDefault(); if (editing.trim()) rename.mutate({ id, name: editing.trim() }); setEditing(null); }}>
-            <input autoFocus value={editing} onChange={(e) => setEditing(e.target.value)} onBlur={() => setEditing(null)} />
+            <input autoFocus value={editing} onChange={(e) => setEditing(e.target.value)} onBlur={() => setEditing(null)} onKeyDown={(e) => { if (e.key === "Escape") setEditing(null); }} />
           </form>
         ) : (
-          <span onDoubleClick={() => setEditing(pl.name)} title="Double-click to rename">{pl.name}</span>
+          <button className="title-edit" onClick={() => setEditing(pl.name)} title="Rename">{pl.name}</button>
         )}
-        <span className="count">{pl.tracks.length} track{pl.tracks.length === 1 ? "" : "s"} · {formatTotal(total)}</span>
-        <span className="spacer" />
-        <PlayPauseAll tracks={pl.tracks} />
-        <button className="btn" onClick={shufflePlay} disabled={!pl.tracks.some((t) => t.streamable)}><ShuffleIcon /> Shuffle</button>
-        <button className="btn" onClick={() => setEditing(pl.name)}>Rename</button>
-        <button className="btn danger" onClick={del}>Delete</button>
-      </h1>
+        <span className="count meta"><span>{pl.tracks.length} track{pl.tracks.length === 1 ? "" : "s"}</span><span>{formatTotal(total)}</span></span>
+        <span className="actions">
+          <PlayPauseAll tracks={pl.tracks} />
+          <button className="btn" onClick={shufflePlay} disabled={!pl.tracks.some((t) => t.streamable)}><ShuffleIcon /> Shuffle</button>
+          <ConfirmButton label="Delete" confirmLabel="Delete playlist" question={`Delete "${pl.name}"?`} onConfirm={async () => { await remove.mutateAsync(id); nav("/playlists"); }} />
+        </span>
+      </div>
       {pl.tracks.length === 0 ? (
-        <div className="empty">Empty playlist. Use the ··· menu on any track to add it here.</div>
+        <div className="empty">Nothing here yet. Add tracks from any album or the Tracks tab using the ··· menu, or select several and choose Add to playlist.</div>
       ) : (
-        <TrackList tracks={pl.tracks} showAlbum reorder={{ onMove, onRemove: (i) => removeTrack.mutate({ id, ptid: pl.tracks[i].playlist_track_id }) }} />
+        <TrackList tracks={pl.tracks} showAlbum reorder={{ onMove, onRemove: (i) => removeTrack.mutate({ id, ptid: pl.tracks[i].playlist_track_id }), removeLabel: "Remove from playlist" }} />
       )}
     </>
   );
