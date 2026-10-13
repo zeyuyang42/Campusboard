@@ -1,0 +1,20 @@
+/** Turn errors from core (ScrapeError codes) or job items ("[code] message") into plain sentences. */
+const MESSAGES: Record<string, string> = {
+  client_challenge: "Bandcamp asked for a browser check. Wait a few minutes and try again.",
+  parse_failed: "Bandcamp's page looked different than expected. Try again later; if it keeps happening, the app needs an update.",
+  fetch_failed: "Couldn't reach Bandcamp. Check your connection and try again.",
+  not_found: "That page doesn't exist on Bandcamp.",
+  not_bandcamp: "That doesn't look like a Bandcamp link. Paste an album, track or artist URL like https://artist.bandcamp.com/album/name.",
+  invalid_url: "That doesn't look like a Bandcamp link. Paste an album, track or artist URL like https://artist.bandcamp.com/album/name.",
+  not_streamable: "This track can't be streamed from Bandcamp.",
+};
+
+export function friendlyError(err: unknown, fallback = "Something went wrong."): string {
+  const code = typeof err === "object" && err && "code" in err ? String((err as { code: unknown }).code) : typeof err === "string" ? err.match(/^\[(\w+)\]/)?.[1] : undefined;
+  if (code && MESSAGES[code]) return MESSAGES[code];
+  if (typeof err === "string" && err.trim()) return err.replace(/^\[\w+\]\s*/, "");
+  const msg = err instanceof Error ? err.message : "";
+  if (/schema mismatch|not valid JSON|No data-tralbum/i.test(msg)) return MESSAGES.parse_failed;
+  if (/fetch|network|timeout|HTTP \d/i.test(msg)) return MESSAGES.fetch_failed;
+  return fallback;
+}

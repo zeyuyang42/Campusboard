@@ -4,6 +4,7 @@ import { useImport, useJob, useSearch, useInvalidateLibrary } from "../api/queri
 import type { SearchResult } from "@bc/core";
 import { JobProgress } from "../components/JobProgress";
 import { artUrl } from "../lib/art";
+import { friendlyError } from "../lib/errors";
 import { ExternalLink } from "../components/ExternalLink";
 
 function useDebounced<T>(v: T, ms: number): T {
@@ -25,7 +26,7 @@ export function SearchPage() {
     <>
       <h1 className="page-title">Search Bandcamp</h1>
       <input data-search-input className="search-input" autoFocus placeholder="Artist, album or track…" value={q} onChange={(e) => setQ(e.target.value)} />
-      {error && <div className="error">{String(error)}</div>}
+      {error && <div className="notice error">Search isn't available right now. {friendlyError(error)}</div>}
       {isFetching && <div className="muted">Searching…</div>}
       <div className="results">
         {groups.map((g) => {
@@ -38,7 +39,7 @@ export function SearchPage() {
             </div>
           );
         })}
-        {data && data.length === 0 && dq.length >= 2 && !isFetching && <div className="empty">No results.</div>}
+        {data && data.length === 0 && dq.length >= 2 && !isFetching && <div className="empty">No results for “{dq}”. Try the artist name or a different spelling.</div>}
       </div>
     </>
   );

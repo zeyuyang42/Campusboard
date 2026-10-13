@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, NavLink, useParams } from "react-router-dom";
 import { useAlbums, useArtists, useTracks } from "../api/queries";
+import { friendlyError } from "../lib/errors";
 import { AlbumCard } from "../components/AlbumCard";
 import { TrackList, PlayPauseAll } from "../components/TrackList";
 
@@ -24,7 +25,7 @@ export function LibraryPage() {
 function Albums() {
   const [sort, setSort] = useState("added");
   const { data, isLoading, error } = useAlbums(sort);
-  if (error) return <div className="error">{String(error)}</div>;
+  if (error) return <div className="notice error">Couldn't load your library. {friendlyError(error)}</div>;
   if (isLoading) return <div className="empty">Loading…</div>;
   if (!data?.length) return <div className="empty">Your library is empty. Paste a Bandcamp album, track or artist link on the Import page to get started.<br /><Link className="btn primary" to="/import">Go to Import</Link></div>;
   return (

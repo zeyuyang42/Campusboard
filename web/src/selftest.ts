@@ -4,6 +4,7 @@
 import { getCore } from "./api/core";
 import { usePlayer } from "./player/store";
 import { audioEl } from "./player/audio";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const ALBUM = "https://illuminatihotties.bandcamp.com/album/let-me-do-one-more";
@@ -47,4 +48,7 @@ export async function runSelfTest() {
   out.finishedAt = new Date().toISOString();
   await core.setSetting("selftest", out);
   console.log("[selftest]", JSON.stringify(out));
+  // Closing through the normal path exercises onCloseRequested + destroy permissions.
+  await sleep(500);
+  await getCurrentWindow().close().catch((e) => core.setSetting("selftest_close_error", String(e)));
 }

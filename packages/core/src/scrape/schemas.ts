@@ -52,7 +52,8 @@ export const SearchResponseSchema = z.object({
     results: z.array(
       z
         .object({
-          type: z.enum(["b", "a", "t"]),
+          // b = band/label, a = album, t = track, f = fan profile; new kinds may appear, so accept any string.
+          type: z.string(),
           id: z.number(),
           name: z.string(),
           band_name: z.string().nullable().optional(),

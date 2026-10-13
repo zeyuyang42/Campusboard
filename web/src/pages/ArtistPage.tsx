@@ -2,12 +2,13 @@ import { useParams } from "react-router-dom";
 import { useArtist } from "../api/queries";
 import { AlbumCard } from "../components/AlbumCard";
 import { ExternalIcon } from "../components/Icons";
+import { friendlyError } from "../lib/errors";
 import { ExternalLink } from "../components/ExternalLink";
 
 export function ArtistPage() {
   const id = Number(useParams().id);
   const { data: artist, isLoading, error } = useArtist(id);
-  if (error) return <div className="error">{String(error)}</div>;
+  if (error) return <div className="notice error">Couldn't load this artist. {friendlyError(error)}</div>;
   if (isLoading || !artist) return <div className="empty">Loading…</div>;
   return (
     <>

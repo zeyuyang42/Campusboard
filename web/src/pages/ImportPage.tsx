@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useImport, useJobs, useInvalidateLibrary } from "../api/queries";
 import { JobProgress } from "../components/JobProgress";
+import { friendlyError } from "../lib/errors";
 
 export function ImportPage() {
   const [url, setUrl] = useState("");
@@ -23,7 +24,7 @@ export function ImportPage() {
       for (const u of urls) await imp.mutateAsync({ url: u });
       setUrl("");
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(friendlyError(e));
     }
   };
 
@@ -34,7 +35,7 @@ export function ImportPage() {
         <input autoFocus placeholder="Paste an album, track or artist URL (e.g. https://artist.bandcamp.com/album/…)" value={url} onChange={(e) => setUrl(e.target.value)} />
         <button className="btn primary" type="submit" disabled={imp.isPending || !url.trim()}>Import</button>
       </form>
-      {err && <div className="error" style={{ marginBottom: 16 }}>{err}</div>}
+      {err && <div className="notice error" style={{ marginBottom: 16 }}>{err}</div>}
       <p className="muted" style={{ marginTop: -8, marginBottom: 24 }}>
         Album and track pages import immediately. An artist URL (or <code>/music</code>) imports their whole discography, one page per second. Paste several URLs separated by spaces or newlines to queue them all.
       </p>

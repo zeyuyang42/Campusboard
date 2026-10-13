@@ -5,6 +5,7 @@ import { TrackList, PlayPauseAll } from "../components/TrackList";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { PlaylistCover } from "../components/PlaylistCover";
 import { formatTotal } from "../lib/format";
+import { friendlyError } from "../lib/errors";
 import { usePlayer } from "../player/store";
 import { ShuffleIcon } from "../components/Icons";
 
@@ -17,7 +18,7 @@ export function PlaylistPage() {
   const playTracks = usePlayer((s) => s.playTracks);
   const shuffle = usePlayer((s) => s.shuffle);
   const toggleShuffle = usePlayer((s) => s.toggleShuffle);
-  if (error) return <div className="error">{String(error)}</div>;
+  if (error) return <div className="notice error">Couldn't load this playlist. {friendlyError(error)}</div>;
   if (isLoading || !pl) return <div className="empty">Loading…</div>;
 
   const total = pl.tracks.reduce((s, t) => s + (t.duration ?? 0), 0);

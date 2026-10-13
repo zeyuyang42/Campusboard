@@ -6,6 +6,7 @@ import { ExternalIcon, MoreIcon } from "../components/Icons";
 import { ExternalLink } from "../components/ExternalLink";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { formatDate, formatTotal } from "../lib/format";
+import { friendlyError } from "../lib/errors";
 import { useTrackActions } from "../lib/useTrackActions";
 import { openMenuFromEvent } from "../ui/menu";
 
@@ -15,7 +16,7 @@ export function AlbumPage() {
   const { remove, refresh } = useAlbumMutations();
   const nav = useNavigate();
   const actions = useTrackActions();
-  if (error) return <div className="error">{String(error)}</div>;
+  if (error) return <div className="notice error">Couldn't load this album. {friendlyError(error)}</div>;
   if (isLoading || !album) return <div className="empty">Loading…</div>;
 
   const total = album.tracks.reduce((s, t) => s + (t.duration ?? 0), 0);

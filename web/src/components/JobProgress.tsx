@@ -1,6 +1,7 @@
 import type { Job } from "@bc/core";
 import { useQueryClient } from "@tanstack/react-query";
 import { keys, cancelJob } from "../api/queries";
+import { friendlyError } from "../lib/errors";
 
 export function JobProgress({ job, compact = false }: { job: Job; compact?: boolean }) {
   const qc = useQueryClient();
@@ -19,10 +20,10 @@ export function JobProgress({ job, compact = false }: { job: Job; compact?: bool
         {active && <button className="btn sm" onClick={cancel}>Cancel</button>}
       </div>
       {(active || job.total > 1) && <div className="progress"><div className="fill" style={{ width: `${pct}%` }} /></div>}
-      {job.error && <div className={job.status === "failed" ? "error" : "muted"} style={{ fontSize: 12, marginTop: 6 }}>{job.error}</div>}
+      {job.error && <div className={job.status === "failed" ? "error" : "muted"} style={{ fontSize: 12, marginTop: 6 }}>{friendlyError(job.error)}</div>}
       {!compact && failedItems.length > 0 && (
         <div className="items">
-          {failedItems.map((i) => <div key={i.id} className="fail">{i.url.replace(/^https?:\/\/[^/]+/, "")} — {i.error}</div>)}
+          {failedItems.map((i) => <div key={i.id} className="fail">{i.url.replace(/^https?:\/\/[^/]+/, "")}: {friendlyError(i.error)}</div>)}
         </div>
       )}
     </div>

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { QueueTrack, RepeatMode, Track } from "@bc/core";
 import { audioEl } from "./audio";
 import { getCore } from "../api/core";
+import { friendlyError } from "../lib/errors";
 
 export type Status = "idle" | "loading" | "playing" | "paused";
 
@@ -68,7 +69,7 @@ function load(track: QueueTrack, autoplay: boolean, force = false) {
       if (autoplay) await audioEl.play().catch(() => undefined);
     } catch (e) {
       if (seq !== loadSeq) return;
-      usePlayer.setState({ error: `Couldn't play "${track.title}": ${(e as Error).message}`, status: "paused" });
+      usePlayer.setState({ error: `Couldn't play "${track.title}". ${friendlyError(e)}`, status: "paused" });
       const { queue, index } = usePlayer.getState();
       if (autoplay && index < queue.length - 1) setTimeout(() => usePlayer.getState().next(true), 800);
     }

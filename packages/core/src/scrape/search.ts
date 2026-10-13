@@ -21,7 +21,9 @@ export async function searchBandcamp(queue: FetchQueue, query: string): Promise<
   }
   const res = SearchResponseSchema.safeParse(json);
   if (!res.success) throw new ScrapeError("parse_failed", `Search schema mismatch: ${res.error.issues[0]?.path.join(".")}`);
-  return res.data.auto.results.map((r) => ({
+  return res.data.auto.results
+    .filter((r): r is typeof r & { type: "b" | "a" | "t" } => r.type in TYPE_MAP)
+    .map((r) => ({
     type: TYPE_MAP[r.type],
     id: r.id,
     name: r.name,
