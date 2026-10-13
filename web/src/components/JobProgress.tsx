@@ -1,13 +1,12 @@
-import type { Job } from "@bc/shared";
-import { Api } from "../api/client";
+import type { Job } from "@bc/core";
 import { useQueryClient } from "@tanstack/react-query";
-import { keys } from "../api/queries";
+import { keys, cancelJob } from "../api/queries";
 
 export function JobProgress({ job, compact = false }: { job: Job; compact?: boolean }) {
   const qc = useQueryClient();
   const active = job.status === "queued" || job.status === "running";
   const pct = job.total ? Math.round(((job.done + job.failed) / job.total) * 100) : active ? 0 : 100;
-  const cancel = async () => { await Api.cancelJob(job.id); void qc.invalidateQueries({ queryKey: keys.jobs }); void qc.invalidateQueries({ queryKey: keys.job(job.id) }); };
+  const cancel = async () => { await cancelJob(job.id); void qc.invalidateQueries({ queryKey: keys.jobs }); void qc.invalidateQueries({ queryKey: keys.job(job.id) }); };
   const failedItems = job.items?.filter((i) => i.status === "failed") ?? [];
   return (
     <div className="job">

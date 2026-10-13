@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "noEmit": true, "types": ["node"], "lib": ["ES2022", "DOM"], "moduleResolution": "Bundler", "module": "ESNext", "allowImportingTsExtensions": true, "paths": { "@bc/core": ["./src/index.ts"] } },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

@@ -1,8 +1,8 @@
 import { Link } from "react-router-dom";
-import type { Album } from "@bc/shared";
+import type { Album } from "@bc/core";
 import { ArtImage } from "./ArtImage";
 import { PlayIcon } from "./Icons";
-import { Api } from "../api/client";
+import { getCore } from "../api/core";
 import { usePlayer } from "../player/store";
 import { yearOf } from "../lib/format";
 
@@ -10,8 +10,8 @@ export function AlbumCard({ album, showArtist = true }: { album: Album; showArti
   const playTracks = usePlayer((s) => s.playTracks);
   const play = async (e: React.MouseEvent) => {
     e.preventDefault();
-    const full = await Api.album(album.id);
-    playTracks(full.tracks.filter((t) => t.streamable));
+    const full = await (await getCore()).album(album.id);
+    if (full) playTracks(full.tracks.filter((t) => t.streamable));
   };
   const year = yearOf(album.release_date);
   return (

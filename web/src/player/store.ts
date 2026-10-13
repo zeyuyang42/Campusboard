@@ -1,6 +1,7 @@
 import { create } from "zustand";
-import type { QueueTrack, RepeatMode, Track } from "@bc/shared";
-import { audioEl, audioSrcFor } from "./audio";
+import type { QueueTrack, RepeatMode, Track } from "@bc/core";
+import { audioEl } from "./audio";
+import { getCore } from "../api/core";
 
 export type Status = "idle" | "loading" | "playing" | "paused";
 
@@ -51,12 +52,27 @@ function shuffled<T>(arr: T[]): T[] {
 
 let retriedFor: number | null = null;
 let pendingSeek: number | null = null;
+let loadSeq = 0;
 
+/** Resolve a fresh CDN URL for the track and point the audio element at it. */
 function load(track: QueueTrack, autoplay: boolean, force = false) {
+  const seq = ++loadSeq;
   retriedFor = force ? track.id : null;
-  audioEl.src = audioSrcFor(track.id, force);
-  audioEl.load();
-  if (autoplay) void audioEl.play().catch(() => undefined);
+  void (async () => {
+    try {
+      const core = await getCore();
+      const { url } = await core.getFreshStreamUrl(track.id, force);
+      if (seq !== loadSeq) return; // a newer load superseded this one
+      audioEl.src = url;
+      audioEl.load();
+      if (autoplay) await audioEl.play().catch(() => undefined);
+    } catch (e) {
+      if (seq !== loadSeq) return;
+      usePlayer.setState({ error: `Couldn't play "${track.title}": ${(e as Error).message}`, status: "paused" });
+      const { queue, index } = usePlayer.getState();
+      if (autoplay && index < queue.length - 1) setTimeout(() => usePlayer.getState().next(true), 800);
+    }
+  })();
 }
 
 export const usePlayer = create<PlayerState>((set, get) => ({

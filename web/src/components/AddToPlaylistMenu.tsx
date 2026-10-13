@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Track } from "@bc/shared";
+import type { Track } from "@bc/core";
 import { usePlaylists, usePlaylistMutations } from "../api/queries";
 import { usePlayer } from "../player/store";
 import { MoreIcon } from "./Icons";

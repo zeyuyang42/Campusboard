@@ -4,6 +4,7 @@ import { ArtImage } from "../components/ArtImage";
 import { TrackList, PlayPauseAll } from "../components/TrackList";
 import { TrackMenu } from "../components/AddToPlaylistMenu";
 import { ExternalIcon } from "../components/Icons";
+import { ExternalLink } from "../components/ExternalLink";
 import { formatDate, formatTotal } from "../lib/format";
 
 export function AlbumPage() {
@@ -38,7 +39,7 @@ export function AlbumPage() {
           <div className="actions">
             <PlayPauseAll tracks={album.tracks} />
             <TrackMenu tracks={album.tracks} />
-            <a className="btn" href={album.url} target="_blank" rel="noreferrer">Buy on Bandcamp <ExternalIcon /></a>
+            <ExternalLink className="btn" href={album.url}>Buy on Bandcamp <ExternalIcon /></ExternalLink>
             <button className="btn" onClick={() => refresh.mutate(album.id)} disabled={refresh.isPending}>{refresh.isPending ? "Refreshing…" : "Refresh"}</button>
             <button className="btn danger" onClick={del}>Remove</button>
           </div>

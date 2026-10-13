@@ -2,6 +2,7 @@ import { useParams } from "react-router-dom";
 import { useArtist } from "../api/queries";
 import { AlbumCard } from "../components/AlbumCard";
 import { ExternalIcon } from "../components/Icons";
+import { ExternalLink } from "../components/ExternalLink";
 
 export function ArtistPage() {
   const id = Number(useParams().id);
@@ -14,7 +15,7 @@ export function ArtistPage() {
         {artist.name}
         <span className="count">{artist.albums.length} release{artist.albums.length === 1 ? "" : "s"}{artist.location ? ` · ${artist.location}` : ""}</span>
         <span className="spacer" />
-        <a className="btn sm" href={artist.url} target="_blank" rel="noreferrer">Bandcamp <ExternalIcon /></a>
+        <ExternalLink className="btn sm" href={artist.url}>Bandcamp <ExternalIcon /></ExternalLink>
       </h1>
       <div className="grid">{artist.albums.map((a) => <AlbumCard key={a.id} album={a} showArtist={false} />)}</div>
     </>

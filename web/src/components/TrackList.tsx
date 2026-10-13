@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import type { Track } from "@bc/shared";
+import type { Track } from "@bc/core";
 import { usePlayer } from "../player/store";
 import { formatDuration } from "../lib/format";
 import { TrackMenu } from "./AddToPlaylistMenu";

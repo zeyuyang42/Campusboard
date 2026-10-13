@@ -1,21 +1,27 @@
 {
   "name": "bandcamp-player",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "workspaces": ["shared", "server", "web"],
+  "workspaces": [
+    "packages/core",
+    "web"
+  ],
   "scripts": {
-    "dev": "concurrently -n server,web -c blue,magenta \"npm run dev -w server\" \"npm run dev -w web\"",
-    "build": "npm run build -w web && npm run build -w server",
-    "start": "NODE_ENV=production node server/dist/server/src/index.js",
-    "test": "npm run test -w server",
-    "scrape": "npm run scrape -w server --",
-    "fixtures:save": "npm run fixtures:save -w server --",
-    "smoke": "bash server/scripts/smoke.sh",
-    "smoke:live": "npm run smoke:live -w server"
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri",
+    "web:dev": "npm run dev -w web",
+    "web:build": "npm run build -w web",
+    "test": "npm run test -w packages/core",
+    "typecheck": "npm run typecheck -w packages/core && npm run typecheck -w web",
+    "scrape": "npx tsx packages/core/scripts/scrape.ts",
+    "fixtures:save": "npx tsx packages/core/scripts/saveFixture.ts",
+    "smoke:live": "npx tsx packages/core/scripts/smokeLive.ts"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2",
+    "@tauri-apps/cli": "^2.12.2",
+    "tsx": "^4.19.3",
     "typescript": "^5.7.3"
   }
 }

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useImport, useJob, useSearch, useInvalidateLibrary } from "../api/queries";
-import type { SearchResult } from "@bc/shared";
+import type { SearchResult } from "@bc/core";
 import { JobProgress } from "../components/JobProgress";
 import { artUrl } from "../lib/art";
+import { ExternalLink } from "../components/ExternalLink";
 
 function useDebounced<T>(v: T, ms: number): T {
   const [d, setD] = useState(v);
@@ -59,7 +60,7 @@ function Result({ r }: { r: SearchResult }) {
         {img ? <img src={img} alt="" loading="lazy" /> : <div />}
         <div>
           <div>{r.name}</div>
-          <div className="sub">{r.type === "band" ? (r.location || "artist") : r.artist ?? ""}{r.type !== "band" && r.location ? ` · ${r.location}` : ""} · <a href={r.url} target="_blank" rel="noreferrer" className="muted">bandcamp ↗</a></div>
+          <div className="sub">{r.type === "band" ? (r.location || "artist") : r.artist ?? ""}{r.type !== "band" && r.location ? ` · ${r.location}` : ""} · <ExternalLink href={r.url} className="muted">bandcamp ↗</ExternalLink></div>
         </div>
         {r.in_library && r.type !== "band" ? (
           <Link className="btn sm" to="/library">In library</Link>
