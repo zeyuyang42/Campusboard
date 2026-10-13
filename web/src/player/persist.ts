@@ -1,0 +1,47 @@
+import { Api } from "../api/client";
+import { usePlayer } from "./store";
+import { audioEl } from "./audio";
+import type { PlayState } from "@bc/shared";
+
+function snapshot(): PlayState {
+  const s = usePlayer.getState();
+  return {
+    current_track_id: s.queue[s.index]?.id ?? null,
+    position_sec: audioEl.currentTime || s.position || 0,
+    queue: s.queue,
+    queue_index: s.index,
+    shuffle: s.shuffle,
+    repeat: s.repeat,
+    volume: s.volume,
+  };
+}
+
+export async function initPersistence() {
+  try {
+    const st = await Api.playState();
+    usePlayer.getState().hydrate({ queue: st.queue, index: st.queue_index, position: st.position_sec, volume: st.volume, shuffle: st.shuffle, repeat: st.repeat });
+  } catch (e) {
+    console.warn("could not restore play state", e);
+  }
+
+  let timer: number | null = null;
+  const save = () => {
+    if (timer) window.clearTimeout(timer);
+    timer = window.setTimeout(() => void Api.savePlayState(snapshot()).catch(() => undefined), 400);
+  };
+
+  let prev = usePlayer.getState();
+  usePlayer.subscribe((s) => {
+    const trackChanged = s.queue[s.index]?.id !== prev.queue[prev.index]?.id;
+    const structural = s.queue !== prev.queue || s.shuffle !== prev.shuffle || s.repeat !== prev.repeat || s.volume !== prev.volume;
+    const paused = s.status === "paused" && prev.status !== "paused";
+    prev = s;
+    if (trackChanged || structural || paused) save();
+  });
+  window.setInterval(() => { if (usePlayer.getState().status === "playing") save(); }, 5000);
+  window.addEventListener("beforeunload", () => {
+    try {
+      navigator.sendBeacon?.("/api/play-state", new Blob([JSON.stringify(snapshot())], { type: "application/json" }));
+    } catch { /* ignore */ }
+  });
+}

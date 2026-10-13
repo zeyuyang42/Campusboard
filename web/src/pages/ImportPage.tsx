@@ -1,0 +1,47 @@
+import { useEffect, useRef, useState } from "react";
+import { useImport, useJobs, useInvalidateLibrary } from "../api/queries";
+import { JobProgress } from "../components/JobProgress";
+
+export function ImportPage() {
+  const [url, setUrl] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const imp = useImport();
+  const { data: jobs } = useJobs();
+  const invalidate = useInvalidateLibrary();
+
+  // Refresh library views whenever a job finishes.
+  const activeCount = jobs?.filter((j) => j.status === "queued" || j.status === "running").length ?? 0;
+  const prevActive = useRef(activeCount);
+  useEffect(() => { if (prevActive.current > 0 && activeCount === 0) invalidate(); prevActive.current = activeCount; }, [activeCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErr(null);
+    const urls = url.split(/\s+/).map((s) => s.trim()).filter(Boolean);
+    if (!urls.length) return;
+    try {
+      for (const u of urls) await imp.mutateAsync({ url: u });
+      setUrl("");
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+
+  return (
+    <>
+      <h1 className="page-title">Import from Bandcamp</h1>
+      <form className="import-form" onSubmit={submit}>
+        <input autoFocus placeholder="Paste an album, track or artist URL (e.g. https://artist.bandcamp.com/album/…)" value={url} onChange={(e) => setUrl(e.target.value)} />
+        <button className="btn primary" type="submit" disabled={imp.isPending || !url.trim()}>Import</button>
+      </form>
+      {err && <div className="error" style={{ marginBottom: 16 }}>{err}</div>}
+      <p className="muted" style={{ marginTop: -8, marginBottom: 24 }}>
+        Album and track pages import immediately. An artist URL (or <code>/music</code>) imports their whole discography, one page per second. Paste several URLs separated by spaces or newlines to queue them all.
+      </p>
+      {jobs?.map((j) => <JobProgress key={j.id} job={j} />)}
+      <div className="kbd-help">
+        Shortcuts: <kbd>Space</kbd> play/pause · <kbd>←</kbd>/<kbd>→</kbd> seek 5s · <kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> prev/next · <kbd>↑</kbd>/<kbd>↓</kbd> volume · <kbd>S</kbd> shuffle · <kbd>R</kbd> repeat · <kbd>Q</kbd> queue · <kbd>/</kbd> search
+      </div>
+    </>
+  );
+}

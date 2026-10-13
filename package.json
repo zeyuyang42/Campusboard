@@ -1,0 +1,21 @@
+{
+  "name": "bandcamp-player",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": ["shared", "server", "web"],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,magenta \"npm run dev -w server\" \"npm run dev -w web\"",
+    "build": "npm run build -w web && npm run build -w server",
+    "start": "NODE_ENV=production node server/dist/server/src/index.js",
+    "test": "npm run test -w server",
+    "scrape": "npm run scrape -w server --",
+    "fixtures:save": "npm run fixtures:save -w server --",
+    "smoke": "bash server/scripts/smoke.sh",
+    "smoke:live": "npm run smoke:live -w server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}
