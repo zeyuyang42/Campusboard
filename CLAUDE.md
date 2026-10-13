@@ -17,7 +17,7 @@
   scratchpad, never in the repo.
 - Commit messages: one-line summary, a short body saying why, then the
   `Co-Authored-By` trailer. Do not commit or push unless asked.
-- Use `gh` for GitHub (repo `zeyuyang42/bandcamp-player`, private). New planned
+- Use `gh` for GitHub (the repo this checkout is cloned from, private). New planned
   features become issues with the `feature` label rather than TODO comments.
 - When something about Bandcamp's pages looks different from the facts listed in
   AGENTS.md, verify with `curl` and `npm run scrape -- <url>` before changing code,

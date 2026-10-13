@@ -99,7 +99,7 @@ src-tauri/
    through the sidebar links. Vite proxies Bandcamp at `/bc-proxy/<encoded url>`.
 3. Runtime: `VITE_SELFTEST=1 npm run dev`, then read
    `SELECT value FROM settings WHERE key='selftest'` from
-   `~/Library/Application Support/dev.zeyuyang.bandcamp-player/library.db`.
+   `~/Library/Application Support/com.bandcampplayer.app/library.db`.
    Extend `web/src/selftest.ts` when adding features that touch Tauri plugins.
 4. Screenshots of the real window need Screen Recording permission for the
    terminal (`screencapture -l <windowid>`); without it, use browser mode.

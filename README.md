@@ -27,7 +27,7 @@ personal, non-commercial use. Please buy what you keep coming back to.
    click **Open Anyway**. You only need to do this once.
 
 Requires macOS 13.3 or later. Your library lives in
-`~/Library/Application Support/dev.zeyuyang.bandcamp-player/library.db`.
+`~/Library/Application Support/com.bandcampplayer.app/library.db`.
 
 ## Using it
 

@@ -2,7 +2,7 @@
 name = "bandcamp-player"
 version = "0.2.0"
 description = "Personal Bandcamp player"
-authors = ["Zeyu Yang"]
+authors = ["Bandcamp Player contributors"]
 edition = "2021"
 
 [lib]
