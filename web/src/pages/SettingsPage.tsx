@@ -4,6 +4,15 @@ import { useTheme } from "../theme/store";
 import { appInfo, pickBackgroundImage, pickTextFile, revealDataDir, saveTextFile } from "../lib/files";
 import { isTauri } from "../lib/env";
 
+const SHORTCUTS: [string, string][] = [
+  ["Space", "Play or pause"], ["← →", "Seek 5 seconds"], ["⇧← ⇧→", "Previous or next track"], ["↑ ↓", "Volume"],
+  ["S", "Shuffle"], ["R", "Repeat"], ["Q", "Queue"], ["N", "Now playing"], ["/", "Search"], ["Esc", "Close a panel"],
+  ["⌘P", "Play or pause"], ["⌘← ⌘→", "Previous or next track"], ["⌘↑ ⌘↓", "Volume"], ["⌘⇧S  ⌘⇧R", "Shuffle, repeat"],
+  ["⌘⇧N  ⌘⇧Q", "Now playing, queue"], ["⌘1 – ⌘4", "Library, Search, Import, Playlists"], ["⌘[ ⌘]", "Back, forward"],
+  ["⌘F", "Find"], ["⌘I", "Import from link"], ["⌘N", "New playlist"], ["⌘,", "Settings"],
+  ["⌘W", "Close the window (music keeps playing)"], ["⌘Q", "Quit"], ["⌃⌘F", "Full screen"],
+];
+
 const FONT_SUGGESTIONS = ["Bricolage Grotesque Variable", "Instrument Sans Variable", "Helvetica Neue", "Avenir Next", "Georgia", "Iowan Old Style", "Menlo", "SF Mono"];
 
 export function SettingsPage() {
@@ -140,6 +149,13 @@ export function SettingsPage() {
           <button className="btn" onClick={exportTheme}>Export theme…</button>
           <button className="btn" onClick={importTheme}>Import theme…</button>
           <button className="btn" onClick={reset}>Reset to {basePreset}</button>
+        </div>
+      </section>
+
+      <section id="shortcuts">
+        <h2>Keyboard shortcuts</h2>
+        <div className="shortcuts">
+          {SHORTCUTS.map(([keys, what]) => <div key={keys} className="shortcut"><span>{what}</span><kbd>{keys}</kbd></div>)}
         </div>
       </section>
 

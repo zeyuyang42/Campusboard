@@ -2,12 +2,14 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { usePlaylists, usePlaylistMutations } from "../api/queries";
 import { PlaylistCover } from "./PlaylistCover";
 import { useState } from "react";
+import { useUi } from "../ui/store";
 
 export function Sidebar({ open }: { open: boolean }) {
   const { data: playlists } = usePlaylists();
   const { create } = usePlaylistMutations();
   const nav = useNavigate();
-  const [creating, setCreating] = useState(false);
+  const creating = useUi((s) => s.creatingPlaylist);
+  const setCreating = useUi((s) => s.setCreatingPlaylist);
   const [name, setName] = useState("");
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -40,9 +40,10 @@ web/src/
   ui/menu.ts + components/MenuHost.tsx   the one context menu / playlist picker for the whole app
   components/, pages/      plain CSS in styles.css driven by tokens on :root
 src-tauri/
-  src/lib.rs               registers sql/http/dialog/fs/opener plugins and the migrations list
+  src/lib.rs               registers sql/http/dialog/fs/opener/window-state plugins, migrations, Dock reopen
+  src/menu.rs              native menu bar; custom items emit a `menu` event handled by web/src/lib/appMenu.ts
   migrations/*.sql         schema; every statement is IF NOT EXISTS so an old library.db can be adopted
-  capabilities/default.json  URL scope for http (bandcamp.com, bcbits.com) and fs scope ($APPDATA)
+  capabilities/default.json  URL scope for http (bandcamp.com, bcbits.com), fs scope ($APPDATA), window permissions
   tauri.conf.json          window (Overlay title bar), CSP, bundle targets, min macOS 13.3
 ```
 
@@ -68,6 +69,13 @@ src-tauri/
   `valuesList()`; playlist append computes positions inside one INSERT.
 - WKWebView supports `@property`, `color-mix`, `oklch`, `OffscreenCanvas` from
   macOS 13.3, hence the minimum version.
+- `core:window:default` does not include `allow-start-dragging`, so the
+  `data-tauri-drag-region` band only works because the capability file grants
+  it explicitly, along with hide/show/minimize/toggle-maximize/set-focus.
+- Window behaviour follows Music.app: closing hides the window and playback
+  continues (`persist.ts` prevents the close and calls `hide()`), the Dock icon
+  reopens it (`RunEvent::Reopen` in lib.rs), Cmd+Q quits. Menu accelerators use
+  Cmd so they never fight text fields; plain-key shortcuts stay in `shortcuts.ts`.
 
 ## Rules
 
@@ -84,6 +92,10 @@ src-tauri/
   `ThemeSchema` with bounds, and bump `version` only for breaking changes.
 - No `window.prompt`/`confirm`/`alert`: WKWebView handles them badly. Use inline
   inputs and `ConfirmButton`.
+- Navigate from non-React code with `navigateTo()` in `web/src/lib/navigation.ts`;
+  never `window.location.assign` (a reload drops the player state).
+- Chrome text is unselectable with the arrow cursor inside Tauri; add the
+  `selectable` class to any new element whose text people should copy.
 - The player store is the only code that touches `audioEl`. UI calls store actions.
 - Keep it personal-use: always render the "Buy on Bandcamp" link on album pages.
 - The `sqlite3` CLI has foreign keys OFF by default; prefer the app's own

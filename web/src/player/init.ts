@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { initMediaSession } from "./mediaSession";
 import { initShortcuts } from "./shortcuts";
 import { initPersistence } from "./persist";
+import { initAppMenu } from "../lib/appMenu";
 
 let done = false;
 export function initPlayer(_qc: QueryClient) {
@@ -10,4 +11,5 @@ export function initPlayer(_qc: QueryClient) {
   initMediaSession();
   initShortcuts();
   void initPersistence();
+  void initAppMenu();
 }

@@ -40,11 +40,15 @@ export async function initPersistence() {
     if (trackChanged || structural || paused) save();
   });
   window.setInterval(() => { if (usePlayer.getState().status === "playing") save(); }, 5000);
-  // Flush on close so the position survives quitting the app.
+  // Closing the window hides it and playback continues (Cmd+Q quits, as in
+  // Music.app). Flush first so the position survives either way.
   try {
-    await getCurrentWindow().onCloseRequested(async () => {
+    const win = getCurrentWindow();
+    await win.onCloseRequested(async (event) => {
+      event.preventDefault();
       if (timer) window.clearTimeout(timer);
       await savePlayState(snapshot()).catch(() => undefined);
+      await win.hide().catch(() => undefined);
     });
   } catch { /* not inside Tauri */ }
 }

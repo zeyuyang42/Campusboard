@@ -5,6 +5,7 @@ import { getCore } from "./api/core";
 import { usePlayer } from "./player/store";
 import { audioEl } from "./player/audio";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { exit } from "@tauri-apps/api/app";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const ALBUM = "https://illuminatihotties.bandcamp.com/album/let-me-do-one-more";
@@ -42,6 +43,21 @@ export async function runSelfTest() {
     const browse = await core.browse("https://illuminatihotties.bandcamp.com");
     out.browse = { releases: browse.items.length, band: browse.band?.name, inLibrary: browse.items.filter((i) => i.album_id).length, firstTitle: browse.items[0]?.title };
     out.mediaSession = "mediaSession" in navigator;
+    // Window permissions the menu bar and close-to-hide rely on.
+    const win = getCurrentWindow();
+    await win.toggleMaximize(); await sleep(400);
+    const maximized = await win.isMaximized();
+    await win.toggleMaximize(); await sleep(400);
+    await win.minimize(); await sleep(400);
+    const minimized = await win.isMinimized();
+    await win.unminimize(); await sleep(400);
+    await win.hide(); await sleep(300);
+    const hidden = !(await win.isVisible());
+    await win.show(); await win.setFocus(); await sleep(300);
+    out.window = { maximized, minimized, hidden, visibleAgain: await win.isVisible(), focused: await win.isFocused() };
+    // startDragging needs a live mouse-down to do anything, but a missing
+    // capability rejects the call outright; record what it says.
+    out.dragPermission = await win.startDragging().then(() => "ok", (e) => String(e));
     out.ok = true;
   } catch (e) {
     out.ok = false;
@@ -50,7 +66,7 @@ export async function runSelfTest() {
   out.finishedAt = new Date().toISOString();
   await core.setSetting("selftest", out);
   console.log("[selftest]", JSON.stringify(out));
-  // Closing through the normal path exercises onCloseRequested + destroy permissions.
+  // Closing only hides the window now (playback continues), so quit explicitly.
   await sleep(500);
-  await getCurrentWindow().close().catch((e) => core.setSetting("selftest_close_error", String(e)));
+  await exit(0).catch((e) => core.setSetting("selftest_close_error", String(e)));
 }

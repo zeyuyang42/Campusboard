@@ -46,9 +46,14 @@ Requires macOS 13.3 or later. Your library lives in
   density, the album-art wash and an optional background image. Export writes a
   `.theme.json` you can send to a friend; Import loads one.
 
-Shortcuts: `Space` play/pause · `←`/`→` seek 5 s · `Shift+←`/`→` previous/next ·
-`↑`/`↓` volume · `S` shuffle · `R` repeat · `Q` queue · `N` now playing ·
-`/` search · `Esc` close.
+Closing the window keeps the music playing; click the Dock icon to bring it
+back, and press `⌘Q` to quit. The window remembers its size and position.
+
+Shortcuts: `Space` play/pause, `←`/`→` seek 5 s, `Shift+←`/`→` previous/next,
+`↑`/`↓` volume, `S` shuffle, `R` repeat, `Q` queue, `N` now playing,
+`/` search, `Esc` close. The menu bar adds `⌘1`–`⌘4` for the main pages,
+`⌘F` find, `⌘I` import, `⌘N` new playlist, `⌘,` settings and `⌘`-based
+playback controls; the full list is in Settings → Keyboard shortcuts.
 
 ## Theme files
 

@@ -1,5 +1,6 @@
 import { usePlayer } from "./store";
 import { useUi } from "../ui/store";
+import { focusSearch } from "../lib/navigation";
 
 export function initShortcuts() {
   window.addEventListener("keydown", (e) => {
@@ -17,12 +18,7 @@ export function initShortcuts() {
       case "r": case "R": p.cycleRepeat(); break;
       case "q": case "Q": p.setQueueOpen(!p.queueOpen); break;
       case "n": case "N": if (p.current()) useUi.getState().setNowPlayingOpen(!useUi.getState().nowPlayingOpen); break;
-      case "/": {
-        e.preventDefault();
-        const el = document.querySelector<HTMLInputElement>("[data-search-input]");
-        if (el) el.focus(); else window.location.assign("/search");
-        break;
-      }
+      case "/": e.preventDefault(); focusSearch(); break;
       case "Escape": if (useUi.getState().nowPlayingOpen) useUi.getState().setNowPlayingOpen(false); else p.setQueueOpen(false); break;
     }
   });
