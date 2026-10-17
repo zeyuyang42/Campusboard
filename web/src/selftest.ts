@@ -6,6 +6,7 @@ import { usePlayer } from "./player/store";
 import { audioEl } from "./player/audio";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { exit } from "@tauri-apps/api/app";
+import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const ALBUM = "https://illuminatihotties.bandcamp.com/album/let-me-do-one-more";
@@ -67,6 +68,15 @@ export async function runSelfTest() {
         for (const x of await core.albums()) if (!before.has(x.id)) await core.deleteAlbum(x.id);
       }
     }, (e) => String(e));
+    // The http scope's deny list must beat the custom-domain allow patterns for private hosts
+    // (a redirect hop is checked the same way). The scope check happens before any connection.
+    const denied = ["https://127.0.0.1/album/x", "https://192.168.1.1/music", "https://[::1]/track/x", "https://nas.lan/album/x", "https://router/album/x"];
+    const deniedResults = await Promise.all(denied.map((u) =>
+      tauriFetch(u, { maxRedirections: 0, connectTimeout: 2000 }).then((r) => `fetched ${r.status}`, (e) => String(e))));
+    out.denyScope = {
+      allRejected: deniedResults.every((r) => r.includes("not allowed on the configured scope")),
+      results: Object.fromEntries(denied.map((u, i) => [u, deniedResults[i]])),
+    };
     out.mediaSession = "mediaSession" in navigator;
     // Window permissions the menu bar and close-to-hide rely on.
     const win = getCurrentWindow();
