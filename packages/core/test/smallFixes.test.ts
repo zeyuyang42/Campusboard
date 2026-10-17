@@ -62,6 +62,16 @@ describe("prunePageCache", () => {
     await cachedFetchText(db2, queue, "https://x.bandcamp.com/music");
     expect((await cacheRows(db2)).map((r) => r.url)).toEqual(["https://x.bandcamp.com/music"]);
   });
+
+  it("returns the fetched page even when the opportunistic prune fails", async () => {
+    const inner = new NodeDb();
+    const failingPrune: typeof inner = Object.assign(Object.create(inner), {
+      run: (sql: string, params?: unknown[]) =>
+        sql.startsWith("DELETE FROM page_cache") ? Promise.reject(new Error("database is locked")) : inner.run(sql, params),
+    });
+    const queue = new FetchQueue(async () => new Response("<html>ok</html>", { status: 200 }), 0);
+    await expect(cachedFetchText(failingPrune, queue, "https://y.bandcamp.com/music")).resolves.toBe("<html>ok</html>");
+  });
 });
 
 describe("getArtPalette", () => {
@@ -108,6 +118,24 @@ describe("playlist names", () => {
     expect(pl.normalizePlaylistName("x".repeat(500))).toHaveLength(PLAYLIST_NAME_MAX);
     const emoji = pl.normalizePlaylistName("🎵".repeat(150))!;
     expect(Array.from(emoji)).toHaveLength(PLAYLIST_NAME_MAX);
+  });
+
+  it("caps by grapheme cluster, so ZWJ emoji and combining accents stay whole", () => {
+    const zwj = String.fromCodePoint(0x200d);
+    const family = ["👩", "👩", "👧"].join(zwj); // one grapheme, five code points
+    const out = pl.normalizePlaylistName(family.repeat(120))!;
+    expect(out).toBe(family.repeat(PLAYLIST_NAME_MAX));
+    const accented = "e" + String.fromCodePoint(0x301);
+    expect(pl.normalizePlaylistName(accented.repeat(150))).toBe(accented.repeat(PLAYLIST_NAME_MAX));
+  });
+
+  it("strips zero-width and format characters, rejecting names made only of them", () => {
+    const invisible = [0x200b, 0x2060, 0xfeff, 0x200e, 0x202e].map((c) => String.fromCodePoint(c)).join("");
+    expect(pl.normalizePlaylistName(invisible)).toBeNull();
+    expect(pl.normalizePlaylistName(` ${invisible} \n `)).toBeNull();
+    expect(pl.normalizePlaylistName(`mi${invisible}x`)).toBe("mix");
+    const joiners = [0x200d, 0x200c, 0x200d].map((c) => String.fromCodePoint(c)).join("");
+    expect(pl.normalizePlaylistName(` ${joiners} `)).toBeNull();
   });
 
   it("createPlaylist stores the normalised name and rejects empty ones", async () => {

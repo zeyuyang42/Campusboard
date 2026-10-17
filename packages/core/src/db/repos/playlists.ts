@@ -19,10 +19,27 @@ export class PlaylistNameError extends Error {
  * single space, and cap at PLAYLIST_NAME_MAX characters. Returns null when nothing
  * is left, so the UI can disable submit with the same rule the repo enforces.
  */
+const ZWJ = String.fromCharCode(0x200d);
+const ZWNJ = String.fromCharCode(0x200c);
+
 export function normalizePlaylistName(name: string): string | null {
-  const clean = String(name ?? "").replace(/[\p{Cc}\p{Zl}\p{Zp} ]+/gu, " ").trim();
-  if (!clean) return null;
-  return Array.from(clean).slice(0, PLAYLIST_NAME_MAX).join("").trimEnd();
+  const clean = String(name ?? "")
+    // Drop invisible format characters (zero-width space, BOM, direction marks...), but
+    // keep the joiners that emoji sequences and some scripts need.
+    .replace(/\p{Cf}/gu, (c) => (c === ZWJ || c === ZWNJ ? c : ""))
+    .replace(/[\p{Cc}\p{Zl}\p{Zp} ]+/gu, " ")
+    .trim();
+  // A name made only of joiners and spaces is still empty.
+  if (!clean.split(ZWJ).join("").split(ZWNJ).join("").trim()) return null;
+  return graphemes(clean).slice(0, PLAYLIST_NAME_MAX).join("").trimEnd();
+}
+
+/** Split into user-perceived characters so the cap never cuts an emoji or accent in half. */
+function graphemes(s: string): string[] {
+  if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
+    return Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(s), (g) => g.segment);
+  }
+  return Array.from(s);
 }
 
 function requireName(name: string): string {

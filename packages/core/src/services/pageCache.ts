@@ -13,7 +13,8 @@ export async function cachedFetchText(db: Db, queue: FetchQueue, url: string, ma
   }
   const html = await queue.fetchText(url);
   await db.run("INSERT INTO page_cache (url, html, fetched_at) VALUES (?, ?, ?) ON CONFLICT(url) DO UPDATE SET html = excluded.html, fetched_at = excluded.fetched_at", [url, html, Date.now()]);
-  if (Date.now() - (lastPrune.get(db) ?? 0) > PAGE_CACHE_PRUNE_INTERVAL_MS) await prunePageCache(db);
+  // Best effort: a failed prune must not fail a fetch that already succeeded.
+  if (Date.now() - (lastPrune.get(db) ?? 0) > PAGE_CACHE_PRUNE_INTERVAL_MS) await prunePageCache(db).catch(() => {});
   return html;
 }
 

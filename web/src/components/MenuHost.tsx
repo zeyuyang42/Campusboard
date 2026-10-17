@@ -77,16 +77,34 @@ function PlaylistPicker({ trackIds }: { trackIds: number[] }) {
   useEffect(() => { void getCore().then((c) => c.playlistsContaining(trackIds)).then(setContaining); }, [trackIds]);
   const shown = (playlists ?? []).filter((p) => !filter || p.name.toLowerCase().includes(filter.toLowerCase()));
   const add = async (id: number) => { close(); await addTracks.mutateAsync({ id, trackIds }); };
+  // Guards against a second Enter while a create is in flight, and remembers a playlist
+  // that was created but not filled so a retry only re-adds the tracks.
+  const busy = useRef(false);
+  const created = useRef<{ id: number; name: string } | null>(null);
   const createAndAdd = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (busy.current) return;
     const clean = normalizePlaylistName(name);
     if (!clean) return;
+    busy.current = true;
     try {
-      const p = await create.mutateAsync(clean);
-      await addTracks.mutateAsync({ id: p.id, trackIds });
-      close();
-    } catch (err) {
-      setError(friendlyError(err, "Couldn't create the playlist."));
+      if (!created.current || created.current.name !== clean) {
+        try {
+          const p = await create.mutateAsync(clean);
+          created.current = { id: p.id, name: clean };
+        } catch (err) {
+          setError(friendlyError(err, "Couldn't create the playlist."));
+          return;
+        }
+      }
+      try {
+        await addTracks.mutateAsync({ id: created.current.id, trackIds });
+        close();
+      } catch (err) {
+        setError(`Created "${clean}" but couldn't add the tracks. Press Return to try again. ${friendlyError(err, "")}`.trim());
+      }
+    } finally {
+      busy.current = false;
     }
   };
   const n = trackIds.length;

@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { usePlaylists, usePlaylistMutations } from "../api/queries";
 import { PlaylistCover } from "./PlaylistCover";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useUi } from "../ui/store";
 import { normalizePlaylistName, PLAYLIST_NAME_MAX } from "@bc/core";
 import { friendlyError } from "../lib/errors";
@@ -14,16 +14,21 @@ export function Sidebar({ open }: { open: boolean }) {
   const setCreating = useUi((s) => s.setCreatingPlaylist);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const busy = useRef(false);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (busy.current) return; // a second Enter while the first create is in flight
     const clean = normalizePlaylistName(name);
     if (!clean) { setCreating(false); setName(""); return; }
+    busy.current = true;
     try {
       const p = await create.mutateAsync(clean);
       setName(""); setError(null); setCreating(false);
       nav(`/playlists/${p.id}`);
     } catch (err) {
       setError(friendlyError(err, "Couldn't create the playlist."));
+    } finally {
+      busy.current = false;
     }
   };
   return (
