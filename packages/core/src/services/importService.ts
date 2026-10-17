@@ -25,29 +25,32 @@ export async function upsertTralbum(db: Db, p: ParsedTralbum): Promise<number> {
   }
 
   const artistId = await upsertArtist(db, p.artist);
+  // `owned` follows the synced collection (fan_items), so any import of a purchased release is flagged.
   const album = await db.get<{ id: number }>(
-    `INSERT INTO albums (bandcamp_id, item_type, artist_id, title, url, art_id, release_date, about, credits, tags_json, is_preorder, fetched_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO albums (bandcamp_id, item_type, artist_id, title, url, art_id, release_date, about, credits, tags_json, is_preorder, fetched_at, owned)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+       EXISTS (SELECT 1 FROM fan_items f WHERE f.list = 'collection' AND f.item_type = ? AND f.bandcamp_id = ?))
      ON CONFLICT(item_type, bandcamp_id) DO UPDATE SET
        artist_id = excluded.artist_id, title = excluded.title, url = excluded.url, art_id = excluded.art_id,
        release_date = excluded.release_date, about = excluded.about, credits = excluded.credits,
-       tags_json = excluded.tags_json, is_preorder = excluded.is_preorder, fetched_at = excluded.fetched_at
+       tags_json = excluded.tags_json, is_preorder = excluded.is_preorder, fetched_at = excluded.fetched_at,
+       owned = excluded.owned
      RETURNING id`,
-    [p.bandcamp_id, p.item_type, artistId, p.title, p.url, p.art_id, p.release_date, p.about, p.credits, JSON.stringify(p.tags), p.is_preorder ? 1 : 0, now()],
+    [p.bandcamp_id, p.item_type, artistId, p.title, p.url, p.art_id, p.release_date, p.about, p.credits, JSON.stringify(p.tags), p.is_preorder ? 1 : 0, now(), p.item_type, p.bandcamp_id],
   );
   const albumId = album!.id;
 
-  const COLS = 10;
+  const COLS = 11;
   for (let i = 0; i < p.tracks.length; i += 100) {
     const chunk = p.tracks.slice(i, i + 100);
     await db.run(
-      `INSERT INTO tracks (track_id, album_id, title, track_num, duration, track_artist, streamable, stream_url, stream_expires_at, lyrics)
+      `INSERT INTO tracks (track_id, album_id, title, track_num, duration, track_artist, streamable, stream_url, stream_quality, stream_expires_at, lyrics)
        VALUES ${valuesList(chunk.length, COLS)}
        ON CONFLICT(track_id) DO UPDATE SET
          album_id = excluded.album_id, title = excluded.title, track_num = excluded.track_num, duration = excluded.duration,
          track_artist = excluded.track_artist, streamable = excluded.streamable, stream_url = excluded.stream_url,
-         stream_expires_at = excluded.stream_expires_at, lyrics = excluded.lyrics`,
-      chunk.flatMap((t) => [t.track_id, albumId, t.title, t.track_num, t.duration, t.artist, t.streamable ? 1 : 0, t.stream_url, t.stream_expires_at, t.lyrics]),
+         stream_quality = excluded.stream_quality, stream_expires_at = excluded.stream_expires_at, lyrics = excluded.lyrics`,
+      chunk.flatMap((t) => [t.track_id, albumId, t.title, t.track_num, t.duration, t.artist, t.streamable ? 1 : 0, t.stream_url, t.stream_quality, t.stream_expires_at, t.lyrics]),
     );
   }
 
@@ -67,6 +70,6 @@ export async function vacuumOrphans(db: Db): Promise<void> {
 
 async function updateStreamFields(db: Db, p: ParsedTralbum) {
   for (const t of p.tracks) {
-    await db.run("UPDATE tracks SET streamable = ?, stream_url = ?, stream_expires_at = ? WHERE track_id = ?", [t.streamable ? 1 : 0, t.stream_url, t.stream_expires_at, t.track_id]);
+    await db.run("UPDATE tracks SET streamable = ?, stream_url = ?, stream_quality = ?, stream_expires_at = ? WHERE track_id = ?", [t.streamable ? 1 : 0, t.stream_url, t.stream_quality, t.stream_expires_at, t.track_id]);
   }
 }

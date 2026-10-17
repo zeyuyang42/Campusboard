@@ -1,21 +1,27 @@
 import type { Db } from "../Db.js";
 import type { Album, AlbumWithTracks, Track } from "../../types.js";
 
-export interface AlbumRow extends Omit<Album, "tags" | "is_preorder" | "owned"> {
+export interface AlbumRow extends Omit<Album, "tags" | "is_preorder" | "owned" | "wishlisted"> {
   tags_json: string;
   is_preorder: number;
   owned: number;
+  wishlisted: number;
 }
 
 export function rowToAlbum(r: AlbumRow): Album {
-  return { ...r, tags: JSON.parse(r.tags_json || "[]"), is_preorder: !!r.is_preorder, owned: !!r.owned };
+  return { ...r, tags: JSON.parse(r.tags_json || "[]"), is_preorder: !!r.is_preorder, owned: !!r.owned, wishlisted: !!r.wishlisted };
 }
 
+const WISHLISTED = "EXISTS (SELECT 1 FROM fan_items f WHERE f.list = 'wishlist' AND f.item_type = al.item_type AND f.bandcamp_id = al.bandcamp_id)";
+
 const ALBUM_SELECT = `
-  SELECT al.*, ar.name AS artist_name,
+  SELECT al.*, ar.name AS artist_name, ${WISHLISTED} AS wishlisted,
     (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
     (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id AND t.streamable = 1) AS streamable_count
   FROM albums al JOIN artists ar ON ar.id = al.artist_id`;
+
+export type AlbumFilter = "all" | "purchased" | "wishlist";
+const FILTERS: Record<AlbumFilter, string> = { all: "", purchased: "WHERE al.owned = 1", wishlist: `WHERE ${WISHLISTED}` };
 
 export type AlbumSort = "added" | "artist" | "release" | "title";
 const SORTS: Record<AlbumSort, string> = {
@@ -25,8 +31,8 @@ const SORTS: Record<AlbumSort, string> = {
   title: "al.title COLLATE NOCASE",
 };
 
-export async function listAlbums(db: Db, sort: AlbumSort = "added"): Promise<Album[]> {
-  return (await db.select<AlbumRow>(`${ALBUM_SELECT} ORDER BY ${SORTS[sort] ?? SORTS.added}`)).map(rowToAlbum);
+export async function listAlbums(db: Db, sort: AlbumSort = "added", filter: AlbumFilter = "all"): Promise<Album[]> {
+  return (await db.select<AlbumRow>(`${ALBUM_SELECT} ${FILTERS[filter] ?? ""} ORDER BY ${SORTS[sort] ?? SORTS.added}`)).map(rowToAlbum);
 }
 
 export async function getAlbum(db: Db, id: number): Promise<Album | null> {

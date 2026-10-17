@@ -12,6 +12,8 @@ export interface ParsedTrack {
   artist: string | null;
   streamable: boolean;
   stream_url: string | null;
+  /** "mp3-v0" when the page offered it (owned items fetched with the identity cookie), else "mp3-128". */
+  stream_quality: StreamQuality;
   stream_expires_at: number | null; // unix ms
   lyrics: string | null;
 }
@@ -33,6 +35,8 @@ export interface ParsedTralbum {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+export type StreamQuality = "mp3-v0" | "mp3-128";
 
 /** Derive expiry from the `ts=` query param on a bcbits stream URL. */
 export function streamExpiry(streamUrl: string, fetchedAt: number): number {
@@ -85,7 +89,10 @@ export function parseTralbumPage(html: string, fetchedAt = Date.now()): ParsedTr
   const artistUrl = new URL(canonical).origin;
 
   const tracks: ParsedTrack[] = t.trackinfo.map((ti) => {
-    const stream = ti.file?.["mp3-128"] ?? null;
+    // Logged-in pages list mp3-v0 next to mp3-128 for items the account owns (per
+    // bandcamp-fetch; not verified here, no cookie available). Prefer it when present.
+    const v0 = ti.file?.["mp3-v0"] ?? null;
+    const stream = v0 ?? ti.file?.["mp3-128"] ?? null;
     const streamable = !!stream && (ti.streaming ?? 1) !== 0;
     return {
       track_id: ti.track_id,
@@ -95,6 +102,7 @@ export function parseTralbumPage(html: string, fetchedAt = Date.now()): ParsedTr
       artist: ti.artist ?? null,
       streamable,
       stream_url: streamable ? stream : null,
+      stream_quality: streamable && v0 ? "mp3-v0" : "mp3-128",
       stream_expires_at: streamable && stream ? streamExpiry(stream, fetchedAt) : null,
       lyrics: ti.lyrics ?? null,
     };

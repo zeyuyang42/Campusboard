@@ -26,7 +26,10 @@ export interface Album {
   credits: string | null;
   tags: string[];
   is_preorder: boolean;
+  /** In the synced Bandcamp collection (purchased). */
   owned: boolean;
+  /** On the synced Bandcamp wishlist. */
+  wishlisted: boolean;
   fetched_at: string;
   created_at: string;
   track_count?: number;
@@ -73,7 +76,7 @@ export interface PlaylistWithTracks extends Playlist {
   tracks: PlaylistTrack[];
 }
 
-export type JobKind = "album" | "track" | "discography" | "selection";
+export type JobKind = "album" | "track" | "discography" | "selection" | "collection";
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 
 export interface JobItem {
@@ -149,4 +152,29 @@ export interface BrowseResult {
   url: string;
   band: { band_id: number; name: string } | null;
   items: BrowseItem[];
+}
+
+/** How Bandcamp treated the identity cookie on the last sync. */
+export type CookieStatus = "none" | "unchecked" | "ok" | "rejected" | "other_account";
+
+/** Outcome of the last collection sync, kept in settings. */
+export interface SyncSummary {
+  /** ISO time the sync finished. */
+  at: string;
+  username: string;
+  collection: number;
+  wishlist: number;
+  /** Items the sync queued for import (not yet in the library). */
+  queued: number;
+  /** Every page of both lists was read (otherwise departed items were kept). */
+  complete: boolean;
+  cookie: CookieStatus;
+  job_id: number;
+}
+
+/** The Bandcamp account in Settings. The cookie itself never leaves core. */
+export interface AccountInfo {
+  username: string | null;
+  hasCookie: boolean;
+  lastSync: SyncSummary | null;
 }

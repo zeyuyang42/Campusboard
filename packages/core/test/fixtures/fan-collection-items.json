@@ -1,0 +1,44 @@
+{
+ "items": [
+  {
+   "item_id": 2164502333,
+   "item_type": "album",
+   "band_id": 2193968603,
+   "tralbum_id": 2164502333,
+   "tralbum_type": "a",
+   "featured_track": 1537202651,
+   "hidden": null,
+   "url_hints": {
+    "subdomain": "zoekeating",
+    "custom_domain": "music.zoekeating.com",
+    "custom_domain_verified": 1,
+    "slug": "snowmelt-ep",
+    "item_type": "a"
+   },
+   "item_title": "Snowmelt (EP)",
+   "item_url": "https://music.zoekeating.com/album/snowmelt-ep",
+   "item_art_id": 209695768,
+   "band_name": "Zoe Keating",
+   "band_url": "https://zoekeating.bandcamp.com",
+   "featured_track_title": null,
+   "featured_track_number": 1,
+   "featured_track_is_custom": false,
+   "featured_track_duration": 392.0,
+   "featured_track_url": null,
+   "num_streamable_tracks": 1,
+   "is_purchasable": true,
+   "is_private": false,
+   "is_preorder": false,
+   "album_id": null,
+   "album_title": null,
+   "token": "1700000000:2164502333:a::"
+  }
+ ],
+ "more_available": false,
+ "tracklists": {},
+ "redownload_urls": {},
+ "item_lookup": {},
+ "last_token": "1700000000:2164502333:a::",
+ "purchase_infos": {},
+ "collectors": {}
+}

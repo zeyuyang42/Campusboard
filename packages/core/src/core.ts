@@ -19,6 +19,8 @@ import { vacuumOrphans } from "./services/importService.js";
 import { prunePageCache } from "./services/pageCache.js";
 import { ART_FETCH_TIMEOUT_MS, CHALLENGE_SETTING_KEY, RATE_LIMIT_MS } from "./config.js";
 import { ChallengeGate, type ChallengeState } from "./scrape/challenge.js";
+import { clearAccount, getAccount, setIdentityCookie, setUsername } from "./services/account.js";
+import { recomputeOwned } from "./db/repos/fanItems.js";
 import type { BrowseResult, PlayState, SearchResult } from "./types.js";
 
 export interface CoreDeps {
@@ -39,12 +41,14 @@ export function createCore(deps: CoreDeps) {
   const runner = new JobRunner(db, queue, deps.onJobsChange);
   void prunePageCache(db);
   void vacuumOrphans(db);
+  // Cheap, and repairs flags if the app quit between a sync's membership and flag writes.
+  void recomputeOwned(db).catch(() => {});
 
   return {
     db,
     queue,
     // library
-    albums: (sort: albums.AlbumSort = "added") => albums.listAlbums(db, sort),
+    albums: (sort: albums.AlbumSort = "added", filter: albums.AlbumFilter = "all") => albums.listAlbums(db, sort, filter),
     album: (id: number) => albums.getAlbumWithTracks(db, id),
     deleteAlbum: (id: number) => albums.deleteAlbum(db, id),
     refreshAlbum: async (id: number) => {
@@ -69,6 +73,8 @@ export function createCore(deps: CoreDeps) {
       // Report the canonical address (custom domain if any), not whichever one was typed.
       return { url: `${parsed.origin}/music`, band: parsed.band, items: parsed.items.map((i) => ({ ...i, album_id: byUrl.get(i.url) ?? null })) };
     },
+    /** Sync the purchased collection and wishlist of the Bandcamp account in Settings. */
+    syncCollection: () => runner.enqueueSync(),
     jobs: () => jobs.listJobs(db),
     job: (id: number) => jobs.getJob(db, id),
     cancelJob: (id: number) => runner.cancel(id),
@@ -94,6 +100,11 @@ export function createCore(deps: CoreDeps) {
     getFreshStreamUrl: (trackId: number, force = false) => getFreshStreamUrl(db, queue, trackId, force),
     playState: () => playState.getPlayState(db),
     savePlayState: (s: PlayState) => playState.setPlayState(db, s),
+    // Bandcamp account (the identity cookie is write-only from the UI's side)
+    account: () => getAccount(db),
+    setAccountUsername: (username: string) => setUsername(db, username),
+    setIdentityCookie: (cookie: string | null) => setIdentityCookie(db, cookie),
+    clearAccount: () => clearAccount(db),
     // settings
     getSetting: <T>(key: string) => settings.getSetting<T>(db, key),
     setSetting: (key: string, value: unknown) => settings.setSetting(db, key, value),

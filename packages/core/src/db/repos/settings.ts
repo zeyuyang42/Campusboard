@@ -10,3 +10,7 @@ export async function getSetting<T>(db: Db, key: string): Promise<T | null> {
 export async function setSetting(db: Db, key: string, value: unknown): Promise<void> {
   await db.run("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at", [key, JSON.stringify(value), now()]);
 }
+
+export async function deleteSetting(db: Db, key: string): Promise<void> {
+  await db.run("DELETE FROM settings WHERE key = ?", [key]);
+}
