@@ -7,6 +7,7 @@ const MESSAGES: Record<string, string> = {
   not_bandcamp: "That doesn't look like a Bandcamp link. Paste an album, track or artist URL like https://artist.bandcamp.com/album/name.",
   invalid_url: "That doesn't look like a Bandcamp link. Paste an album, track or artist URL like https://artist.bandcamp.com/album/name.",
   not_streamable: "This track can't be streamed from Bandcamp.",
+  invalid_playlist_name: "Give the playlist a name.",
 };
 
 export function friendlyError(err: unknown, fallback = "Something went wrong."): string {

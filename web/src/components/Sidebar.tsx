@@ -1,8 +1,10 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { usePlaylists, usePlaylistMutations } from "../api/queries";
 import { PlaylistCover } from "./PlaylistCover";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useUi } from "../ui/store";
+import { normalizePlaylistName, PLAYLIST_NAME_MAX } from "@bc/core";
+import { friendlyError } from "../lib/errors";
 
 export function Sidebar({ open }: { open: boolean }) {
   const { data: playlists } = usePlaylists();
@@ -11,12 +13,23 @@ export function Sidebar({ open }: { open: boolean }) {
   const creating = useUi((s) => s.creatingPlaylist);
   const setCreating = useUi((s) => s.setCreatingPlaylist);
   const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const busy = useRef(false);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) { setCreating(false); return; }
-    const p = await create.mutateAsync(name.trim());
-    setName(""); setCreating(false);
-    nav(`/playlists/${p.id}`);
+    if (busy.current) return; // a second Enter while the first create is in flight
+    const clean = normalizePlaylistName(name);
+    if (!clean) { setCreating(false); setName(""); return; }
+    busy.current = true;
+    try {
+      const p = await create.mutateAsync(clean);
+      setName(""); setError(null); setCreating(false);
+      nav(`/playlists/${p.id}`);
+    } catch (err) {
+      setError(friendlyError(err, "Couldn't create the playlist."));
+    } finally {
+      busy.current = false;
+    }
   };
   return (
     <aside className={`sidebar nav ${open ? "open" : ""}`}>
@@ -31,7 +44,8 @@ export function Sidebar({ open }: { open: boolean }) {
       </div>
       {creating && (
         <form onSubmit={submit} style={{ padding: "0 4px 6px" }}>
-          <input autoFocus placeholder="Playlist name" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => { if (!name.trim()) setCreating(false); }} onKeyDown={(e) => { if (e.key === "Escape") { setCreating(false); setName(""); } }} style={{ width: "100%" }} />
+          <input autoFocus placeholder="Playlist name" maxLength={PLAYLIST_NAME_MAX} value={name} onChange={(e) => { setName(e.target.value); setError(null); }} onBlur={() => { if (!normalizePlaylistName(name)) { setCreating(false); setName(""); } }} onKeyDown={(e) => { if (e.key === "Escape") { setCreating(false); setName(""); setError(null); } }} style={{ width: "100%" }} />
+          {error && <div className="error" role="alert" style={{ fontSize: 12, padding: "4px 2px 0" }}>{error}</div>}
         </form>
       )}
       {playlists?.map((p) => (

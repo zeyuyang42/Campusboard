@@ -6,6 +6,7 @@ export { getFreshStreamUrl, refreshAlbum } from "./services/streamService.js";
 export { JobRunner, type ImportRequest, type ImportSelectionRequest } from "./services/jobRunner.js";
 export { cachedFetchText, prunePageCache } from "./services/pageCache.js";
 export * as repos from "./db/repos/index.js";
+export { normalizePlaylistName, PlaylistNameError, PLAYLIST_NAME_MAX } from "./db/repos/playlists.js";
 export { createCore, type Core, type CoreDeps } from "./core.js";
 export * from "./theme/index.js";
 export * from "./palette/index.js";
