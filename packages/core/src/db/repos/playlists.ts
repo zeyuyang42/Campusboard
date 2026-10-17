@@ -1,6 +1,35 @@
 import type { Db } from "../Db.js";
 import { now } from "../Db.js";
 import type { Playlist, PlaylistWithTracks, PlaylistTrack } from "../../types.js";
+import { PLAYLIST_NAME_MAX } from "../../config.js";
+
+export { PLAYLIST_NAME_MAX };
+
+/** Thrown by createPlaylist/renamePlaylist when the name is empty after normalisation. */
+export class PlaylistNameError extends Error {
+  readonly code = "invalid_playlist_name";
+  constructor(message = "Playlist name can't be empty.") {
+    super(message);
+    this.name = "PlaylistNameError";
+  }
+}
+
+/**
+ * Trim, collapse runs of control characters (newlines, tabs, ...) and spaces into a
+ * single space, and cap at PLAYLIST_NAME_MAX characters. Returns null when nothing
+ * is left, so the UI can disable submit with the same rule the repo enforces.
+ */
+export function normalizePlaylistName(name: string): string | null {
+  const clean = String(name ?? "").replace(/[\p{Cc}\p{Zl}\p{Zp} ]+/gu, " ").trim();
+  if (!clean) return null;
+  return Array.from(clean).slice(0, PLAYLIST_NAME_MAX).join("").trimEnd();
+}
+
+function requireName(name: string): string {
+  const n = normalizePlaylistName(name);
+  if (!n) throw new PlaylistNameError();
+  return n;
+}
 
 interface PlaylistRow extends Playlist { art_ids_csv: string | null }
 
@@ -29,12 +58,12 @@ export async function listPlaylists(db: Db): Promise<Playlist[]> {
 }
 
 export async function createPlaylist(db: Db, name: string): Promise<Playlist> {
-  const r = await db.get<{ id: number }>("INSERT INTO playlists (name) VALUES (?) RETURNING id", [name]);
+  const r = await db.get<{ id: number }>("INSERT INTO playlists (name) VALUES (?) RETURNING id", [requireName(name)]);
   return (await db.get<PlaylistRow>(`${PLAYLIST_SELECT} WHERE p.id = ?`, [r!.id]).then((p) => p && rowToPlaylist(p)))!;
 }
 
 export async function renamePlaylist(db: Db, id: number, name: string): Promise<boolean> {
-  return (await db.run("UPDATE playlists SET name = ?, updated_at = ? WHERE id = ?", [name, now(), id])).changes > 0;
+  return (await db.run("UPDATE playlists SET name = ?, updated_at = ? WHERE id = ?", [requireName(name), now(), id])).changes > 0;
 }
 
 export async function deletePlaylist(db: Db, id: number): Promise<boolean> {

@@ -17,6 +17,7 @@ import { normalizeBandcampUrl } from "./scrape/url.js";
 import { getFreshStreamUrl, refreshAlbum } from "./services/streamService.js";
 import { vacuumOrphans } from "./services/importService.js";
 import { prunePageCache } from "./services/pageCache.js";
+import { ART_FETCH_TIMEOUT_MS } from "./config.js";
 import type { BrowseResult, PlayState, SearchResult } from "./types.js";
 
 export interface CoreDeps {
@@ -95,9 +96,20 @@ export function createCore(deps: CoreDeps) {
       if (cached) return cached;
       const url = artUrl(artId, 2);
       if (!url) return null;
-      const res = await deps.fetch(url, { headers: { Accept: "image/*" } });
-      if (!res.ok) return null;
-      const p = await extractPalette(await res.arrayBuffer());
+      // Bypasses FetchQueue on purpose (static CDN), so it needs its own timeout.
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), ART_FETCH_TIMEOUT_MS);
+      let bytes: ArrayBuffer;
+      try {
+        const res = await deps.fetch(url, { headers: { Accept: "image/*" }, signal: ctrl.signal });
+        if (!res.ok) return null;
+        bytes = await res.arrayBuffer();
+      } catch {
+        return null; // timed out or network error: no palette, the UI keeps its defaults
+      } finally {
+        clearTimeout(timer);
+      }
+      const p = await extractPalette(bytes);
       await palettes.cachePalette(db, artId, p);
       return p;
     },

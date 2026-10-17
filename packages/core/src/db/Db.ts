@@ -31,6 +31,11 @@ export function toDollar(sql: string): string {
   return out;
 }
 
+/**
+ * Current time in UTC as `YYYY-MM-DD HH:MM:SS`: the same format and zone as SQLite's
+ * `datetime('now')` (also UTC), so values written from JS and by SQL column defaults
+ * compare and sort together. Convert to local time only for display.
+ */
 export const now = () => new Date().toISOString().replace("T", " ").slice(0, 19);
 
 /** Build `(?,?,..),(?,?,..)` for a multi-row insert. */

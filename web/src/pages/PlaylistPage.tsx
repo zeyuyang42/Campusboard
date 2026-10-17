@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { normalizePlaylistName, PLAYLIST_NAME_MAX } from "@bc/core";
 import { useNavigate, useParams } from "react-router-dom";
 import { usePlaylist, usePlaylistMutations } from "../api/queries";
 import { TrackList, PlayPauseAll } from "../components/TrackList";
@@ -39,12 +40,13 @@ export function PlaylistPage() {
       <div className="page-title">
         <PlaylistCover artIds={pl.art_ids} />
         {editing !== null ? (
-          <form className="inline-edit" onSubmit={(e) => { e.preventDefault(); if (editing.trim()) rename.mutate({ id, name: editing.trim() }); setEditing(null); }}>
-            <input autoFocus value={editing} onChange={(e) => setEditing(e.target.value)} onBlur={() => setEditing(null)} onKeyDown={(e) => { if (e.key === "Escape") setEditing(null); }} />
+          <form className="inline-edit" onSubmit={(e) => { e.preventDefault(); const name = normalizePlaylistName(editing); if (name && name !== pl.name) rename.mutate({ id, name }); setEditing(null); }}>
+            <input autoFocus maxLength={PLAYLIST_NAME_MAX} value={editing} onChange={(e) => setEditing(e.target.value)} onBlur={() => setEditing(null)} onKeyDown={(e) => { if (e.key === "Escape") setEditing(null); }} />
           </form>
         ) : (
-          <button className="title-edit" onClick={() => setEditing(pl.name)} title="Rename">{pl.name}</button>
+          <button className="title-edit" onClick={() => { rename.reset(); setEditing(pl.name); }} title="Rename">{pl.name}</button>
         )}
+        {rename.isError && editing === null && <span className="error" role="alert">{friendlyError(rename.error, "Couldn't rename the playlist.")}</span>}
         <span className="count meta"><span>{pl.tracks.length} track{pl.tracks.length === 1 ? "" : "s"}</span><span>{formatTotal(total)}</span></span>
         <span className="actions">
           <PlayPauseAll tracks={pl.tracks} />

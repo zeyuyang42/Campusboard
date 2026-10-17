@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import { useMenu, type MenuItem } from "../ui/menu";
 import { usePlaylists, usePlaylistMutations } from "../api/queries";
 import { getCore } from "../api/core";
+import { normalizePlaylistName, PLAYLIST_NAME_MAX } from "@bc/core";
+import { friendlyError } from "../lib/errors";
 
 /** Renders the single app menu (context menu or playlist picker) with keyboard support. */
 export function MenuHost() {
@@ -70,16 +72,22 @@ function PlaylistPicker({ trackIds }: { trackIds: number[] }) {
   const [filter, setFilter] = useState("");
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [containing, setContaining] = useState<Set<number>>(new Set());
   useEffect(() => { void getCore().then((c) => c.playlistsContaining(trackIds)).then(setContaining); }, [trackIds]);
   const shown = (playlists ?? []).filter((p) => !filter || p.name.toLowerCase().includes(filter.toLowerCase()));
   const add = async (id: number) => { close(); await addTracks.mutateAsync({ id, trackIds }); };
   const createAndAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
-    const p = await create.mutateAsync(name.trim());
-    await addTracks.mutateAsync({ id: p.id, trackIds });
-    close();
+    const clean = normalizePlaylistName(name);
+    if (!clean) return;
+    try {
+      const p = await create.mutateAsync(clean);
+      await addTracks.mutateAsync({ id: p.id, trackIds });
+      close();
+    } catch (err) {
+      setError(friendlyError(err, "Couldn't create the playlist."));
+    }
   };
   const n = trackIds.length;
   return (
@@ -96,7 +104,8 @@ function PlaylistPicker({ trackIds }: { trackIds: number[] }) {
       <hr />
       {creating ? (
         <form onSubmit={createAndAdd}>
-          <input autoFocus placeholder="New playlist name" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setCreating(false); } }} />
+          <input autoFocus placeholder="New playlist name" maxLength={PLAYLIST_NAME_MAX} value={name} onChange={(e) => { setName(e.target.value); setError(null); }} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setCreating(false); } }} />
+          {error && <div className="label error" role="alert">{error}</div>}
         </form>
       ) : (
         <button role="menuitem" onClick={() => setCreating(true)}><span style={{ width: 14, display: "inline-block" }}>+</span><span>New playlist…</span></button>
