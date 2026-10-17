@@ -4,7 +4,7 @@ const MESSAGES: Record<string, string> = {
   parse_failed: "Bandcamp's page looked different than expected. Try again later; if it keeps happening, the app needs an update.",
   fetch_failed: "Couldn't reach Bandcamp. Check your connection and try again.",
   not_found: "That page doesn't exist on Bandcamp.",
-  not_bandcamp: "That doesn't look like a Bandcamp link. Paste an album, track or artist URL like https://artist.bandcamp.com/album/name.",
+  not_bandcamp: "That page isn't on Bandcamp. Paste an album, track or artist URL like https://artist.bandcamp.com/album/name, or the same page on the artist's own domain.",
   invalid_url: "That doesn't look like a Bandcamp link. Paste an album, track or artist URL like https://artist.bandcamp.com/album/name.",
   not_streamable: "This track can't be streamed from Bandcamp.",
   invalid_playlist_name: "Give the playlist a name.",

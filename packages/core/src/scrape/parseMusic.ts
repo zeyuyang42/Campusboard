@@ -1,5 +1,6 @@
 import { ScrapeError } from "./errors.js";
-import { readJsonAttr, pageTitle, decodeEntities, stripTags } from "./html.js";
+import { readJsonAttr, pageTitle, decodeEntities, stripTags, hasBandcampMarker } from "./html.js";
+import { normalizeBandcampUrl } from "./url.js";
 import { BandSchema } from "./schemas.js";
 import { isChallengePage } from "./parseTralbum.js";
 import type { ItemType } from "../types.js";
@@ -15,6 +16,8 @@ export interface MusicItem {
 }
 
 export interface ParsedMusicPage {
+  /** Canonical artist origin (the custom domain if the artist has one), from the page's data-tralbum url. */
+  origin: string;
   band: { band_id: number; name: string } | null;
   items: MusicItem[]; // page order, deduped by url
 }
@@ -34,7 +37,8 @@ const artIdFrom = (s: string): number | null => {
 
 export function parseMusicPage(html: string, origin: string): ParsedMusicPage {
   if (isChallengePage(html)) throw new ScrapeError("client_challenge", "Bandcamp returned a bot challenge page");
-  const base = origin.replace(/\/+$/, "");
+  if (!hasBandcampMarker(html)) throw new ScrapeError("not_bandcamp", `Not a Bandcamp page (title: ${pageTitle(html) ?? "?"})`);
+  const base = canonicalOrigin(html) ?? origin.replace(/\/+$/, "");
   const seen = new Map<string, MusicItem>();
   const push = (it: MusicItem) => {
     const prev = seen.get(it.url);
@@ -86,5 +90,21 @@ export function parseMusicPage(html: string, origin: string): ParsedMusicPage {
   if (items.length === 0 && !band) {
     throw new ScrapeError("parse_failed", `No discography items found (title: ${pageTitle(html) ?? "?"})`);
   }
-  return { band, items };
+  return { origin: base, band, items };
+}
+
+/**
+ * Artist pages embed `data-tralbum="{"url":"https://<canonical>/music"}"`. For an
+ * artist with a custom domain that is the custom domain even when the page was
+ * served from name.bandcamp.com, so relative release links resolve to the same
+ * URLs that album pages report and the library stores.
+ */
+function canonicalOrigin(html: string): string | null {
+  try {
+    const t = readJsonAttr<{ url?: unknown }>(html, "data-tralbum");
+    if (typeof t?.url !== "string") return null;
+    return new URL(normalizeBandcampUrl(t.url).url).origin;
+  } catch {
+    return null;
+  }
 }

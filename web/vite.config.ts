@@ -8,6 +8,15 @@ import type { Plugin } from "vite";
  * Browser-only dev mode: GET/POST /bc-proxy/<encoded url> is fetched server-side with Node's fetch
  * (plain headers, like the app does through Tauri) so Bandcamp pages load without CORS.
  */
+/**
+ * Mirrors the http scope in src-tauri/capabilities/default.json: anything on bandcamp.com or
+ * bcbits.com, plus Bandcamp-shaped paths on any other https host (artists' custom domains).
+ */
+function proxyAllowed(target: string): boolean {
+  if (/^https:\/\/([a-z0-9-]+\.)*(bandcamp\.com|bcbits\.com)(\/|$)/i.test(target)) return true;
+  return /^https:\/\/[a-z0-9.-]+\/(album\/[^/?#]+|track\/[^/?#]+|music)\/?([?#].*)?$/i.test(target);
+}
+
 function bandcampProxy(): Plugin {
   const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15";
   return {
@@ -16,7 +25,7 @@ function bandcampProxy(): Plugin {
       server.middlewares.use("/bc-proxy/", async (req, res) => {
         try {
           const target = decodeURIComponent((req.url ?? "").replace(/^\//, ""));
-          if (!/^https:\/\/([a-z0-9-]+\.)?(bandcamp\.com|bcbits\.com)\//.test(target)) { res.statusCode = 400; res.end("not allowed"); return; }
+          if (!proxyAllowed(target)) { res.statusCode = 400; res.end("not allowed"); return; }
           const chunks: Buffer[] = [];
           for await (const c of req) chunks.push(c as Buffer);
           const body = chunks.length ? Buffer.concat(chunks) : undefined;

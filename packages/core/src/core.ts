@@ -61,7 +61,8 @@ export function createCore(deps: CoreDeps) {
       const parsed = parseMusicPage(await cachedFetchText(db, queue, url), `https://${n.host}`);
       const rows = await db.select<{ id: number; url: string }>("SELECT id, url FROM albums");
       const byUrl = new Map(rows.map((r) => [r.url, r.id]));
-      return { url, band: parsed.band, items: parsed.items.map((i) => ({ ...i, album_id: byUrl.get(i.url) ?? null })) };
+      // Report the canonical address (custom domain if any), not whichever one was typed.
+      return { url: `${parsed.origin}/music`, band: parsed.band, items: parsed.items.map((i) => ({ ...i, album_id: byUrl.get(i.url) ?? null })) };
     },
     jobs: () => jobs.listJobs(db),
     job: (id: number) => jobs.getJob(db, id),

@@ -29,6 +29,15 @@
         },
         {
           "url": "https://*.bcbits.com"
+        },
+        {
+          "url": "https://*/album/*"
+        },
+        {
+          "url": "https://*/track/*"
+        },
+        {
+          "url": "https://*/music"
         }
       ]
     },
