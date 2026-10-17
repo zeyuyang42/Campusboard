@@ -4,6 +4,7 @@ import path from "node:path";
 import type { Plugin } from "vite";
 // Same allowlist as core and the Tauri http scope (with scopeRedirects on).
 import { isFetchableBandcampUrl } from "../packages/core/src/scrape/url";
+import { mayCarryIdentity } from "../packages/core/src/scrape/fan";
 
 // Runs inside the Tauri window; `tauri dev` starts this server and loads http://localhost:5173.
 /** Redirect hops followed per proxied request, each re-checked against the allowlist. */
@@ -29,15 +30,19 @@ function bandcampProxy(): Plugin {
           const body = chunks.length ? Buffer.concat(chunks) : undefined;
           const headers: Record<string, string> = { "User-Agent": UA, Accept: req.headers.accept ?? "text/html,*/*;q=0.8", "Accept-Language": "en-US,en;q=0.9" };
           if (req.headers["content-type"]) headers["Content-Type"] = String(req.headers["content-type"]);
+          // The identity cookie (sent as x-bc-cookie, see browserFetch) goes only to bandcamp.com hosts.
+          const cookie = req.headers["x-bc-cookie"] ? String(req.headers["x-bc-cookie"]) : null;
+          const withCookie = (url: string) => (cookie && mayCarryIdentity(url) ? { ...headers, Cookie: cookie } : headers);
           // Follow redirects by hand so every hop passes the same check as the first URL.
           let url = target;
-          let r = await fetch(url, { method: req.method, headers, body: body && req.method !== "GET" ? body : undefined, redirect: "manual" });
+          let r = await fetch(url, { method: req.method, headers: withCookie(url), body: body && req.method !== "GET" ? body : undefined, redirect: "manual" });
           for (let hop = 0; r.status >= 300 && r.status < 400 && r.headers.get("location"); hop++) {
             const next = new URL(r.headers.get("location")!, url).toString();
             if (hop >= MAX_REDIRECTS) { res.statusCode = 502; res.end("too many redirects"); return; }
             if (!isFetchableBandcampUrl(next)) { deny(next); return; }
             url = next;
-            r = await fetch(url, { method: "GET", headers, redirect: "manual" });
+            // Like reqwest, drop the cookie when a hop changes host.
+            r = await fetch(url, { method: "GET", headers: new URL(url).host === new URL(target).host ? withCookie(url) : headers, redirect: "manual" });
           }
           res.statusCode = r.status;
           res.setHeader("content-type", r.headers.get("content-type") ?? "application/octet-stream");

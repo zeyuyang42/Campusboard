@@ -3,7 +3,7 @@ import { getCore } from "./core";
 import type { Job, PlayState } from "@bc/core";
 
 export const keys = {
-  albums: (sort: string) => ["albums", sort] as const,
+  albums: (sort: string, filter = "all") => ["albums", sort, filter] as const,
   album: (id: number) => ["album", id] as const,
   artists: ["artists"] as const,
   artist: (id: number) => ["artist", id] as const,
@@ -14,10 +14,11 @@ export const keys = {
   job: (id: number) => ["job", id] as const,
   challenge: ["jobs", "challenge"] as const,
   search: (q: string) => ["search", q] as const,
+  account: ["account"] as const,
 };
 
 const core = getCore;
-export const useAlbums = (sort: string) => useQuery({ queryKey: keys.albums(sort), queryFn: async () => (await core()).albums(sort as never) });
+export const useAlbums = (sort: string, filter = "all") => useQuery({ queryKey: keys.albums(sort, filter), queryFn: async () => (await core()).albums(sort as never, filter as never) });
 export const useAlbum = (id: number) => useQuery({ queryKey: keys.album(id), queryFn: async () => (await core()).album(id), enabled: id > 0 });
 export const useArtists = () => useQuery({ queryKey: keys.artists, queryFn: async () => (await core()).artists() });
 export const useArtist = (id: number) => useQuery({ queryKey: keys.artist(id), queryFn: async () => (await core()).artist(id), enabled: id > 0 });
@@ -40,6 +41,21 @@ export function useInvalidateLibrary() {
   const qc = useQueryClient();
   return () => {
     for (const k of ["albums", "album", "artists", "artist", "tracks", "search", "playlists", "playlist"]) void qc.invalidateQueries({ queryKey: [k] });
+  };
+}
+
+/** The Bandcamp account in Settings: username, whether a cookie is stored, the last sync. */
+export const useAccount = () => useQuery({ queryKey: keys.account, queryFn: async () => (await core()).account() });
+
+export function useAccountMutations() {
+  const qc = useQueryClient();
+  const inv = useInvalidateLibrary();
+  const done = () => { void qc.invalidateQueries({ queryKey: keys.account }); };
+  return {
+    setUsername: useMutation({ mutationFn: async (username: string) => (await core()).setAccountUsername(username), onSuccess: () => { done(); inv(); } }),
+    setCookie: useMutation({ mutationFn: async (cookie: string | null) => (await core()).setIdentityCookie(cookie), onSuccess: done }),
+    clear: useMutation({ mutationFn: async () => (await core()).clearAccount(), onSuccess: () => { done(); inv(); } }),
+    sync: useMutation({ mutationFn: async () => (await core()).syncCollection(), onSuccess: () => { void qc.invalidateQueries({ queryKey: keys.jobs }); } }),
   };
 }
 

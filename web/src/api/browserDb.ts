@@ -6,6 +6,7 @@ import wasmUrl from "sql.js/dist/sql-wasm.wasm?url";
 import type { Db } from "@bc/core";
 import m1 from "../../../src-tauri/migrations/0001_init.sql?raw";
 import m2 from "../../../src-tauri/migrations/0002_settings.sql?raw";
+import m3 from "../../../src-tauri/migrations/0003_fan_items.sql?raw";
 
 export async function openBrowserDb(): Promise<Db> {
   const SQL = await initSqlJs({ locateFile: () => wasmUrl });
@@ -13,6 +14,7 @@ export async function openBrowserDb(): Promise<Db> {
   db.exec("PRAGMA foreign_keys = ON");
   db.exec(m1);
   db.exec(m2);
+  db.exec(m3);
   const bind = (params: unknown[]) => params.map((p) => (p === undefined ? null : p)) as (string | number | null | Uint8Array)[];
   const api: Db = {
     async select<T>(sql: string, params: unknown[] = []): Promise<T[]> {
@@ -39,9 +41,15 @@ export async function openBrowserDb(): Promise<Db> {
   return api;
 }
 
-/** Route Bandcamp fetches through the Vite dev proxy, which strips CORS. */
+/**
+ * Route Bandcamp fetches through the Vite dev proxy, which strips CORS. A browser drops a
+ * Cookie header set from script, so it travels as x-bc-cookie and the proxy restores it
+ * (for bandcamp.com hosts only).
+ */
 export async function browserFetch(input: string, init?: RequestInit): Promise<Response> {
-  const res = await fetch(`/bc-proxy/${encodeURIComponent(input)}`, init);
+  const headers = { ...((init?.headers ?? {}) as Record<string, string>) };
+  if (headers.Cookie) { headers["x-bc-cookie"] = headers.Cookie; delete headers.Cookie; }
+  const res = await fetch(`/bc-proxy/${encodeURIComponent(input)}`, { ...init, headers });
   // The proxy refused the URL or a redirect hop: fail the way the Tauri http plugin does.
   if (res.headers.get("x-bc-proxy-denied")) throw new Error(`url not allowed on the configured scope: ${res.headers.get("x-bc-proxy-denied")}`);
   return res;

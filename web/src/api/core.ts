@@ -33,6 +33,8 @@ export function getCore(): Promise<Core> {
         onJobsChange: () => {
           void qc?.invalidateQueries({ queryKey: ["jobs"] });
           void qc?.invalidateQueries({ queryKey: ["job"] });
+          // A collection sync updates the account summary and the Purchased/Wishlist flags.
+          void qc?.invalidateQueries({ queryKey: ["account"] });
         },
       });
     })();

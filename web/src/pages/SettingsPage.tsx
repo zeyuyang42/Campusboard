@@ -3,6 +3,7 @@ import { PRESETS, parseThemeJson, type Theme } from "@bc/core";
 import { useTheme } from "../theme/store";
 import { appInfo, pickBackgroundImage, pickTextFile, revealDataDir, saveTextFile } from "../lib/files";
 import { isTauri } from "../lib/env";
+import { AccountSettings } from "../components/AccountSettings";
 
 const SHORTCUTS: [string, string][] = [
   ["Space", "Play or pause"], ["← →", "Seek 5 seconds"], ["⇧← ⇧→", "Previous or next track"], ["↑ ↓", "Volume"],
@@ -43,6 +44,8 @@ export function SettingsPage() {
     <div className="settings">
       <h1 className="page-title">Settings</h1>
       {notice && <div className={`notice ${notice.kind}`}>{notice.text}</div>}
+
+      <AccountSettings />
 
       <section>
         <h2>Theme</h2>
