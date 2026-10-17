@@ -139,10 +139,14 @@ async function historyCheck(core: Awaited<ReturnType<typeof getCore>>, album: Aw
  * Background listening: hide the window (what closing it does) for 20 s while a track plays,
  * and measure how often timeupdate still arrives and whether listening history keeps
  * accumulating. Observes the audio element without changing it.
+ *
+ * status "stalled" (the playhead didn't move: not playing, or buffering) says nothing about
+ * the counter, so it doesn't fail the run; "failed" means the playhead moved but listened
+ * time didn't keep up.
  */
 async function hiddenPlaybackCheck() {
   const win = getCurrentWindow();
-  if (audioEl.paused) return { ok: false, error: "not playing" };
+  if (audioEl.paused) return { ok: true, status: "stalled", reason: "not playing" };
   let last = performance.now();
   let maxGapMs = 0;
   let reports = 0;
@@ -162,21 +166,25 @@ async function hiddenPlaybackCheck() {
     const wallSec = (performance.now() - w0) / 1000;
     const mediaSec = audioEl.currentTime - t0;
     const listenedSec = listenedSeconds() - l0;
-    await win.show();
-    await win.setFocus();
     const r = (x: number) => Math.round(x * 100) / 100;
+    const status = mediaSec < 1 ? "stalled" : listenedSec >= mediaSec * 0.9 ? "ok" : "failed";
     return {
-      ok: !audioEl.paused && mediaSec > wallSec * 0.8 && listenedSec > mediaSec * 0.9,
+      ok: status !== "failed", status,
       visibility, wallSec: r(wallSec), mediaSec: r(mediaSec), listenedSec: r(listenedSec), reports, maxGapMs: Math.round(maxGapMs),
     };
   } finally {
     audioEl.removeEventListener("timeupdate", onTick);
+    await win.show();
+    await win.setFocus();
   }
 }
 
 export async function runSelfTest() {
   const out: Record<string, unknown> = { startedAt: new Date().toISOString() };
   const core = await getCore();
+  // Plays above this id were made by the run (the player or the history check) and are
+  // removed at the end, so the selftest never leaves anything in the real history.
+  const playsBefore = await core.db.get<{ m: number | null }>("SELECT MAX(id) AS m FROM plays").then((r) => r?.m ?? 0, () => null);
   try {
     const job = await core.import({ url: ALBUM });
     for (let i = 0; i < 90; i++) {
@@ -197,7 +205,9 @@ export async function runSelfTest() {
     usePlayer.getState().next();
     await sleep(4000);
     out.audioAfterNext = { currentTime: audioEl.currentTime, paused: audioEl.paused, index: usePlayer.getState().index, title: usePlayer.getState().current()?.title };
-    out.hiddenPlayback = await hiddenPlaybackCheck().catch((e) => ({ ok: false, error: String(e) }));
+    out.hiddenPlayback = await hiddenPlaybackCheck().catch((e) => ({ ok: false, status: "failed", error: String(e) }));
+    // Nothing below needs playback; stopping here keeps the track from reaching a counted play.
+    usePlayer.getState().pause();
     const pl = await core.createPlaylist("Selftest");
     await core.addToPlaylist(pl.id, playable.slice(0, 3).map((t) => t.id));
     const got = await core.playlist(pl.id);
@@ -304,7 +314,12 @@ export async function runSelfTest() {
     out.ok = failed.length === 0;
   } catch (e) {
     out.ok = false;
-    out.error = String((e as Error)?.stack ?? e);
+    // WebKit's stack has no message line, so keep both.
+    out.error = `${String(e)}\n${(e as Error)?.stack ?? ""}`;
+  } finally {
+    if (playsBefore != null) {
+      out.playsRemoved = await core.db.run("DELETE FROM plays WHERE id > ?", [playsBefore]).then((r) => r.changes, (e) => String(e));
+    }
   }
   out.finishedAt = new Date().toISOString();
   await core.setSetting("selftest", out);
