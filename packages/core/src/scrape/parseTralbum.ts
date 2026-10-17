@@ -1,5 +1,5 @@
 import { ScrapeError } from "./errors.js";
-import { decodeEntities, readJsonAttr, pageTitle, hasBandcampMarker } from "./html.js";
+import { decodeEntities, readJsonAttr, pageTitle, hasBandcampMarker, isChallengePage } from "./html.js";
 import { normalizeBandcampUrl } from "./url.js";
 import { TralbumSchema, LdJsonSchema } from "./schemas.js";
 import type { ItemType } from "../types.js";
@@ -41,10 +41,7 @@ export function streamExpiry(streamUrl: string, fetchedAt: number): number {
   return fetchedAt + DAY_MS;
 }
 
-export function isChallengePage(html: string): boolean {
-  const t = pageTitle(html);
-  return !!t && /client challenge/i.test(t);
-}
+export { isChallengePage };
 
 export function parseTralbumPage(html: string, fetchedAt = Date.now()): ParsedTralbum {
   if (isChallengePage(html)) throw new ScrapeError("client_challenge", "Bandcamp returned a bot challenge page");

@@ -23,6 +23,12 @@ export function pageTitle(html: string): string | null {
   return m ? decodeEntities(m[1]).trim() : null;
 }
 
+/** Bandcamp's bot check: a page titled "Client Challenge" instead of the one asked for. */
+export function isChallengePage(html: string): boolean {
+  const t = pageTitle(html);
+  return !!t && /client challenge/i.test(t);
+}
+
 /**
  * Whether the HTML is a Bandcamp-rendered page. Every album, track and artist
  * page carries a `data-tralbum` or `data-band` JSON attribute; a custom domain

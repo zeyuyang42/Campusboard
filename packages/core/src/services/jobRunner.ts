@@ -87,7 +87,8 @@ export class JobRunner {
     try {
       if (job.kind === "discography" && job.total === 0) {
         const origin = new URL(job.input_url).origin;
-        const html = await cachedFetchText(this.db, this.queue, job.input_url);
+        const html = await this.fetchForJob(job.id, job.input_url);
+        if (html === null) return;
         const parsed = parseMusicPage(html, origin);
         const have = await albumUrlsInLibrary(this.db);
         const force = this.forceFlags.get(job.id) ?? false;
@@ -99,27 +100,30 @@ export class JobRunner {
           return;
         }
       }
+      let challenged = false;
       for (let item = await jobs.nextQueuedItem(this.db, job.id); item; item = await jobs.nextQueuedItem(this.db, job.id)) {
         if ((await jobs.jobStatus(this.db, job.id)) === "cancelled") return;
         try {
-          const html = await cachedFetchText(this.db, this.queue, item.url);
+          const html = await this.fetchForJob(job.id, item.url);
+          if (html === null) return;
           const albumId = await upsertTralbum(this.db, parseTralbumPage(html));
           await jobs.setItemResult(this.db, item.id, job.id, true, albumId, null);
         } catch (e) {
           const msg = e instanceof ScrapeError ? `[${e.code}] ${e.message}` : String(e);
           console.error(`[job ${job.id}] ${item.url}: ${msg}`);
+          // A challenge on the retry fails just this item. The gate has already doubled the
+          // cooldown, and the next item waits that out before anything else goes to Bandcamp.
           await jobs.setItemResult(this.db, item.id, job.id, false, null, msg);
-          if (e instanceof ScrapeError && e.code === "client_challenge") {
-            await jobs.setJobStatus(this.db, job.id, "failed", "Bandcamp asked for a browser check. Wait a few minutes and try again.");
-            return;
-          }
+          if (e instanceof ScrapeError && e.code === "client_challenge") challenged = true;
         }
         this.onChange();
       }
       const final = (await jobs.getJob(this.db, job.id, false))!;
       if (final.status === "cancelled") return;
       const allFailed = final.total > 0 && final.done === 0;
-      await jobs.setJobStatus(this.db, job.id, allFailed ? "failed" : "done", allFailed ? "Every item failed to import" : null);
+      // Keep the clear challenge message when that is why nothing imported.
+      const why = challenged ? "[client_challenge] Bandcamp kept returning its bot check" : "Every item failed to import";
+      await jobs.setJobStatus(this.db, job.id, allFailed ? "failed" : "done", allFailed ? why : null);
     } catch (e) {
       const msg = e instanceof ScrapeError ? `[${e.code}] ${e.message}` : String(e);
       console.error(`[job ${job.id}] ${msg}`);
@@ -128,6 +132,40 @@ export class JobRunner {
       this.forceFlags.delete(job.id);
       this.onChange();
     }
+  }
+
+  /**
+   * Fetch for a job, honouring the challenge cooldown. While a cooldown runs the job goes
+   * back to "queued" and its items stay queued; a challenge on this fetch waits out the
+   * new cooldown and retries once. Returns null if the job was cancelled while paused.
+   */
+  private async fetchForJob(jobId: number, url: string): Promise<string | null> {
+    for (let challenges = 0; ;) {
+      if (!(await this.waitOutCooldown(jobId))) return null;
+      try {
+        return await cachedFetchText(this.db, this.queue, url);
+      } catch (e) {
+        if (!(e instanceof ScrapeError)) throw e;
+        // Another request tripped the gate while this one waited in the queue: not an attempt.
+        if (e.code === "challenge_cooldown") continue;
+        if (e.code === "client_challenge" && challenges++ === 0) continue;
+        throw e;
+      }
+    }
+  }
+
+  /** Wait for any challenge cooldown to end. False if the job was cancelled meanwhile. */
+  private async waitOutCooldown(jobId: number): Promise<boolean> {
+    const gate = this.queue.gate;
+    await gate.ready();
+    if (!gate.until()) return (await jobs.jobStatus(this.db, jobId)) !== "cancelled";
+    if ((await jobs.jobStatus(this.db, jobId)) === "running") await jobs.setJobStatus(this.db, jobId, "queued");
+    this.onChange();
+    await gate.waitClear();
+    if ((await jobs.jobStatus(this.db, jobId)) === "cancelled") return false;
+    await jobs.setJobStatus(this.db, jobId, "running");
+    this.onChange();
+    return true;
   }
 
   async cancel(id: number): Promise<boolean> {

@@ -60,7 +60,12 @@ src-tauri/
   so palette extraction fetches bytes and decodes them, never a tainted `<img>`.
 - Bandcamp's bot check ("Client Challenge" page title) is triggered by requests
   whose headers look inconsistent (e.g. Chrome `sec-ch-ua` with a Safari UA).
-  Keep requests plain: UA + Accept + Accept-Language.
+  Keep requests plain: UA + Accept + Accept-Language. When the challenge does
+  come back, `FetchQueue` trips a `ChallengeGate` (persisted in
+  `settings.key='challenge_until'`): 60 s cooldown, doubled for each challenge
+  soon after, capped at 30 min. Interactive fetches fail fast with
+  `challenge_cooldown` meanwhile; the job runner holds items queued and retries
+  a challenged item once. No headless-browser fallback: it doesn't fit the app.
 - Search `item_url_path` may be absolute or relative; album `img` from search
   lacks the `a` prefix real art URLs need (derive from `art_id`).
 - Custom artist domains (verified 2026-10-17 on music.sufjan.com and

@@ -17,7 +17,8 @@ import { normalizeBandcampUrl } from "./scrape/url.js";
 import { getFreshStreamUrl, refreshAlbum } from "./services/streamService.js";
 import { vacuumOrphans } from "./services/importService.js";
 import { prunePageCache } from "./services/pageCache.js";
-import { ART_FETCH_TIMEOUT_MS } from "./config.js";
+import { ART_FETCH_TIMEOUT_MS, CHALLENGE_SETTING_KEY, RATE_LIMIT_MS } from "./config.js";
+import { ChallengeGate, type ChallengeState } from "./scrape/challenge.js";
 import type { BrowseResult, PlayState, SearchResult } from "./types.js";
 
 export interface CoreDeps {
@@ -30,7 +31,11 @@ export interface CoreDeps {
 /** Everything the UI needs, as plain async functions over one database. */
 export function createCore(deps: CoreDeps) {
   const { db } = deps;
-  const queue = new FetchQueue(deps.fetch);
+  const gate = new ChallengeGate({
+    load: () => settings.getSetting<ChallengeState>(db, CHALLENGE_SETTING_KEY),
+    save: (s) => settings.setSetting(db, CHALLENGE_SETTING_KEY, s),
+  }, () => deps.onJobsChange?.());
+  const queue = new FetchQueue(deps.fetch, RATE_LIMIT_MS, gate);
   const runner = new JobRunner(db, queue, deps.onJobsChange);
   void prunePageCache(db);
   void vacuumOrphans(db);
@@ -67,6 +72,8 @@ export function createCore(deps: CoreDeps) {
     jobs: () => jobs.listJobs(db),
     job: (id: number) => jobs.getJob(db, id),
     cancelJob: (id: number) => runner.cancel(id),
+    /** When Bandcamp requests resume after a bot challenge (ms timestamp), or null if they aren't on hold. */
+    challengeUntil: async (): Promise<number | null> => { await gate.ready(); return gate.until(); },
     // playlists
     playlists: () => playlists.listPlaylists(db),
     playlist: (id: number) => playlists.getPlaylist(db, id),

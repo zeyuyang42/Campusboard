@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { normalizeBandcampUrl } from "@bc/core";
 import { useImport, useJobs, useInvalidateLibrary } from "../api/queries";
 import { JobProgress } from "../components/JobProgress";
+import { ChallengeNotice } from "../components/ChallengeNotice";
 import { friendlyError } from "../lib/errors";
 
 export function ImportPage() {
@@ -47,6 +48,7 @@ export function ImportPage() {
         Album and track pages import immediately. An artist or label URL opens their releases so you can choose what to import. Paste several album URLs separated by spaces or newlines to queue them all.
       </p>
       {jobs && jobs.length === 0 && <div className="empty">No imports yet.</div>}
+      {activeCount > 0 && <ChallengeNotice />}
       {jobs?.map((j) => <JobProgress key={j.id} job={j} />)}
       <div className="kbd-help">
         <span><kbd>Space</kbd> play/pause</span><span><kbd>←</kbd> <kbd>→</kbd> seek 5s</span><span><kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> previous/next</span><span><kbd>↑</kbd> <kbd>↓</kbd> volume</span><span><kbd>S</kbd> shuffle</span><span><kbd>R</kbd> repeat</span><span><kbd>Q</kbd> queue</span><span><kbd>N</kbd> now playing</span><span><kbd>/</kbd> search</span>
