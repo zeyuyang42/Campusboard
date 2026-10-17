@@ -43,7 +43,7 @@ src-tauri/
   src/lib.rs               registers sql/http/dialog/fs/opener/window-state plugins, migrations, Dock reopen
   src/menu.rs              native menu bar; custom items emit a `menu` event handled by web/src/lib/appMenu.ts
   migrations/*.sql         schema; every statement is IF NOT EXISTS so an old library.db can be adopted
-  capabilities/default.json  URL scope for http (bandcamp.com, bcbits.com), fs scope ($APPDATA), window permissions
+  capabilities/default.json  URL scope for http (bandcamp.com, bcbits.com, custom-domain paths; LAN denied), fs scope ($APPDATA), window permissions
   tauri.conf.json          window (Overlay title bar), CSP, bundle targets, min macOS 13.3
 ```
 
@@ -79,6 +79,16 @@ src-tauri/
   in scope). Release links from `/music` pages go through `normalizeBandcampUrl`
   before they are queued, and the browser-mode proxy uses the same
   `isFetchableBandcampUrl` check on every hop.
+- The http permission's `deny` list mirrors `isPublicCustomHost` so a redirect
+  hop can't reach the LAN: any IPv4 literal, any IPv6 literal, bare names, and
+  the private suffixes (`.local`, `.lan`, `.internal`, `.home.arpa`, ...), each
+  with and without a trailing dot. In tauri-plugin-http 2.8.2 deny always beats
+  allow. Pattern gotcha (urlpattern 0.6, verified 2026-10-17): fixed hostname
+  text is canonicalised as a hostname, so `192.168.*` becomes `192.0.0.168*` and
+  never matches; IP patterns must be regex groups like `(\d+\.\d+\.\d+\.\d+)`
+  (the url crate already turns `0x7f000001`, `127.1` etc. into dotted decimal).
+  Test new scope entries with the plugin's own `parse_url_pattern` before
+  relying on them; the selftest's `denyScope` row checks a few in the app.
 - The Tauri SQL plugin pools connections and has no transaction API. Writes are
   single statements or ordered so any interruption leaves a readable library
   (parents first, deletes last, every step idempotent). Multi-row inserts use

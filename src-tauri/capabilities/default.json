@@ -39,6 +39,28 @@
         {
           "url": "https://*/music"
         }
+      ],
+      "deny": [
+        { "url": "*://(\\d+\\.\\d+\\.\\d+\\.\\d+)" },
+        { "url": "*://[*]" },
+        { "url": "*://([^.]+)" },
+        { "url": "*://([^.]+\\.)" },
+        { "url": "*://*.local" },
+        { "url": "*://*.local." },
+        { "url": "*://*.localhost" },
+        { "url": "*://*.localhost." },
+        { "url": "*://*.localdomain" },
+        { "url": "*://*.localdomain." },
+        { "url": "*://*.internal" },
+        { "url": "*://*.internal." },
+        { "url": "*://*.lan" },
+        { "url": "*://*.lan." },
+        { "url": "*://*.home.arpa" },
+        { "url": "*://*.home.arpa." },
+        { "url": "*://*.intranet" },
+        { "url": "*://*.intranet." },
+        { "url": "*://*.corp" },
+        { "url": "*://*.corp." }
       ]
     },
     "dialog:default",

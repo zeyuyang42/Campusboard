@@ -138,6 +138,17 @@ describe("playlist names", () => {
     expect(pl.normalizePlaylistName(` ${joiners} `)).toBeNull();
   });
 
+  it("keeps the tag characters of subdivision flags (England, Scotland, Wales)", () => {
+    const flag = (code: string) =>
+      String.fromCodePoint(0x1f3f4, ...[...code].map((c) => 0xe0000 + c.charCodeAt(0)), 0xe007f);
+    const flags = ["gbeng", "gbsct", "gbwls"].map(flag).join("");
+    expect(pl.normalizePlaylistName(`Anthems ${flags}`)).toBe(`Anthems ${flags}`);
+    // Seven code points, one grapheme: the cap counts each flag once.
+    expect(pl.normalizePlaylistName(flag("gbsct").repeat(150))).toBe(flag("gbsct").repeat(PLAYLIST_NAME_MAX));
+    const tagsOnly = String.fromCodePoint(0xe0067, 0xe0062, 0xe007f);
+    expect(pl.normalizePlaylistName(` ${tagsOnly} `)).toBeNull();
+  });
+
   it("createPlaylist stores the normalised name and rejects empty ones", async () => {
     const p = await pl.createPlaylist(db, "  road\ntrip  ");
     expect(p.name).toBe("road trip");

@@ -14,23 +14,23 @@ export class PlaylistNameError extends Error {
   }
 }
 
+// Invisible format characters (Cf) other than the ones emoji and some scripts need: ZWNJ,
+// ZWJ, and the tag characters U+E0020-E007F that spell out the England/Scotland/Wales flags.
+const DROPPED_FORMAT = /[^\P{Cf}\u200c\u200d\u{E0020}-\u{E007F}]/gu;
+const KEPT_FORMAT = /[\u200c\u200d\u{E0020}-\u{E007F}]/gu;
+
 /**
  * Trim, collapse runs of control characters (newlines, tabs, ...) and spaces into a
  * single space, and cap at PLAYLIST_NAME_MAX characters. Returns null when nothing
  * is left, so the UI can disable submit with the same rule the repo enforces.
  */
-const ZWJ = String.fromCharCode(0x200d);
-const ZWNJ = String.fromCharCode(0x200c);
-
 export function normalizePlaylistName(name: string): string | null {
   const clean = String(name ?? "")
-    // Drop invisible format characters (zero-width space, BOM, direction marks...), but
-    // keep the joiners that emoji sequences and some scripts need.
-    .replace(/\p{Cf}/gu, (c) => (c === ZWJ || c === ZWNJ ? c : ""))
+    .replace(DROPPED_FORMAT, "")
     .replace(/[\p{Cc}\p{Zl}\p{Zp} ]+/gu, " ")
     .trim();
-  // A name made only of joiners and spaces is still empty.
-  if (!clean.split(ZWJ).join("").split(ZWNJ).join("").trim()) return null;
+  // A name made only of joiners, tags and spaces is still empty.
+  if (!clean.replace(KEPT_FORMAT, "").trim()) return null;
   return graphemes(clean).slice(0, PLAYLIST_NAME_MAX).join("").trimEnd();
 }
 
