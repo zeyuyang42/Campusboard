@@ -9,7 +9,8 @@ import { useTrackActions } from "../lib/useTrackActions";
 import { useMenu } from "../ui/menu";
 import { useAlbumMutations } from "../api/queries";
 
-export function AlbumCard({ album, showArtist = true }: { album: Album; showArtist?: boolean }) {
+/** `detail` replaces the release year under the title (e.g. a play count); "" shows nothing there. */
+export function AlbumCard({ album, showArtist = true, detail }: { album: Album; showArtist?: boolean; detail?: string }) {
   const playTracks = usePlayer((s) => s.playTracks);
   const actions = useTrackActions();
   const { remove, refresh } = useAlbumMutations();
@@ -28,7 +29,7 @@ export function AlbumCard({ album, showArtist = true }: { album: Album; showArti
     if ("items" in content) content.items.splice(content.items.length - 2, 0, { label: "Refresh from Bandcamp", onSelect: () => refresh.mutate(album.id) });
     useMenu.getState().show(at, content);
   };
-  const year = yearOf(album.release_date);
+  const second = detail ?? yearOf(album.release_date);
   return (
     <Link className="card" to={`/album/${album.id}`} onContextMenu={menu}>
       <div className="art">
@@ -39,7 +40,7 @@ export function AlbumCard({ album, showArtist = true }: { album: Album; showArti
         )}
       </div>
       <div className="title" title={album.title}>{album.title}</div>
-      <div className="sub meta">{showArtist && <span>{album.artist_name}</span>}{year && <span>{year}</span>}</div>
+      <div className="sub meta">{showArtist && <span>{album.artist_name}</span>}{second && <span>{second}</span>}</div>
     </Link>
   );
 }

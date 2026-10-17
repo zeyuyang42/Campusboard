@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useParams } from "react-router-dom";
 import { repos } from "@bc/core";
-import { useAlbums, useArtists, useLibraryView, useTracks, type LibraryView } from "../api/queries";
+import { useAlbums, useArtists, useLibraryView, useRecentlyPlayed, useTracks, type LibraryView } from "../api/queries";
 import { useUi } from "../ui/store";
 import { friendlyError } from "../lib/errors";
+import { formatPlays } from "../lib/format";
 import { AlbumCard } from "../components/AlbumCard";
 import { TrackList, PlayPauseAll } from "../components/TrackList";
 
@@ -31,7 +32,7 @@ const FILTER_EMPTY: Record<string, string> = {
 const FILTER_NAME: Record<string, string> = { purchased: "your purchases", wishlist: "your wishlist" };
 
 // Offered in ALBUM_SORTS order; a new sort in core needs a label here.
-const SORT_LABELS: Record<repos.AlbumSort, string> = { added: "Date added", artist: "Artist", title: "Album title", release: "Release date" };
+const SORT_LABELS: Record<repos.AlbumSort, string> = { added: "Date added", played: "Recently played", plays: "Most played", artist: "Artist", title: "Album title", release: "Release date" };
 
 /** `value`, but only after it has stopped changing for `ms`. */
 function useDebounced<T>(value: T, ms: number): T {
@@ -64,7 +65,11 @@ function Albums() {
   return <AlbumGrid sort={view.sort} filter={view.filter} set={set} />;
 }
 
-function AlbumGrid({ sort, filter, set }: LibraryView & { set: (p: Partial<LibraryView>) => void }) {
+function AlbumGrid({ sort: savedSort, filter, set }: LibraryView & { set: (p: Partial<LibraryView>) => void }) {
+  // "Show all" on the Recently played row switches the sort for this visit only; the saved
+  // sort comes back next time, or as soon as a sort is picked from the menu.
+  const [tempSort, setTempSort] = useState<repos.AlbumSort | null>(null);
+  const sort = tempSort ?? savedSort;
   const q = useUi((s) => s.libraryQuery);
   const setQ = useUi((s) => s.setLibraryQuery);
   const term = useDebounced(q, 150).trim();
@@ -73,6 +78,9 @@ function AlbumGrid({ sort, filter, set }: LibraryView & { set: (p: Partial<Libra
   if (isLoading) return <div className="empty">Loading…</div>;
   if (!data?.length && filter === "all" && !term && !q.trim()) return <div className="empty">Your library is empty. Paste a Bandcamp album, track or artist link on the Import page to get started.<br /><Link className="btn primary" to="/import">Go to Import</Link></div>;
   const n = data?.length ?? 0;
+  // The Recently played row sits over the plain library view only: not while filtering, and
+  // not when the grid itself is already ordered by listening.
+  const shelf = filter === "all" && !term && !q.trim() && sort !== "played" && sort !== "plays";
   return (
     <>
       <div className="toolbar">
@@ -86,11 +94,12 @@ function AlbumGrid({ sort, filter, set }: LibraryView & { set: (p: Partial<Libra
           <option value="wishlist">Wishlist</option>
         </select>
         <label className="muted" htmlFor="album-sort">Sort</label>
-        <select id="album-sort" value={sort} onChange={(e) => set({ sort: e.target.value as repos.AlbumSort })}>
+        <select id="album-sort" value={sort} onChange={(e) => { setTempSort(null); set({ sort: e.target.value as repos.AlbumSort }); }}>
           {repos.ALBUM_SORTS.map((s) => <option key={s} value={s}>{SORT_LABELS[s]}</option>)}
         </select>
       </div>
-      {n ? <div className="grid">{data!.map((a) => <AlbumCard key={a.id} album={a} />)}</div>
+      {shelf && <RecentlyPlayed libraryCount={n} onShowAll={() => setTempSort("played")} />}
+      {n ? <div className="grid">{data!.map((a) => <AlbumCard key={a.id} album={a} detail={sort === "plays" ? (a.play_count ? formatPlays(a.play_count) : "") : undefined} />)}</div>
         : term ? (
           <div className="empty">
             Nothing in {FILTER_NAME[filter] ?? "your library"} matches <span className="selectable">“{term}”</span>.<br />
@@ -100,6 +109,51 @@ function AlbumGrid({ sort, filter, set }: LibraryView & { set: (p: Partial<Libra
         )
         : <div className="empty">{FILTER_EMPTY[filter]}<br /><Link className="btn" to="/settings#account">Open Settings</Link></div>}
     </>
+  );
+}
+
+// Must match .grid in styles.css: minmax(168px, 1fr) columns, 18px column gap.
+const CARD_MIN = 168;
+const CARD_GAP = 18;
+
+/** How many grid columns fit in the element's width (at least 1). */
+function useGridColumns() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [cols, setCols] = useState(1);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setCols(Math.max(1, Math.floor((el.clientWidth + CARD_GAP) / (CARD_MIN + CARD_GAP))));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, cols] as const;
+}
+
+/**
+ * The latest played albums as one row of the same grid, cut to what fits: no sideways
+ * scrolling, and no hidden cards for keyboard focus to land on. Nothing until something has
+ * been played, and nothing when the row would hold the whole library (it would only repeat
+ * the grid below).
+ */
+function RecentlyPlayed({ libraryCount, onShowAll }: { libraryCount: number; onShowAll: () => void }) {
+  const { data } = useRecentlyPlayed();
+  const [ref, cols] = useGridColumns();
+  const hidden = !data?.length || data.length >= libraryCount;
+  return (
+    <div ref={ref}>
+      {!hidden && (
+        <section className="shelf" aria-labelledby="recently-played">
+          <div className="shelf-head">
+            <h2 id="recently-played">Recently played</h2>
+            <button className="btn ghost sm" onClick={onShowAll}>Show all</button>
+          </div>
+          <div className="grid">{data!.slice(0, cols).map((a) => <AlbumCard key={a.id} album={a} />)}</div>
+        </section>
+      )}
+    </div>
   );
 }
 
@@ -127,7 +181,7 @@ function Tracks() {
         <FilterInput value={q} onChange={setQ} placeholder="Filter tracks, albums, artists" />
         {data && data.length > 0 && <PlayPauseAll tracks={data} />}
         <span className="spacer" />
-        <span className="muted">{data?.length ?? 0} tracks{!q && data?.length === 500 ? " (showing latest 500)" : ""}</span>
+        <span className="muted">{data?.length ?? 0} track{data?.length === 1 ? "" : "s"}{!q && data?.length === 500 ? " (showing latest 500)" : ""}</span>
       </div>
       {isLoading ? <div className="empty">Loading…</div> : data?.length ? <TrackList tracks={data} showAlbum /> : <div className="empty">No tracks.</div>}
     </>

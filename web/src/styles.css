@@ -139,6 +139,7 @@ h2 { font-family: var(--font-display); font-size: 18px; font-weight: 600; letter
 .segmented button.on { background: var(--surface-hover); }
 
 /* ---------- album grid ---------- */
+/* LibraryPage's Recently played row assumes these column sizes (CARD_MIN, CARD_GAP). */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: var(--card-gap) 18px; }
 .card { display: block; min-width: 0; }
 .card .art { position: relative; aspect-ratio: 1; border-radius: var(--radius-sm); overflow: hidden; background: var(--surface-raised); border: 1px solid var(--line); }
@@ -147,6 +148,12 @@ h2 { font-family: var(--font-display); font-size: 18px; font-weight: 600; letter
 .card:hover .play, .card:focus-within .play { opacity: 1; }
 .card .title { margin-top: 9px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card .sub { color: var(--text-muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Recently played: one row of the same grid, cut to the columns that fit (LibraryPage). */
+.shelf { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
+.shelf-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.shelf-head h2 { margin: 0; }
+.shelf-head .btn { color: var(--text-muted); }
+.shelf-head .btn:hover { color: var(--text); background: none; }
 .card .badge { position: absolute; left: 8px; top: 8px; background: color-mix(in oklab, var(--surface) 75%, transparent); color: var(--text); font-size: 11px; padding: 2px 7px; border-radius: 999px; backdrop-filter: blur(6px); }
 
 /* ---------- album page ---------- */
@@ -179,6 +186,7 @@ details.about-wrap summary { cursor: pointer; color: var(--text-muted); margin-t
 .tracks td.title { white-space: normal; }
 .tracks td.title .sub { color: var(--text-muted); font-size: 12.5px; }
 .tracks td.title .sub a:hover { text-decoration: underline; }
+.tracks td.plays { width: 72px; text-align: right; color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 12.5px; }
 .tracks td.dur { width: 64px; text-align: right; color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 13px; }
 .tracks td.actions { width: 120px; text-align: right; }
 .tracks td.actions .icon-btn { opacity: 0; }

@@ -114,6 +114,19 @@ src-tauri/
   continues (`persist.ts` prevents the close and calls `hide()`), the Dock icon
   reopens it (`RunEvent::Reopen` in lib.rs), Cmd+Q quits. Menu accelerators use
   Cmd so they never fight text fields; plain-key shortcuts stay in `shortcuts.ts`.
+- Hidden window (verified 2026-10-18, selftest `hiddenPlayback`): with the window
+  hidden for 20 s while playing, `document.visibilityState` is `hidden` but
+  `timeupdate` keeps arriving at the normal rate (80 reports, max gap 254 ms), and
+  listened time kept pace with the playhead (20.06 s for 20 s). Longer App Nap
+  periods weren't measured, so `PlayCounter` doesn't rely on frequent reports: a
+  playhead step counts if it fits the wall-clock time since the last report at
+  the current `playbackRate` (+1.5 s slack); anything larger is treated as a seek.
+- Listening history (`plays`): a play counts once per playback after
+  min(50%, 4 min) of listened time, for tracks over 30 s (`services/playRule.ts`).
+  `played_at` is when the play counted, not when the track started, and
+  `seconds_listened` is the listened time at that moment (the threshold plus at
+  most one report's step), not the whole listen. `ix_plays_played_at` is unused
+  so far; it stays because 0005 is applied to existing libraries.
 
 ## Collection sync facts (verified 2026-10-17 with curl against a public profile)
 

@@ -9,6 +9,7 @@ import * as playState from "./db/repos/playState.js";
 import * as jobs from "./db/repos/jobs.js";
 import * as settings from "./db/repos/settings.js";
 import * as palettes from "./db/repos/palettes.js";
+import * as plays from "./db/repos/plays.js";
 import { artUrl, extractPalette, type ArtPalette } from "./palette/index.js";
 import { JobRunner, type ImportRequest, type ImportSelectionRequest } from "./services/jobRunner.js";
 import { cachedFetchText } from "./services/pageCache.js";
@@ -99,6 +100,13 @@ export function createCore(deps: CoreDeps) {
     // playback
     getFreshStreamUrl: (trackId: number, force = false) => getFreshStreamUrl(db, queue, trackId, force),
     playState: () => playState.getPlayState(db),
+    // listening history
+    /** Record one counted play (see services/playRule.ts). Returns the row id, or null if the track is gone. */
+    recordPlay: (trackId: number, seconds: number) => plays.recordPlay(db, trackId, seconds),
+    recentlyPlayed: (limit = 12) => plays.recentlyPlayedAlbums(db, limit),
+    mostPlayed: (limit = 12) => plays.mostPlayedAlbums(db, limit),
+    playCount: () => plays.countPlays(db),
+    clearHistory: () => plays.clearPlays(db),
     savePlayState: (s: PlayState) => playState.setPlayState(db, s),
     // Bandcamp account (the identity cookie is write-only from the UI's side)
     account: () => getAccount(db),

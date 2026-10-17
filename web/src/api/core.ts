@@ -13,6 +13,11 @@ export function bindQueryClient(client: QueryClient) {
   qc = client;
 }
 
+/** Refetch every query whose key starts with one of `prefixes` (for code outside React). */
+export function invalidateQueries(prefixes: string[]) {
+  for (const k of prefixes) void qc?.invalidateQueries({ queryKey: [k] });
+}
+
 /** The app's single data layer: one SQLite file plus rate-limited Bandcamp fetches. */
 export function getCore(): Promise<Core> {
   if (!corePromise) {

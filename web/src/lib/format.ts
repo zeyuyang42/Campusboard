@@ -18,3 +18,5 @@ export function yearOf(d: string | null | undefined): string {
   const t = Date.parse(d);
   return Number.isNaN(t) ? "" : String(new Date(t).getUTCFullYear());
 }
+/** "1 play", "3 plays". */
+export const formatPlays = (n: number) => `${n} play${n === 1 ? "" : "s"}`;

@@ -4,6 +4,9 @@ import { useTheme } from "../theme/store";
 import { appInfo, pickBackgroundImage, pickTextFile, revealDataDir, saveTextFile } from "../lib/files";
 import { isTauri } from "../lib/env";
 import { AccountSettings } from "../components/AccountSettings";
+import { ConfirmButton } from "../components/ConfirmButton";
+import { useClearHistory, usePlayCount } from "../api/queries";
+import { formatPlays } from "../lib/format";
 
 const SHORTCUTS: [string, string][] = [
   ["Space", "Play or pause"], ["← →", "Seek 5 seconds"], ["⇧← ⇧→", "Previous or next track"], ["↑ ↓", "Volume"],
@@ -46,6 +49,8 @@ export function SettingsPage() {
       {notice && <div className={`notice ${notice.kind}`}>{notice.text}</div>}
 
       <AccountSettings />
+
+      <ListeningHistory />
 
       <section>
         <h2>Theme</h2>
@@ -168,6 +173,29 @@ export function SettingsPage() {
         {isTauri && <button className="btn" onClick={() => void revealDataDir()}>Open data folder</button>}
       </section>
     </div>
+  );
+}
+
+function ListeningHistory() {
+  const { data: n } = usePlayCount();
+  const clear = useClearHistory();
+  return (
+    <section id="history">
+      <h2>Listening history</h2>
+      <p className="muted">
+        A track counts as played once you have listened to half of it or four minutes, whichever comes first.
+        History is stored in your local library and feeds Recently played and Most played in the Library.
+      </p>
+      <div className="row">
+        {n ? (
+          <>
+            <span>{formatPlays(n)} recorded</span>
+            <ConfirmButton label="Clear listening history" confirmLabel="Clear history" question={n === 1 ? "Forget the 1 play?" : `Forget all ${n} plays?`} onConfirm={() => clear.mutateAsync().then(() => undefined)} />
+          </>
+        ) : <span className="muted">Nothing recorded yet.</span>}
+      </div>
+      {clear.error && <div className="notice error">Couldn't clear the history. {String((clear.error as Error).message ?? clear.error)}</div>}
+    </section>
   );
 }
 

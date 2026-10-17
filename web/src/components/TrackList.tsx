@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import type { Track } from "@bc/core";
 import { usePlayer } from "../player/store";
-import { formatDuration } from "../lib/format";
+import { formatDuration, formatPlays } from "../lib/format";
 import { useSelection } from "../lib/useSelection";
 import { useRowDrag } from "../lib/useRowDrag";
 import { useTrackActions } from "../lib/useTrackActions";
@@ -56,6 +56,8 @@ export function TrackList({ tracks, showAlbum = false, useTrackNum = false, reor
     return actions(ts, { remove: removeOpt, onAlbumPage });
   };
   const selectedTracks = tracks.filter((t) => sel.selected.has(t.id));
+  // The play-count column only exists when some row in this list has been played.
+  const showPlays = tracks.some((t) => t.play_count);
 
   return (
     <>
@@ -93,6 +95,7 @@ export function TrackList({ tracks, showAlbum = false, useTrackNum = false, reor
                   )}
                   {!showAlbum && t.track_artist && <div className="sub">{t.track_artist}</div>}
                 </td>
+                {showPlays && <td className="plays">{t.play_count ? formatPlays(t.play_count) : null}</td>}
                 <td className="dur">{formatDuration(t.duration)}</td>
                 <td className="actions">
                   <button className="icon-btn" title="More" aria-label={`More actions for ${t.title}`} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => openMenuFromEvent(e, menuFor(i))}><MoreIcon /></button>
