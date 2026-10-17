@@ -17,6 +17,7 @@ import { listAlbums } from "../src/db/repos/albums.js";
 import { getSetting } from "../src/db/repos/settings.js";
 import * as jobs from "../src/db/repos/jobs.js";
 import type { Db } from "../src/db/Db.js";
+import { createCore } from "../src/core.js";
 import type { Job } from "../src/types.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -48,10 +49,11 @@ const withV0 = (html: string) => html.replace(/&quot;file&quot;:\{&quot;mp3-128&
 
 interface Call { url: string; method: string; cookie: string | null; body: string | null }
 
+type Route = string | (() => string | Promise<string>);
 /** A fake Bandcamp serving the fixtures; `routes` overrides or adds bodies by URL. */
-function fakeBandcamp(routes: Record<string, string | (() => string)> = {}) {
+function fakeBandcamp(routes: Record<string, Route> = {}) {
   const calls: Call[] = [];
-  const base: Record<string, string | (() => string)> = {
+  const base: Record<string, Route> = {
     [FAN]: () => fanPage(),
     [COLLECTION_API]: () => json("fan-collection-items"),
     [WISHLIST_API]: () => json("fan-wishlist-items"),
@@ -65,7 +67,7 @@ function fakeBandcamp(routes: Record<string, string | (() => string)> = {}) {
     calls.push({ url, method: init.method ?? "GET", cookie: h.Cookie ?? null, body: (init.body as string) ?? null });
     const r = all[url];
     if (r === undefined) return new Response("not here", { status: 404 });
-    return new Response(typeof r === "function" ? r() : r, { status: 200 });
+    return new Response(typeof r === "function" ? await r() : r, { status: 200 });
   };
   return { fetch, calls };
 }
@@ -211,7 +213,7 @@ describe("fetchFanList", () => {
 });
 
 describe("collection sync", () => {
-  function setup(routes?: Record<string, string | (() => string)>) {
+  function setup(routes?: Record<string, Route>) {
     const f = fakeBandcamp(routes);
     const runner = new JobRunner(db, new FetchQueue(f.fetch, 0));
     return { ...f, runner };
@@ -350,6 +352,128 @@ describe("collection sync", () => {
     expect((await listAlbums(db, "title", "purchased")).length).toBe(2);
     await setUsername(db, "someoneelse");
     expect(await listAlbums(db, "title", "purchased")).toEqual([]);
+  });
+
+  it("an expired or removed cookie doesn't empty Purchased when the signed-out view shows nothing", async () => {
+    await setUsername(db, "examplefan");
+    await setIdentityCookie(db, COOKIE);
+    let signedIn = true;
+    const { runner, calls } = setup({
+      // Signed in the private collection is visible; signed out it looks empty.
+      [FAN]: () => signedIn ? fanPage(loggedInAsFan) : fanPage((b) => {
+        b.collection_data = { ...b.collection_data, item_count: 0, sequence: [], last_token: null };
+      }),
+    });
+    expect(await runSync(db, runner)).toMatchObject({ status: "done", error: null });
+    expect(await listAlbums(db, "title", "purchased")).toHaveLength(2);
+
+    signedIn = false; // the cookie expired
+    calls.length = 0;
+    expect(await runSync(db, runner)).toMatchObject({ status: "done" });
+    expect(calls[0]).toMatchObject({ url: FAN, cookie: `identity=${COOKIE}` });
+    expect(await listAlbums(db, "title", "purchased")).toHaveLength(2);
+    expect((await getAccount(db)).lastSync).toMatchObject({ cookie: "rejected", complete: false, authenticated: true });
+
+    // Rejected once is not rejected for good: the fan page still gets the cookie and the
+    // next sync finds it working again. Album pages don't get it while it looks rejected.
+    expect(await identityHeaders(db, CUSTOM_ALBUM_SUB)).toEqual({});
+    calls.length = 0;
+    await runSync(db, runner);
+    expect(calls[0]).toMatchObject({ url: FAN, cookie: `identity=${COOKIE}` });
+
+    // The user removes the cookie: still signed out, still nothing removed.
+    await setIdentityCookie(db, null);
+    calls.length = 0;
+    await runSync(db, runner);
+    expect(calls.every((c) => c.cookie === null)).toBe(true);
+    expect(await listAlbums(db, "title", "purchased")).toHaveLength(2);
+
+    // A signed-in sync may remove again.
+    await setIdentityCookie(db, COOKIE);
+    signedIn = true;
+    await runSync(db, runner);
+    expect((await getAccount(db)).lastSync).toMatchObject({ cookie: "ok", complete: true });
+  });
+
+  it("removing the account mid-sync cancels it and nothing it was about to write comes back", async () => {
+    await setUsername(db, "examplefan");
+    let release!: () => void;
+    let reached!: () => void;
+    const atApi = new Promise<void>((r) => { reached = r; });
+    const gate = new Promise<void>((r) => { release = r; });
+    const { runner, calls } = setup({ [COLLECTION_API]: async () => { reached(); await gate; return json("fan-collection-items"); } });
+    const job = await runner.enqueueSync();
+    await atApi;
+    await clearAccount(db);
+    release();
+    for (let i = 0; i < 100 && (runner as unknown as { running: boolean }).running; i++) await new Promise((r) => setTimeout(r, 5));
+    expect((await jobs.getJob(db, job.id))!.status).toBe("cancelled");
+    expect(await db.get("SELECT 1 AS x FROM fan_items")).toBeNull();
+    expect((await getAccount(db)).lastSync).toBeNull();
+    expect(calls.map((c) => c.url)).toEqual([FAN, COLLECTION_API]);
+  });
+
+  it("the listing phase's writes are no-ops once the job is cancelled", async () => {
+    await setUsername(db, "examplefan");
+    const job = await jobs.createJob(db, "collection", FAN, []);
+    await jobs.transitionJob(db, job.id, ["queued"], "cancelled");
+    const items = parseFanPage(fixture("fan")).collection.items;
+    const { upsertFanItems, removeUnseen } = await import("../src/db/repos/fanItems.js");
+    await upsertFanItems(db, "collection", items, job.id);
+    expect(await db.get("SELECT 1 AS x FROM fan_items")).toBeNull();
+    const { setSettingWhileJobRuns } = await import("../src/db/repos/settings.js");
+    expect(await setSettingWhileJobRuns(db, "bandcamp_sync", { x: 1 }, job.id)).toBe(false);
+    await removeUnseen(db, "collection", job.id);
+  });
+
+  it("changing the username cancels a queued sync of the old one", async () => {
+    await setUsername(db, "examplefan");
+    const job = await jobs.createJob(db, "collection", FAN, []);
+    await setUsername(db, "someoneelse");
+    expect((await jobs.getJob(db, job.id))!.status).toBe("cancelled");
+  });
+
+  it("doesn't re-import a synced album the user removed, until they import it again", async () => {
+    await setUsername(db, "examplefan");
+    const { runner, calls } = setup();
+    await runSync(db, runner);
+    const custom = (await listAlbums(db)).find((a) => a.url === CUSTOM_ALBUM)!;
+    const { deleteAlbum } = await import("../src/db/repos/albums.js");
+    await deleteAlbum(db, custom.id);
+    calls.length = 0;
+    expect(await runSync(db, runner)).toMatchObject({ status: "done", total: 0 });
+    expect(calls.map((c) => c.url)).toEqual([FAN, COLLECTION_API]);
+    // Removing the album holding a wishlisted track dismisses the track too.
+    const album = (await listAlbums(db)).find((a) => a.url === ALBUM)!;
+    await deleteAlbum(db, album.id);
+    calls.length = 0;
+    await runSync(db, runner);
+    expect(calls.map((c) => c.url)).toEqual([FAN, COLLECTION_API]);
+    // Importing it by hand clears the dismissal; it stays marked Purchased.
+    const { upsertTralbum } = await import("../src/services/importService.js");
+    await upsertTralbum(db, parseTralbumPage(fixture("custom-album"), 0));
+    expect(await db.get("SELECT 1 AS x FROM fan_dismissed WHERE bandcamp_id = 2164502333")).toBeNull();
+    expect((await listAlbums(db, "title", "purchased")).map((a) => a.url)).toEqual([CUSTOM_ALBUM]);
+  });
+
+  it("a saved cookie shows as unchecked right away, even after a sync without one", async () => {
+    await setUsername(db, "examplefan");
+    await runSync(db, setup().runner);
+    expect((await getAccount(db)).lastSync?.cookie).toBe("none");
+    expect((await setIdentityCookie(db, COOKIE)).lastSync?.cookie).toBe("unchecked");
+    expect((await setIdentityCookie(db, null)).lastSync?.cookie).toBe("none");
+  });
+
+  it("core's generic settings API refuses the account, cookie and sync status", async () => {
+    const core = createCore({ db, fetch: fakeBandcamp().fetch });
+    await setIdentityCookie(db, COOKIE);
+    for (const key of ["bandcamp_identity", "bandcamp_sync", "bandcamp_account"]) {
+      await expect(core.getSetting(key)).rejects.toThrow(/account functions/);
+      await expect(core.setSetting(key, "x")).rejects.toThrow(/account functions/);
+    }
+    await core.setSetting("theme", { a: 1 });
+    expect(await core.getSetting("theme")).toEqual({ a: 1 });
+    expect(await core.account()).toEqual({ username: null, hasCookie: true, lastSync: null });
   });
 
   it("returns the running sync instead of starting a second one", async () => {

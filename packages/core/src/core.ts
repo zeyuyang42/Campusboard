@@ -19,7 +19,7 @@ import { vacuumOrphans } from "./services/importService.js";
 import { prunePageCache } from "./services/pageCache.js";
 import { ART_FETCH_TIMEOUT_MS, CHALLENGE_SETTING_KEY, RATE_LIMIT_MS } from "./config.js";
 import { ChallengeGate, type ChallengeState } from "./scrape/challenge.js";
-import { clearAccount, getAccount, setIdentityCookie, setUsername } from "./services/account.js";
+import { clearAccount, getAccount, setIdentityCookie, setUsername, PRIVATE_SETTING_KEYS } from "./services/account.js";
 import { recomputeOwned } from "./db/repos/fanItems.js";
 import type { BrowseResult, PlayState, SearchResult } from "./types.js";
 
@@ -106,8 +106,9 @@ export function createCore(deps: CoreDeps) {
     setIdentityCookie: (cookie: string | null) => setIdentityCookie(db, cookie),
     clearAccount: () => clearAccount(db),
     // settings
-    getSetting: <T>(key: string) => settings.getSetting<T>(db, key),
-    setSetting: (key: string, value: unknown) => settings.setSetting(db, key, value),
+    // The account, cookie and sync status have their own functions above; the generic path refuses them.
+    getSetting: async <T>(key: string) => { refusePrivate(key); return settings.getSetting<T>(db, key); },
+    setSetting: async (key: string, value: unknown) => { refusePrivate(key); return settings.setSetting(db, key, value); },
     vacuumOrphans: () => vacuumOrphans(db),
     /** Raw colors for a piece of art, cached per art id. Fetched directly (not through the import queue). */
     getArtPalette: async (artId: number): Promise<ArtPalette | null> => {
@@ -133,6 +134,10 @@ export function createCore(deps: CoreDeps) {
       return p;
     },
   };
+}
+
+function refusePrivate(key: string): void {
+  if (PRIVATE_SETTING_KEYS.has(key)) throw new Error(`Setting "${key}" is only available through the account functions`);
 }
 
 export type Core = ReturnType<typeof createCore>;

@@ -2,26 +2,55 @@ import type { Db } from "../Db.js";
 import { valuesList } from "../Db.js";
 import type { FanItem, FanList } from "../../scrape/fan.js";
 
+/** SQL guard: the sync job is still running (not cancelled by removing or changing the account). */
+const JOB_RUNNING = "EXISTS (SELECT 1 FROM jobs WHERE id = ? AND status = 'running')";
+
 /**
  * Record that `items` are on `list` as of sync job `jobId`. Chunked single statements,
- * each safe to repeat. Call before removeUnseen, and recomputeOwned after both.
+ * each safe to repeat and each a no-op once the job is cancelled, so removing the account
+ * mid-sync can't be undone by a write already on its way. Call before removeUnseen, and
+ * recomputeOwned after both.
  */
 export async function upsertFanItems(db: Db, list: FanList, items: FanItem[], jobId: number): Promise<void> {
   const COLS = 8;
   for (let i = 0; i < items.length; i += 100) {
     const chunk = items.slice(i, i + 100);
     await db.run(
-      `INSERT INTO fan_items (list, item_type, bandcamp_id, url, fetch_url, title, artist, sync_job) VALUES ${valuesList(chunk.length, COLS)}
+      `INSERT INTO fan_items (list, item_type, bandcamp_id, url, fetch_url, title, artist, sync_job)
+       SELECT * FROM (VALUES ${valuesList(chunk.length, COLS)}) WHERE ${JOB_RUNNING}
        ON CONFLICT(list, item_type, bandcamp_id) DO UPDATE SET
          url = excluded.url, fetch_url = excluded.fetch_url, title = excluded.title, artist = excluded.artist, sync_job = excluded.sync_job`,
-      chunk.flatMap((it) => [list, it.item_type, it.bandcamp_id, it.url, it.fetch_url, it.title, it.artist, jobId]),
+      [...chunk.flatMap((it) => [list, it.item_type, it.bandcamp_id, it.url, it.fetch_url, it.title, it.artist, jobId]), jobId],
     );
   }
 }
 
-/** Drop items a complete sync (job `jobId`) no longer saw on `list`. */
+/** Drop items sync job `jobId` no longer saw on `list` (only while that job still runs). */
 export async function removeUnseen(db: Db, list: FanList, jobId: number): Promise<void> {
-  await db.run("DELETE FROM fan_items WHERE list = ? AND sync_job != ?", [list, jobId]);
+  await db.run(`DELETE FROM fan_items WHERE list = ? AND sync_job != ? AND ${JOB_RUNNING}`, [list, jobId, jobId]);
+}
+
+/**
+ * Remember that the synced items an album holds were removed from the library, so syncs
+ * stop importing them. Runs before the album's delete (its tracks are needed here).
+ */
+export async function dismissAlbum(db: Db, albumId: number): Promise<void> {
+  await db.run(
+    `INSERT OR IGNORE INTO fan_dismissed (item_type, bandcamp_id)
+     SELECT f.item_type, f.bandcamp_id FROM fan_items f JOIN albums a ON a.id = ?
+     WHERE (f.item_type = a.item_type AND f.bandcamp_id = a.bandcamp_id)
+        OR (f.item_type = 'track' AND f.bandcamp_id IN (SELECT track_id FROM tracks WHERE album_id = a.id))`,
+    [albumId],
+  );
+}
+
+/** An explicit import brings a release back: forget its dismissal and its tracks'. */
+export async function undismiss(db: Db, itemType: string, bandcampId: number, trackIds: number[]): Promise<void> {
+  await db.run(
+    `DELETE FROM fan_dismissed WHERE (item_type = ? AND bandcamp_id = ?)
+     ${trackIds.length ? `OR (item_type = 'track' AND bandcamp_id IN (${trackIds.map(() => "?").join(",")}))` : ""}`,
+    [itemType, bandcampId, ...trackIds],
+  );
 }
 
 /** Forget the account's lists (username changed or cleared). Follow with recomputeOwned. */
@@ -43,7 +72,7 @@ export async function countFanItems(db: Db): Promise<Record<FanList, number>> {
 }
 
 /**
- * Fetch URLs of synced items not yet in the library, purchases first. A track counts as
+ * Fetch URLs of synced items not yet in the library and not removed from it by the user, purchases first. A track counts as
  * present when its track already lives in any album (a single-track page adds nothing then).
  */
 export async function missingFetchUrls(db: Db): Promise<string[]> {
@@ -51,6 +80,7 @@ export async function missingFetchUrls(db: Db): Promise<string[]> {
     `SELECT fetch_url, MIN(CASE list WHEN 'collection' THEN 0 ELSE 1 END) AS pri, MIN(rowid) AS ord FROM fan_items f
      WHERE NOT EXISTS (SELECT 1 FROM albums a WHERE a.item_type = f.item_type AND a.bandcamp_id = f.bandcamp_id)
        AND NOT (f.item_type = 'track' AND EXISTS (SELECT 1 FROM tracks t WHERE t.track_id = f.bandcamp_id))
+       AND NOT EXISTS (SELECT 1 FROM fan_dismissed d WHERE d.item_type = f.item_type AND d.bandcamp_id = f.bandcamp_id)
      GROUP BY fetch_url ORDER BY pri, ord`,
   );
   return rows.map((r) => r.fetch_url);

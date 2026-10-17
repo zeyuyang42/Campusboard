@@ -156,6 +156,13 @@ src-tauri/
   through `services/account.ts` (`identityHeaders`), which sends it only to https
   bandcamp.com and `*.bandcamp.com`, never to a custom domain. Never log it, put it in
   an error message, a job row, the page cache or the self-test output.
+  `core.getSetting`/`setSetting` refuse the account, cookie and sync-status keys. A
+  cookie a sync found rejected still goes to the fan page (so it can recover) but not
+  to album pages. Once any sync was signed in, only a signed-in sync removes items
+  from the lists, and removing or changing the account cancels the sync job first
+  (its list writes are conditional on the job still running).
+- Albums the user removes are recorded in `fan_dismissed` and not re-imported by a
+  sync; importing the release by hand clears that.
 - Theme files are data: `applyTheme` only ever calls `style.setProperty`. Never
   interpolate theme values into CSS text. New theme fields go through
   `ThemeSchema` with bounds, and bump `version` only for breaking changes.

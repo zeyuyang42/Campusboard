@@ -1,6 +1,7 @@
 import type { Db } from "../db/Db.js";
 import { now, valuesList } from "../db/Db.js";
 import { upsertArtist } from "../db/repos/artists.js";
+import { undismiss } from "../db/repos/fanItems.js";
 import type { ParsedTralbum } from "../scrape/parseTralbum.js";
 
 /**
@@ -39,6 +40,7 @@ export async function upsertTralbum(db: Db, p: ParsedTralbum): Promise<number> {
     [p.bandcamp_id, p.item_type, artistId, p.title, p.url, p.art_id, p.release_date, p.about, p.credits, JSON.stringify(p.tags), p.is_preorder ? 1 : 0, now(), p.item_type, p.bandcamp_id],
   );
   const albumId = album!.id;
+  await undismiss(db, p.item_type, p.bandcamp_id, p.tracks.map((t) => t.track_id));
 
   const COLS = 11;
   for (let i = 0; i < p.tracks.length; i += 100) {

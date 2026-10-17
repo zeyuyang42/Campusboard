@@ -25,6 +25,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0003_fan_items.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 4,
+            description: "releases removed from the library that a sync must not re-import",
+            sql: include_str!("../migrations/0004_fan_dismissed.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

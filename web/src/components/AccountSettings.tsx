@@ -44,14 +44,14 @@ export function AccountSettings() {
   return (
     <section id="account">
       <h2>Bandcamp account</h2>
-      <p className="muted">Bring what you bought and your wishlist into the library. A public collection needs only your username.</p>
+      <p className="muted">Bring what you bought and your wishlist into the library. A public collection needs only your username. Albums you remove from the library stay out on later syncs.</p>
       <div className="field-row">
         <label>Username
           <input value={username} placeholder="bandcamp.com/username" spellCheck={false} autoCapitalize="off" autoCorrect="off"
             onChange={(e) => setUsernameText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !busy) void syncNow(); }} />
         </label>
         <label>Identity cookie <span className="muted">optional</span>
-          <input type="password" value={cookie} autoComplete="off" spellCheck={false}
+          <input type="password" value={cookie} autoComplete="new-password" spellCheck={false}
             placeholder={account?.hasCookie ? "Saved. Paste a new one to replace it" : "Value of the identity cookie"}
             onChange={(e) => setCookieText(e.target.value)} />
         </label>
@@ -75,7 +75,9 @@ export function AccountSettings() {
         <p className="muted">
           Last synced {new Date(last.at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}:{" "}
           {plural(last.collection, "purchase", "purchases")} and {plural(last.wishlist, "wishlist item", "wishlist items")}.
-          {!last.complete && " Bandcamp stopped paging early, so items that left your lists were kept."}
+          {!last.complete && (last.authenticated && last.cookie !== "ok"
+            ? " This sync couldn't sign in, so nothing was removed from Purchased or Wishlist."
+            : " Bandcamp stopped paging early, so items that left your lists were kept.")}
         </p>
       )}
       {cookieLine && <p className={cookieLine.error ? "error" : "muted"}>{cookieLine.text}</p>}

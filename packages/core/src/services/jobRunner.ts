@@ -8,10 +8,10 @@ import { parseTralbumPage } from "../scrape/parseTralbum.js";
 import { ScrapeError } from "../scrape/errors.js";
 import { upsertTralbum } from "./importService.js";
 import { cachedFetchText } from "./pageCache.js";
-import { ACCOUNT_KEY, IDENTITY_KEY, SYNC_KEY, identityHeaders } from "./account.js";
+import { ACCOUNT_KEY, SYNC_KEY, identityHeaders } from "./account.js";
 import { fetchFanList, normalizeFanUsername, parseFanPage, fanPageUrl, type FanList, type FanListResult } from "../scrape/fan.js";
 import * as fan from "../db/repos/fanItems.js";
-import { getSetting, setSetting } from "../db/repos/settings.js";
+import { getSetting, setSettingWhileJobRuns } from "../db/repos/settings.js";
 import type { CookieStatus, Job, SyncSummary } from "../types.js";
 
 /** Thrown inside a job when it was cancelled while waiting; process() swallows it. */
@@ -259,36 +259,47 @@ export class JobRunner {
       return r;
     };
     const pageUrl = fanPageUrl(username);
-    const headers = await identityHeaders(this.db, pageUrl);
+    // The fan page always gets a stored cookie, even one the last sync found rejected,
+    // so a cookie that only looked signed-out once can come back on its own.
+    const headers = await identityHeaders(this.db, pageUrl, { revalidate: true });
     const page = parseFanPage(await fetch(pageUrl, { headers }));
-    const hasCookie = !!(await getSetting<string>(this.db, IDENTITY_KEY));
     const prev = await getSetting<SyncSummary>(this.db, SYNC_KEY);
     // Recognised as this fan: the cookie is used for the API too (private collections).
-    const cookie: CookieStatus = !hasCookie ? "none"
-      : headers.Cookie ? (page.own_page ? "ok" : page.logged_in ? "other_account" : "rejected")
-      : (prev?.cookie ?? "rejected");
+    const cookie: CookieStatus = !headers.Cookie ? "none" : page.own_page ? "ok" : page.logged_in ? "other_account" : "rejected";
     const apiHeaders = cookie === "ok" ? headers : {};
+    // Once a sync saw the lists signed in, a signed-out read may show less (a private
+    // collection looks empty), so only another signed-in read may remove items.
+    const everAuthenticated = !!prev?.authenticated || prev?.cookie === "ok";
+    const mayRemove = cookie === "ok" || !everAuthenticated;
 
     const apiFetch = (u: string, i: RequestInit) => fetch(u, { method: i.method, headers: i.headers as Record<string, string>, body: i.body as string });
     const lists: Record<FanList, FanListResult> = {
       collection: await fetchFanList(apiFetch, page.fan_id, "collection", page.collection, apiHeaders),
       wishlist: await fetchFanList(apiFetch, page.fan_id, "wishlist", page.wishlist, apiHeaders),
     };
-    if ((await jobs.jobStatus(this.db, job.id)) === "cancelled") throw new JobCancelled();
-    await stillThisAccount();
+    const stillRunning = async () => {
+      if ((await jobs.jobStatus(this.db, job.id)) !== "running") throw new JobCancelled();
+      await stillThisAccount();
+    };
+    await stillRunning();
 
+    // Each write below is conditional on the job still running (removing or changing the
+    // account cancels it first), so a removal that lands in between can't be undone.
     for (const list of ["collection", "wishlist"] as const) await fan.upsertFanItems(this.db, list, lists[list].items, job.id);
-    for (const list of ["collection", "wishlist"] as const) if (lists[list].complete) await fan.removeUnseen(this.db, list, job.id);
+    const removed = { collection: mayRemove && lists.collection.complete, wishlist: mayRemove && lists.wishlist.complete };
+    for (const list of ["collection", "wishlist"] as const) if (removed[list]) await fan.removeUnseen(this.db, list, job.id);
     await fan.recomputeOwned(this.db);
+    await stillRunning();
     // Item URLs come from Bandcamp's JSON: queue only ones that pass the same check as pasted links.
     const urls = [...new Set((await fan.missingFetchUrls(this.db)).map(safeReleaseUrl).filter((u): u is string => !!u))];
     if (urls.length) await jobs.addJobItems(this.db, job.id, urls);
     const counts = await fan.countFanItems(this.db);
     const summary: SyncSummary = {
       at: new Date().toISOString(), username: page.username, collection: counts.collection, wishlist: counts.wishlist,
-      queued: urls.length, complete: lists.collection.complete && lists.wishlist.complete, cookie, job_id: job.id,
+      queued: urls.length, complete: removed.collection && removed.wishlist, cookie,
+      authenticated: everAuthenticated || cookie === "ok", job_id: job.id,
     };
-    await setSetting(this.db, SYNC_KEY, summary);
+    if (!(await setSettingWhileJobRuns(this.db, SYNC_KEY, summary, job.id))) throw new JobCancelled();
     this.onChange();
     return { queued: urls.length, note: COOKIE_NOTES[cookie] ?? null };
   }

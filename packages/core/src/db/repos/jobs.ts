@@ -66,6 +66,12 @@ export async function setItemResult(db: Db, itemId: number, jobId: number, ok: b
   await db.run(`UPDATE jobs SET ${ok ? "done = done + 1" : "failed = failed + 1"}, updated_at = ? WHERE id = ?`, [now(), jobId]);
 }
 
+/** Cancel every queued or running job of one kind, in one statement. True if any was. */
+export async function cancelJobsOfKind(db: Db, kind: JobKind): Promise<boolean> {
+  const r = await db.run("UPDATE jobs SET status = 'cancelled', updated_at = ? WHERE kind = ? AND status IN ('queued','running')", [now(), kind]);
+  return r.changes > 0;
+}
+
 export async function resetStaleJobs(db: Db): Promise<void> {
   await db.run("UPDATE jobs SET status = 'queued' WHERE status = 'running'");
   await db.run("UPDATE job_items SET status = 'queued' WHERE status = 'running'");

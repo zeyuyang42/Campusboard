@@ -166,9 +166,15 @@ export interface SyncSummary {
   wishlist: number;
   /** Items the sync queued for import (not yet in the library). */
   queued: number;
-  /** Every page of both lists was read (otherwise departed items were kept). */
+  /** Departed items were removed: both lists were read in full, with the access the last authenticated sync had. */
   complete: boolean;
   cookie: CookieStatus;
+  /**
+   * Some sync of this account was read with an accepted cookie. Sticky until the account
+   * is removed: from then on only an authenticated sync may remove items, so an expired
+   * cookie can't empty Purchased just because the signed-out view shows less.
+   */
+  authenticated: boolean;
   job_id: number;
 }
 

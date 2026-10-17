@@ -7,6 +7,7 @@ import type { Db } from "@bc/core";
 import m1 from "../../../src-tauri/migrations/0001_init.sql?raw";
 import m2 from "../../../src-tauri/migrations/0002_settings.sql?raw";
 import m3 from "../../../src-tauri/migrations/0003_fan_items.sql?raw";
+import m4 from "../../../src-tauri/migrations/0004_fan_dismissed.sql?raw";
 
 export async function openBrowserDb(): Promise<Db> {
   const SQL = await initSqlJs({ locateFile: () => wasmUrl });
@@ -15,6 +16,7 @@ export async function openBrowserDb(): Promise<Db> {
   db.exec(m1);
   db.exec(m2);
   db.exec(m3);
+  db.exec(m4);
   const bind = (params: unknown[]) => params.map((p) => (p === undefined ? null : p)) as (string | number | null | Uint8Array)[];
   const api: Db = {
     async select<T>(sql: string, params: unknown[] = []): Promise<T[]> {

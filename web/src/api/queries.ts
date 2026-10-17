@@ -52,9 +52,9 @@ export function useAccountMutations() {
   const inv = useInvalidateLibrary();
   const done = () => { void qc.invalidateQueries({ queryKey: keys.account }); };
   return {
-    setUsername: useMutation({ mutationFn: async (username: string) => (await core()).setAccountUsername(username), onSuccess: () => { done(); inv(); } }),
+    setUsername: useMutation({ mutationFn: async (username: string) => (await core()).setAccountUsername(username), onSuccess: () => { done(); inv(); void qc.invalidateQueries({ queryKey: keys.jobs }); } }),
     setCookie: useMutation({ mutationFn: async (cookie: string | null) => (await core()).setIdentityCookie(cookie), onSuccess: done }),
-    clear: useMutation({ mutationFn: async () => (await core()).clearAccount(), onSuccess: () => { done(); inv(); } }),
+    clear: useMutation({ mutationFn: async () => (await core()).clearAccount(), onSuccess: () => { done(); inv(); void qc.invalidateQueries({ queryKey: keys.jobs }); } }),
     sync: useMutation({ mutationFn: async () => (await core()).syncCollection(), onSuccess: () => { void qc.invalidateQueries({ queryKey: keys.jobs }); } }),
   };
 }

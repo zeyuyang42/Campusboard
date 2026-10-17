@@ -1,4 +1,5 @@
 import type { Db } from "../Db.js";
+import { dismissAlbum } from "./fanItems.js";
 import type { Album, AlbumWithTracks, Track } from "../../types.js";
 
 export interface AlbumRow extends Omit<Album, "tags" | "is_preorder" | "owned" | "wishlisted"> {
@@ -55,6 +56,8 @@ export async function getAlbumWithTracks(db: Db, id: number): Promise<AlbumWithT
 }
 
 export async function deleteAlbum(db: Db, id: number): Promise<boolean> {
+  // A purchased or wishlisted release the user removes stays out on later syncs.
+  await dismissAlbum(db, id);
   const r = await db.run("DELETE FROM albums WHERE id = ?", [id]);
   await db.run("DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM albums)");
   return r.changes > 0;

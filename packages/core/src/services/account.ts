@@ -1,6 +1,7 @@
 import type { Db } from "../db/Db.js";
 import { deleteSetting, getSetting, setSetting } from "../db/repos/settings.js";
 import { clearFanItems, recomputeOwned } from "../db/repos/fanItems.js";
+import { cancelJobsOfKind } from "../db/repos/jobs.js";
 import { mayCarryIdentity, normalizeFanUsername } from "../scrape/fan.js";
 import { ScrapeError } from "../scrape/errors.js";
 import type { AccountInfo, SyncSummary } from "../types.js";
@@ -37,8 +38,13 @@ export async function getAccount(db: Db): Promise<AccountInfo> {
   return { username: acc?.username ?? null, hasCookie: !!identity, lastSync: last ?? null };
 }
 
-/** Forget what was synced for a previous account, in an order that leaves flags consistent. */
+/**
+ * Forget what was synced for a previous account, in an order that leaves flags consistent.
+ * The sync job is cancelled first: its writes are conditional on still running, so nothing
+ * it does afterwards can bring the lists or the summary back.
+ */
 async function forgetSync(db: Db): Promise<void> {
+  await cancelJobsOfKind(db, "collection");
   await deleteSetting(db, SYNC_KEY);
   await clearFanItems(db);
   await recomputeOwned(db);
@@ -53,33 +59,44 @@ export async function setUsername(db: Db, input: string): Promise<AccountInfo> {
   return getAccount(db);
 }
 
-/** Store the identity cookie (validated) or remove it with null. Marks the cookie as not yet checked. */
+/** Store the identity cookie (validated) or remove it with null. A stored cookie counts as not yet checked. */
 export async function setIdentityCookie(db: Db, input: string | null): Promise<AccountInfo> {
-  if (input === null || !input.trim()) await deleteSetting(db, IDENTITY_KEY);
+  const removing = input === null || !input.trim();
+  if (removing) await deleteSetting(db, IDENTITY_KEY);
   else await setSetting(db, IDENTITY_KEY, normalizeIdentityCookie(input));
   const last = await getSetting<SyncSummary>(db, SYNC_KEY);
-  if (last && last.cookie !== "none") await setSetting(db, SYNC_KEY, { ...last, cookie: "unchecked" });
+  if (last) await setSetting(db, SYNC_KEY, { ...last, cookie: removing ? "none" : "unchecked" });
   return getAccount(db);
 }
 
-/** Remove the account: the cookie first (the secret), then the synced lists and flags, then the username. */
+/**
+ * Remove the account: stop any sync, then the cookie (the secret), then the synced lists
+ * and flags, then the username.
+ */
 export async function clearAccount(db: Db): Promise<AccountInfo> {
+  await cancelJobsOfKind(db, "collection");
   await deleteSetting(db, IDENTITY_KEY);
   await forgetSync(db);
   await deleteSetting(db, ACCOUNT_KEY);
   return getAccount(db);
 }
 
+/** Settings keys core's generic getSetting/setSetting refuse; they have their own functions here. */
+export const PRIVATE_SETTING_KEYS: ReadonlySet<string> = new Set([ACCOUNT_KEY, IDENTITY_KEY, SYNC_KEY]);
+
 /**
  * The Cookie header for `url`, or nothing. Only https bandcamp.com and *.bandcamp.com
- * get it, never a custom domain (any host can claim to be one), and not once a sync
- * found Bandcamp no longer accepts it.
+ * get it, never a custom domain (any host can claim to be one). Once a sync found that
+ * Bandcamp doesn't accept it, only the fan page still gets it (`revalidate`), so the
+ * next sync can find it working again without sending it with every album fetch.
  */
-export async function identityHeaders(db: Db, url: string): Promise<Record<string, string>> {
+export async function identityHeaders(db: Db, url: string, opts: { revalidate?: boolean } = {}): Promise<Record<string, string>> {
   if (!mayCarryIdentity(url)) return {};
   const identity = await getSetting<string>(db, IDENTITY_KEY);
   if (!identity) return {};
-  const last = await getSetting<SyncSummary>(db, SYNC_KEY);
-  if (last && (last.cookie === "rejected" || last.cookie === "other_account")) return {};
+  if (!opts.revalidate) {
+    const last = await getSetting<SyncSummary>(db, SYNC_KEY);
+    if (last && (last.cookie === "rejected" || last.cookie === "other_account")) return {};
+  }
   return { Cookie: `identity=${identity}` };
 }
