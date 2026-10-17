@@ -2,6 +2,7 @@ export * from "./types.js";
 export * from "./scrape/index.js";
 export * from "./db/Db.js";
 export { upsertTralbum, vacuumOrphans } from "./services/importService.js";
+export { PlayCounter, playThreshold, PLAY_MIN_TRACK_SEC, PLAY_MAX_THRESHOLD_SEC, type CountedPlay } from "./services/playRule.js";
 export { getFreshStreamUrl, refreshAlbum } from "./services/streamService.js";
 export { JobRunner, type ImportRequest, type ImportSelectionRequest } from "./services/jobRunner.js";
 export { cachedFetchText, prunePageCache } from "./services/pageCache.js";

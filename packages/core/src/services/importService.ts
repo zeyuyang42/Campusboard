@@ -64,10 +64,15 @@ export async function upsertTralbum(db: Db, p: ParsedTralbum): Promise<number> {
   return albumId;
 }
 
-/** Remove single-track pseudo-albums whose track moved into a real album, and artists with nothing left. */
+/**
+ * Remove single-track pseudo-albums whose track moved into a real album, artists with nothing
+ * left, and plays of tracks that are gone (the foreign key cascades them; this also catches
+ * deletes made with foreign keys off, e.g. from the sqlite3 CLI).
+ */
 export async function vacuumOrphans(db: Db): Promise<void> {
   await db.run("DELETE FROM albums WHERE item_type = 'track' AND id NOT IN (SELECT DISTINCT album_id FROM tracks)");
   await db.run("DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM albums)");
+  await db.run("DELETE FROM plays WHERE track_id NOT IN (SELECT id FROM tracks)");
 }
 
 async function updateStreamFields(db: Db, p: ParsedTralbum) {

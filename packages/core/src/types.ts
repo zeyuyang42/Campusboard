@@ -34,6 +34,10 @@ export interface Album {
   created_at: string;
   track_count?: number;
   streamable_count?: number;
+  /** Counted plays of the album's tracks (listening history). */
+  play_count?: number;
+  /** UTC `YYYY-MM-DD HH:MM:SS` of the latest play, or null if never played. */
+  last_played_at?: string | null;
 }
 
 export interface Track {
@@ -51,6 +55,8 @@ export interface Track {
   artist_name?: string;
   art_id?: number | null;
   album_url?: string;
+  /** Counted plays (listening history). */
+  play_count?: number;
 }
 
 export interface AlbumWithTracks extends Album {

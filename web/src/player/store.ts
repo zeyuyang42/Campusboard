@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import type { QueueTrack, RepeatMode, Track } from "@bc/core";
+import { PlayCounter, type CountedPlay, type QueueTrack, type RepeatMode, type Track } from "@bc/core";
 import { audioEl } from "./audio";
-import { getCore } from "../api/core";
+import { getCore, invalidateQueries } from "../api/core";
 import { friendlyError } from "../lib/errors";
 
 export type Status = "idle" | "loading" | "playing" | "paused";
@@ -55,6 +55,20 @@ let retriedFor: number | null = null;
 let pendingSeek: number | null = null;
 let loadSeq = 0;
 
+// Listening history: one PlayCounter follows the current playback (rule in core's playRule.ts).
+const plays = new PlayCounter();
+/** A fresh playback of `track` starts now (new source, repeat-one, Previous, play after the end). */
+function startPlayback(track: QueueTrack) {
+  plays.start(track.id, Number.isFinite(audioEl.duration) ? audioEl.duration : track.duration);
+}
+function recordPlay(p: CountedPlay) {
+  void getCore()
+    .then((c) => c.recordPlay(p.trackId, p.seconds))
+    // Counts on track rows, the Library's played sorts and shelf, and Settings' total.
+    .then(() => invalidateQueries(["albums", "album", "tracks", "playlist", "history"]))
+    .catch(() => undefined); // history is best-effort; playback never depends on it
+}
+
 /** Resolve a fresh CDN URL for the track and point the audio element at it. */
 function load(track: QueueTrack, autoplay: boolean, force = false) {
   const seq = ++loadSeq;
@@ -66,6 +80,8 @@ function load(track: QueueTrack, autoplay: boolean, force = false) {
       if (seq !== loadSeq) return; // a newer load superseded this one
       audioEl.src = url;
       audioEl.load();
+      // A retry after a media error continues the same playback; anything else is a fresh one.
+      if (!force || plays.trackId !== track.id) plays.start(track.id, track.duration);
       if (autoplay) await audioEl.play().catch(() => undefined);
     } catch (e) {
       if (seq !== loadSeq) return;
@@ -113,7 +129,11 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     const cur = get().current();
     if (!cur) return;
     if (!audioEl.src) load(cur, true);
-    else void audioEl.play().catch(() => undefined);
+    else {
+      // Play after the queue ended restarts the track from the top: a new playback.
+      if (audioEl.ended) startPlayback(cur);
+      void audioEl.play().catch(() => undefined);
+    }
   },
   pause: () => audioEl.pause(),
   toggle: () => (get().status === "playing" ? get().pause() : get().play()),
@@ -122,6 +142,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     const { queue, index, repeat } = get();
     if (!queue.length) return;
     if (auto && repeat === "one") {
+      startPlayback(queue[index]);
       audioEl.currentTime = 0;
       void audioEl.play().catch(() => undefined);
       return;
@@ -143,6 +164,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     const { queue, index } = get();
     if (!queue.length) return;
     if (audioEl.currentTime > 3 || index === 0) {
+      startPlayback(queue[index]);
       audioEl.currentTime = 0;
       return;
     }
@@ -157,6 +179,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     load(queue[i], true);
   },
   seek: (sec) => {
+    plays.seeked();
     if (Number.isFinite(audioEl.duration)) audioEl.currentTime = Math.max(0, Math.min(sec, audioEl.duration));
     else pendingSeek = sec;
     set({ position: sec });
@@ -235,6 +258,9 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 // ---- audio element wiring ----
 let lastTick = 0;
 audioEl.addEventListener("timeupdate", () => {
+  // Every report feeds listening history; only the store update below is throttled.
+  const counted = plays.progress(audioEl.currentTime);
+  if (counted) recordPlay(counted);
   const now = performance.now();
   if (now - lastTick < 250) return;
   lastTick = now;
@@ -242,12 +268,19 @@ audioEl.addEventListener("timeupdate", () => {
 });
 audioEl.addEventListener("loadedmetadata", () => {
   usePlayer.setState({ duration: audioEl.duration });
+  plays.setDuration(audioEl.duration);
   if (pendingSeek != null) {
+    plays.seeked();
     audioEl.currentTime = pendingSeek;
     pendingSeek = null;
   }
 });
-audioEl.addEventListener("durationchange", () => usePlayer.setState({ duration: audioEl.duration }));
+audioEl.addEventListener("durationchange", () => {
+  usePlayer.setState({ duration: audioEl.duration });
+  plays.setDuration(audioEl.duration);
+});
+// Any jump of the playhead (seek bar, keys, media keys, restore) is not listening.
+audioEl.addEventListener("seeking", () => plays.seeked());
 audioEl.addEventListener("play", () => usePlayer.setState({ status: "playing", error: null }));
 audioEl.addEventListener("playing", () => usePlayer.setState({ status: "playing", error: null }));
 audioEl.addEventListener("pause", () => {

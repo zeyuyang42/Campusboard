@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import type { Track } from "@bc/core";
 import { usePlayer } from "../player/store";
-import { formatDuration } from "../lib/format";
+import { formatDuration, formatPlays } from "../lib/format";
 import { useSelection } from "../lib/useSelection";
 import { useRowDrag } from "../lib/useRowDrag";
 import { useTrackActions } from "../lib/useTrackActions";
@@ -93,6 +93,7 @@ export function TrackList({ tracks, showAlbum = false, useTrackNum = false, reor
                   )}
                   {!showAlbum && t.track_artist && <div className="sub">{t.track_artist}</div>}
                 </td>
+                <td className="plays">{t.play_count ? formatPlays(t.play_count) : null}</td>
                 <td className="dur">{formatDuration(t.duration)}</td>
                 <td className="actions">
                   <button className="icon-btn" title="More" aria-label={`More actions for ${t.title}`} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => openMenuFromEvent(e, menuFor(i))}><MoreIcon /></button>

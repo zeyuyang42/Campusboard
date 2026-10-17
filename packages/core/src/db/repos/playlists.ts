@@ -93,7 +93,8 @@ export async function getPlaylist(db: Db, id: number): Promise<PlaylistWithTrack
   const tracks = (
     await db.select<Omit<PlaylistTrack, "streamable"> & { streamable: number }>(
       `SELECT pt.id AS playlist_track_id, pt.position, t.id, t.track_id, t.album_id, t.title, t.track_num, t.duration,
-              t.track_artist, t.streamable, t.lyrics, al.title AS album_title, al.url AS album_url, al.art_id, ar.name AS artist_name
+              t.track_artist, t.streamable, t.lyrics, al.title AS album_title, al.url AS album_url, al.art_id, ar.name AS artist_name,
+              (SELECT COUNT(*) FROM plays p WHERE p.track_id = t.id) AS play_count
        FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id
        JOIN albums al ON al.id = t.album_id JOIN artists ar ON ar.id = al.artist_id
        WHERE pt.playlist_id = ? ORDER BY pt.position, pt.id`,

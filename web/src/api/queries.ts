@@ -16,6 +16,8 @@ export const keys = {
   search: (q: string) => ["search", q] as const,
   account: ["account"] as const,
   libraryView: ["settings", "library_view"] as const,
+  recentlyPlayed: ["history", "recent"] as const,
+  playCount: ["history", "count"] as const,
 };
 
 const core = getCore;
@@ -55,6 +57,20 @@ export function useLibraryView() {
   };
   return { view: q.data, set };
 }
+/** Albums by latest play, for the Library's Recently played row. */
+export const useRecentlyPlayed = (limit = 12) =>
+  useQuery({ queryKey: [...keys.recentlyPlayed, limit], queryFn: async () => (await core()).recentlyPlayed(limit) });
+/** How many plays the listening history holds. */
+export const usePlayCount = () => useQuery({ queryKey: keys.playCount, queryFn: async () => (await core()).playCount() });
+
+/** Forget all listening history, then refresh everything that shows it. */
+export function useClearHistory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => (await core()).clearHistory(),
+    onSuccess: () => { for (const k of ["history", "albums", "album", "tracks", "playlist"]) void qc.invalidateQueries({ queryKey: [k] }); },
+  });
+}
 export const useAlbum = (id: number) => useQuery({ queryKey: keys.album(id), queryFn: async () => (await core()).album(id), enabled: id > 0 });
 export const useArtists = () => useQuery({ queryKey: keys.artists, queryFn: async () => (await core()).artists() });
 export const useArtist = (id: number) => useQuery({ queryKey: keys.artist(id), queryFn: async () => (await core()).artist(id), enabled: id > 0 });
@@ -76,7 +92,7 @@ export const useChallengeUntil = () =>
 export function useInvalidateLibrary() {
   const qc = useQueryClient();
   return () => {
-    for (const k of ["albums", "album", "artists", "artist", "tracks", "search", "playlists", "playlist"]) void qc.invalidateQueries({ queryKey: [k] });
+    for (const k of ["albums", "album", "artists", "artist", "tracks", "search", "playlists", "playlist", "history"]) void qc.invalidateQueries({ queryKey: [k] });
   };
 }
 

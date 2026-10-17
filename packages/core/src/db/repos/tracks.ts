@@ -19,11 +19,13 @@ export interface TrackRow {
   album_item_type: "album" | "track";
   artist_name: string;
   art_id: number | null;
+  play_count: number;
 }
 
 const TRACK_SELECT = `
   SELECT t.*, al.title AS album_title, al.url AS album_url, al.item_type AS album_item_type,
-         al.art_id AS art_id, ar.name AS artist_name
+         al.art_id AS art_id, ar.name AS artist_name,
+         (SELECT COUNT(*) FROM plays p WHERE p.track_id = t.id) AS play_count
   FROM tracks t JOIN albums al ON al.id = t.album_id JOIN artists ar ON ar.id = al.artist_id`;
 
 export function getTrackRow(db: Db, id: number): Promise<TrackRow | null> {

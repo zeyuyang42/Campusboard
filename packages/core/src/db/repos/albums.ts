@@ -16,10 +16,16 @@ export function rowToAlbum(r: AlbumRow): Album {
 
 const WISHLISTED = "EXISTS (SELECT 1 FROM fan_items f WHERE f.list = 'wishlist' AND f.item_type = al.item_type AND f.bandcamp_id = al.bandcamp_id)";
 
-const ALBUM_SELECT = `
+// Per album through ix_tracks_album and ix_plays_track, so only that album's plays are read.
+const ALBUM_PLAYS = "FROM plays p JOIN tracks t ON t.id = p.track_id WHERE t.album_id = al.id";
+
+/** Every album column the UI uses; ends with the FROM/JOIN so callers can add joins and WHERE. */
+export const ALBUM_SELECT = `
   SELECT al.*, ar.name AS artist_name, ${WISHLISTED} AS wishlisted,
     (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
-    (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id AND t.streamable = 1) AS streamable_count
+    (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id AND t.streamable = 1) AS streamable_count,
+    (SELECT COUNT(*) ${ALBUM_PLAYS}) AS play_count,
+    (SELECT MAX(p.played_at) ${ALBUM_PLAYS}) AS last_played_at
   FROM albums al JOIN artists ar ON ar.id = al.artist_id`;
 
 export type AlbumFilter = "all" | "purchased" | "wishlist";
@@ -31,13 +37,16 @@ const FILTERS: Record<AlbumFilter, string | null> = { all: null, purchased: "al.
 export const RELEASE_KEY = `(substr(al.release_date, 8, 4) || printf('%02d', instr('JanFebMarAprMayJunJulAugSepOctNovDec', substr(al.release_date, 4, 3))) || substr(al.release_date, 1, 2))`;
 
 /**
- * Library sort orders, in the order the UI offers them. A new order (e.g. "played" once
- * listening history exists) is one entry here plus its ORDER BY in SORTS.
+ * Library sort orders, in the order the UI offers them. A new order is one entry here plus
+ * its ORDER BY in SORTS. "played" and "plays" put never-played albums last, newest first
+ * (NULL sorts last in DESC).
  */
-export const ALBUM_SORTS = ["added", "artist", "title", "release"] as const;
+export const ALBUM_SORTS = ["added", "played", "plays", "artist", "title", "release"] as const;
 export type AlbumSort = (typeof ALBUM_SORTS)[number];
 const SORTS: Record<AlbumSort, string> = {
   added: "al.created_at DESC, al.id DESC",
+  played: "last_played_at DESC, al.created_at DESC, al.id DESC",
+  plays: "play_count DESC, last_played_at DESC, al.created_at DESC, al.id DESC",
   artist: `ar.name COLLATE NOCASE, ${RELEASE_KEY} DESC, al.id DESC`,
   title: "al.title COLLATE NOCASE, ar.name COLLATE NOCASE, al.id",
   release: `${RELEASE_KEY} DESC, al.title COLLATE NOCASE, al.id`,
@@ -74,7 +83,8 @@ export async function getAlbumWithTracks(db: Db, id: number): Promise<AlbumWithT
   const album = await getAlbum(db, id);
   if (!album) return null;
   const tracks = await db.select<Omit<Track, "streamable"> & { streamable: number }>(
-    `SELECT id, track_id, album_id, title, track_num, duration, track_artist, streamable, lyrics
+    `SELECT id, track_id, album_id, title, track_num, duration, track_artist, streamable, lyrics,
+       (SELECT COUNT(*) FROM plays p WHERE p.track_id = tracks.id) AS play_count
      FROM tracks WHERE album_id = ? ORDER BY track_num, id`,
     [id],
   );

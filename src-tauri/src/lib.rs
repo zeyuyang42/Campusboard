@@ -31,6 +31,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0004_fan_dismissed.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 5,
+            description: "listening history",
+            sql: include_str!("../migrations/0005_plays.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
