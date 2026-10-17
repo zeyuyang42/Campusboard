@@ -3,16 +3,18 @@
  * reaches half the track or four minutes, whichever comes first, and only for tracks longer
  * than 30 seconds. Listened time is measured from playhead progress, so seeking ahead never
  * counts, pausing just stops the clock, and each fresh playback (a new load, repeat-one,
- * restarting with Previous, playing again after the end) can count once.
+ * restarting with Previous or by seeking back to the start, playing again after the end)
+ * can count once.
  */
 export const PLAY_MIN_TRACK_SEC = 30;
 export const PLAY_MAX_THRESHOLD_SEC = 240;
 /**
- * The largest playhead step between two progress reports that still counts as listening.
- * Reports arrive every quarter second or so, even at high playback rates; a bigger jump is a
- * seek the caller didn't announce.
+ * Slack, in seconds of media, when comparing a playhead step with the wall-clock time that
+ * passed. Covers timer jitter and a rate change between two reports.
  */
-export const PLAY_MAX_STEP_SEC = 10;
+export const PLAY_STEP_TOLERANCE_SEC = 1.5;
+/** Seeking back to before this point after the play has counted starts a fresh playback. */
+export const PLAY_RESTART_SEC = 2;
 
 /** Seconds of listening a track needs before it counts, or null if it can never count. */
 export function playThreshold(duration: number | null | undefined): number | null {
@@ -22,7 +24,10 @@ export function playThreshold(duration: number | null | undefined): number | nul
 
 export interface CountedPlay {
   trackId: number;
-  /** Seconds listened when the play counted, to a tenth of a second. */
+  /**
+   * Seconds listened when the play counted, to a tenth of a second: the threshold plus at most
+   * one report's step. Listening after that point is not added.
+   */
   seconds: number;
 }
 
@@ -31,7 +36,7 @@ export class PlayCounter {
   private id: number | null = null;
   private duration: number | null = null;
   private listened = 0;
-  private last: number | null = null;
+  private last: { t: number; wallMs: number } | null = null;
   private counted = false;
 
   /** The track of the current playback, or null before the first one. */
@@ -52,19 +57,33 @@ export class PlayCounter {
     if (Number.isFinite(duration) && duration > 0) this.duration = duration;
   }
 
-  /** The playhead jumped (a seek): the next progress report only sets a new baseline. */
-  seeked(): void {
+  /**
+   * The playhead jumped (a seek) to `to` seconds, if known: the next progress report only sets
+   * a new baseline. Going back to the very start after the play counted is a manual restart,
+   * which is a fresh playback.
+   */
+  seeked(to?: number): void {
     this.last = null;
+    if (this.counted && this.id != null && to != null && to < PLAY_RESTART_SEC) this.start(this.id, this.duration);
   }
 
-  /** The playhead is at `t` seconds. Returns the play the first time this playback counts. */
-  progress(t: number): CountedPlay | null {
-    if (!Number.isFinite(t)) return null;
+  /**
+   * The playhead is at `t` seconds at wall-clock `wallMs` (any monotonic millisecond clock),
+   * playing at `rate`. Returns the play the first time this playback counts.
+   *
+   * A step counts if it is no more than the wall-clock time since the last report allows at
+   * this rate (plus a little slack). Reports can be far apart when the window is hidden or
+   * the app is napping, and those steps still count; a step bigger than the elapsed time
+   * allows is a seek the caller didn't announce.
+   */
+  progress(t: number, wallMs: number, rate = 1): CountedPlay | null {
+    if (!Number.isFinite(t) || !Number.isFinite(wallMs)) return null;
     const prev = this.last;
-    this.last = t;
+    this.last = { t, wallMs };
     if (this.id == null || this.counted || prev == null) return null;
-    const step = t - prev;
-    if (step > 0 && step <= PLAY_MAX_STEP_SEC) this.listened += step;
+    const step = t - prev.t;
+    const allowed = (Math.max(0, wallMs - prev.wallMs) / 1000) * Math.max(0, Number.isFinite(rate) ? rate : 1) + PLAY_STEP_TOLERANCE_SEC;
+    if (step > 0 && step <= allowed) this.listened += step;
     const threshold = playThreshold(this.duration);
     if (threshold == null || this.listened < threshold) return null;
     this.counted = true;

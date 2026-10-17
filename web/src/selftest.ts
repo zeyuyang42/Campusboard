@@ -2,7 +2,7 @@
 // Results are written to the `settings` table (key "selftest") so a script outside
 // the app can read them from the SQLite file.
 import { getCore } from "./api/core";
-import { usePlayer } from "./player/store";
+import { listenedSeconds, usePlayer } from "./player/store";
 import { audioEl } from "./player/audio";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { exit } from "@tauri-apps/api/app";
@@ -135,6 +135,45 @@ async function historyCheck(core: Awaited<ReturnType<typeof getCore>>, album: Aw
   }
 }
 
+/**
+ * Background listening: hide the window (what closing it does) for 20 s while a track plays,
+ * and measure how often timeupdate still arrives and whether listening history keeps
+ * accumulating. Observes the audio element without changing it.
+ */
+async function hiddenPlaybackCheck() {
+  const win = getCurrentWindow();
+  if (audioEl.paused) return { ok: false, error: "not playing" };
+  let last = performance.now();
+  let maxGapMs = 0;
+  let reports = 0;
+  const onTick = () => {
+    const now = performance.now();
+    maxGapMs = Math.max(maxGapMs, now - last);
+    last = now;
+    reports++;
+  };
+  audioEl.addEventListener("timeupdate", onTick);
+  try {
+    await win.hide();
+    const visibility = document.visibilityState;
+    last = performance.now();
+    const t0 = audioEl.currentTime, l0 = listenedSeconds(), w0 = last;
+    await sleep(20000);
+    const wallSec = (performance.now() - w0) / 1000;
+    const mediaSec = audioEl.currentTime - t0;
+    const listenedSec = listenedSeconds() - l0;
+    await win.show();
+    await win.setFocus();
+    const r = (x: number) => Math.round(x * 100) / 100;
+    return {
+      ok: !audioEl.paused && mediaSec > wallSec * 0.8 && listenedSec > mediaSec * 0.9,
+      visibility, wallSec: r(wallSec), mediaSec: r(mediaSec), listenedSec: r(listenedSec), reports, maxGapMs: Math.round(maxGapMs),
+    };
+  } finally {
+    audioEl.removeEventListener("timeupdate", onTick);
+  }
+}
+
 export async function runSelfTest() {
   const out: Record<string, unknown> = { startedAt: new Date().toISOString() };
   const core = await getCore();
@@ -158,6 +197,7 @@ export async function runSelfTest() {
     usePlayer.getState().next();
     await sleep(4000);
     out.audioAfterNext = { currentTime: audioEl.currentTime, paused: audioEl.paused, index: usePlayer.getState().index, title: usePlayer.getState().current()?.title };
+    out.hiddenPlayback = await hiddenPlaybackCheck().catch((e) => ({ ok: false, error: String(e) }));
     const pl = await core.createPlaylist("Selftest");
     await core.addToPlaylist(pl.id, playable.slice(0, 3).map((t) => t.id));
     const got = await core.playlist(pl.id);
@@ -254,7 +294,7 @@ export async function runSelfTest() {
     out.dragPermission = await win.startDragging().then(() => "ok", (e) => String(e));
     // Overall ok needs every block that reports its own `ok` to pass. The listed blocks must
     // be present as objects: one caught and stored as a string threw.
-    const required = ["libraryFilter", "history", "syncGuards"];
+    const required = ["libraryFilter", "history", "hiddenPlayback", "syncGuards"];
     const failed = Object.entries(out)
       .filter(([k, v]) => required.includes(k) || (!!v && typeof v === "object" && "ok" in v))
       .filter(([, v]) => (v as { ok?: unknown } | null)?.ok !== true)

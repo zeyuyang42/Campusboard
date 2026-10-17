@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useParams } from "react-router-dom";
 import { repos } from "@bc/core";
 import { useAlbums, useArtists, useLibraryView, useRecentlyPlayed, useTracks, type LibraryView } from "../api/queries";
@@ -65,7 +65,11 @@ function Albums() {
   return <AlbumGrid sort={view.sort} filter={view.filter} set={set} />;
 }
 
-function AlbumGrid({ sort, filter, set }: LibraryView & { set: (p: Partial<LibraryView>) => void }) {
+function AlbumGrid({ sort: savedSort, filter, set }: LibraryView & { set: (p: Partial<LibraryView>) => void }) {
+  // "Show all" on the Recently played row switches the sort for this visit only; the saved
+  // sort comes back next time, or as soon as a sort is picked from the menu.
+  const [tempSort, setTempSort] = useState<repos.AlbumSort | null>(null);
+  const sort = tempSort ?? savedSort;
   const q = useUi((s) => s.libraryQuery);
   const setQ = useUi((s) => s.setLibraryQuery);
   const term = useDebounced(q, 150).trim();
@@ -90,11 +94,11 @@ function AlbumGrid({ sort, filter, set }: LibraryView & { set: (p: Partial<Libra
           <option value="wishlist">Wishlist</option>
         </select>
         <label className="muted" htmlFor="album-sort">Sort</label>
-        <select id="album-sort" value={sort} onChange={(e) => set({ sort: e.target.value as repos.AlbumSort })}>
+        <select id="album-sort" value={sort} onChange={(e) => { setTempSort(null); set({ sort: e.target.value as repos.AlbumSort }); }}>
           {repos.ALBUM_SORTS.map((s) => <option key={s} value={s}>{SORT_LABELS[s]}</option>)}
         </select>
       </div>
-      {shelf && <RecentlyPlayed libraryCount={n} onShowAll={() => set({ sort: "played" })} />}
+      {shelf && <RecentlyPlayed libraryCount={n} onShowAll={() => setTempSort("played")} />}
       {n ? <div className="grid">{data!.map((a) => <AlbumCard key={a.id} album={a} detail={sort === "plays" ? (a.play_count ? formatPlays(a.play_count) : "") : undefined} />)}</div>
         : term ? (
           <div className="empty">
@@ -108,21 +112,48 @@ function AlbumGrid({ sort, filter, set }: LibraryView & { set: (p: Partial<Libra
   );
 }
 
+// Must match .grid in styles.css: minmax(168px, 1fr) columns, 18px column gap.
+const CARD_MIN = 168;
+const CARD_GAP = 18;
+
+/** How many grid columns fit in the element's width (at least 1). */
+function useGridColumns() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [cols, setCols] = useState(1);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setCols(Math.max(1, Math.floor((el.clientWidth + CARD_GAP) / (CARD_MIN + CARD_GAP))));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, cols] as const;
+}
+
 /**
- * One row of the latest played albums. Nothing until something has been played, and nothing
- * when the row would hold the whole library (it would only repeat the grid below).
+ * The latest played albums as one row of the same grid, cut to what fits: no sideways
+ * scrolling, and no hidden cards for keyboard focus to land on. Nothing until something has
+ * been played, and nothing when the row would hold the whole library (it would only repeat
+ * the grid below).
  */
 function RecentlyPlayed({ libraryCount, onShowAll }: { libraryCount: number; onShowAll: () => void }) {
   const { data } = useRecentlyPlayed();
-  if (!data?.length || data.length >= libraryCount) return null;
+  const [ref, cols] = useGridColumns();
+  const hidden = !data?.length || data.length >= libraryCount;
   return (
-    <section className="shelf" aria-labelledby="recently-played">
-      <div className="shelf-head">
-        <h2 id="recently-played">Recently played</h2>
-        <button className="btn ghost sm" onClick={onShowAll}>Show all</button>
-      </div>
-      <div className="shelf-row">{data.map((a) => <AlbumCard key={a.id} album={a} />)}</div>
-    </section>
+    <div ref={ref}>
+      {!hidden && (
+        <section className="shelf" aria-labelledby="recently-played">
+          <div className="shelf-head">
+            <h2 id="recently-played">Recently played</h2>
+            <button className="btn ghost sm" onClick={onShowAll}>Show all</button>
+          </div>
+          <div className="grid">{data!.slice(0, cols).map((a) => <AlbumCard key={a.id} album={a} />)}</div>
+        </section>
+      )}
+    </div>
   );
 }
 

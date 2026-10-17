@@ -61,6 +61,8 @@ const plays = new PlayCounter();
 function startPlayback(track: QueueTrack) {
   plays.start(track.id, Number.isFinite(audioEl.duration) ? audioEl.duration : track.duration);
 }
+/** Seconds listened in the current playback (read by the selftest). */
+export const listenedSeconds = () => plays.listenedSeconds;
 function recordPlay(p: CountedPlay) {
   void getCore()
     .then((c) => c.recordPlay(p.trackId, p.seconds))
@@ -259,7 +261,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
 let lastTick = 0;
 audioEl.addEventListener("timeupdate", () => {
   // Every report feeds listening history; only the store update below is throttled.
-  const counted = plays.progress(audioEl.currentTime);
+  const counted = plays.progress(audioEl.currentTime, performance.now(), audioEl.playbackRate);
   if (counted) recordPlay(counted);
   const now = performance.now();
   if (now - lastTick < 250) return;
@@ -279,8 +281,9 @@ audioEl.addEventListener("durationchange", () => {
   usePlayer.setState({ duration: audioEl.duration });
   plays.setDuration(audioEl.duration);
 });
-// Any jump of the playhead (seek bar, keys, media keys, restore) is not listening.
-audioEl.addEventListener("seeking", () => plays.seeked());
+// Any jump of the playhead (seek bar, keys, media keys, restore) is not listening; a jump back
+// to the start after the play counted is a manual restart (a fresh playback).
+audioEl.addEventListener("seeking", () => plays.seeked(audioEl.currentTime));
 audioEl.addEventListener("play", () => usePlayer.setState({ status: "playing", error: null }));
 audioEl.addEventListener("playing", () => usePlayer.setState({ status: "playing", error: null }));
 audioEl.addEventListener("pause", () => {

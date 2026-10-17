@@ -184,7 +184,7 @@ function ListeningHistory() {
       <h2>Listening history</h2>
       <p className="muted">
         A track counts as played once you have listened to half of it or four minutes, whichever comes first.
-        History stays on this Mac and feeds Recently played and Most played in the Library.
+        History is stored in your local library and feeds Recently played and Most played in the Library.
       </p>
       <div className="row">
         {n ? (

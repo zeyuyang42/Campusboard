@@ -6,6 +6,11 @@ import type { Album } from "../../types.js";
 /**
  * Record one counted play. A single INSERT, and a no-op (null) if the track has left the
  * library in the meantime. Returns the new row's id.
+ *
+ * `played_at` is when the play counted (the threshold was crossed), not when the track
+ * started. `seconds_listened` is the listened time at that moment: the threshold plus at most
+ * one progress report's step, so effectively capped at min(50%, 4 min); listening after that
+ * isn't recorded.
  */
 export async function recordPlay(db: Db, trackId: number, seconds: number): Promise<number | null> {
   const r = await db.get<{ id: number }>(

@@ -9,11 +9,17 @@ import { createPlaylist, addTracks, getPlaylist } from "../src/db/repos/playlist
 import { upsertTralbum, vacuumOrphans } from "../src/services/importService.js";
 import { parseTralbumPage } from "../src/scrape/parseTralbum.js";
 
-/** Feed playhead positions from `from` to `to` in quarter-second steps, as timeupdate would. */
-function listen(c: PlayCounter, from: number, to: number, step = 0.25) {
+/** Simulated wall clock (ms) shared by the reports below. */
+let clock = 0;
+/**
+ * Feed playhead positions from `from` to `to` in `step`-second steps of media, as timeupdate
+ * would while playing at `rate`: each report comes step / rate seconds of wall time later.
+ */
+function listen(c: PlayCounter, from: number, to: number, step = 0.25, rate = 1) {
   const hits = [];
   for (let t = from; t <= to + 1e-9; t += step) {
-    const h = c.progress(t);
+    clock += (step / rate) * 1000;
+    const h = c.progress(t, clock, rate);
     if (h) hits.push(h);
   }
   return hits;
@@ -70,7 +76,8 @@ describe("PlayCounter", () => {
     listen(c, 150, 160); // 10 s more after a seek: 20 s listened
     expect(c.listenedSeconds).toBeCloseTo(20);
     // A jump without a seek notice is ignored too.
-    expect(c.progress(190)).toBeNull();
+    clock += 250;
+    expect(c.progress(190, clock)).toBeNull();
     expect(c.listenedSeconds).toBeCloseTo(20);
   });
 
@@ -85,7 +92,8 @@ describe("PlayCounter", () => {
   it("keeps listened time across a pause", () => {
     c.start(1, 200);
     listen(c, 0, 60);
-    // Paused: no progress reports. Resuming continues from the same position.
+    // Paused for ten minutes: no progress reports. Resuming continues from the same position.
+    clock += 600_000;
     expect(listen(c, 60, 99.5)).toEqual([]);
     expect(listen(c, 99.75, 100.5)).toHaveLength(1);
   });
@@ -121,7 +129,51 @@ describe("PlayCounter", () => {
 
   it("counts fast playback (high playbackRate) by playhead progress", () => {
     c.start(1, 200);
-    expect(listen(c, 0, 101, 4)).toHaveLength(1); // 4 s of media per report
+    expect(listen(c, 0, 101, 4, 16)).toHaveLength(1); // 4 s of media per quarter-second report
+  });
+
+  it("keeps counting when reports are throttled (hidden window, App Nap)", () => {
+    c.start(1, 200);
+    expect(listen(c, 0, 90, 30)).toEqual([]); // one report every 30 s of wall time at 1x
+    expect(c.listenedSeconds).toBeCloseTo(90);
+    expect(listen(c, 120, 120, 30)).toHaveLength(1);
+    // At 16x a 30 s gap is 480 s of media.
+    c.start(2, 600);
+    expect(listen(c, 0, 240, 120, 16)).toHaveLength(1); // 7.5 s of wall time per report
+  });
+
+  it("treats a step bigger than the elapsed wall time allows as a seek", () => {
+    c.start(1, 600);
+    listen(c, 0, 10);
+    clock += 30_000;
+    c.progress(80, clock); // 70 s of media in 30 s at 1x: a jump
+    expect(c.listenedSeconds).toBeCloseTo(10);
+    clock += 30_000;
+    c.progress(110, clock); // continues normally from the new position
+    expect(c.listenedSeconds).toBeCloseTo(40);
+    // At 16x the same 30 s allows 480 s of media.
+    c.start(2, 3600);
+    listen(c, 0, 4, 4, 16);
+    clock += 30_000;
+    c.progress(484, clock, 16);
+    expect(c.listenedSeconds).toBeCloseTo(484);
+  });
+
+  it("seeking back to the start after the play counted is a fresh playback", () => {
+    c.start(1, 100);
+    expect(listen(c, 0, 60)).toHaveLength(1);
+    c.seeked(30); // back, but not to the start: same playback
+    expect(listen(c, 30, 100)).toEqual([]);
+    c.seeked(0.5);
+    expect(c.listenedSeconds).toBe(0);
+    expect(listen(c, 0.5, 60)).toHaveLength(1);
+  });
+
+  it("seeking to the start before the play counted keeps what was listened", () => {
+    c.start(1, 200);
+    listen(c, 0, 60);
+    c.seeked(0);
+    expect(c.listenedSeconds).toBeCloseTo(60);
   });
 });
 
