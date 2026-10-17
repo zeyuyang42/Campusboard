@@ -14,6 +14,7 @@ npm test                         # vitest in packages/core, offline, uses node:s
 npm run typecheck                # core + web
 VITE_BROWSER_MODE=1 npm run web:dev   # UI in a normal browser: sql.js + Vite fetch middleware, in-memory data
 VITE_SELFTEST=1 npm run dev      # app runs web/src/selftest.ts and writes results to settings.key='selftest'
+                                 # add VITE_SELFTEST_FAN=<public fan username> to include the collection check
 npm run scrape -- <url>          # print what the parser sees (Node)
 npm run fixtures:save -- <url> <name>   # refresh packages/core/test/fixtures/<name>.html
 npm run smoke:live               # re-parse one known live page
@@ -24,10 +25,10 @@ npm run smoke:live               # re-parse one known live page
 ```
 packages/core/src/
   types.ts                 DTOs shared by core and web (import "@bc/core")
-  scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, schemas
+  scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, fan (collection/wishlist), schemas
   db/Db.ts                 async Db interface {select,get,run}; SQL uses "?" and toDollar() rewrites to $n for the Tauri plugin
   db/repos/                one module per table; booleans stored 0/1, converted at the repo boundary
-  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner, pageCache
+  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie)
   theme/                   schema (zod), presets, color math (OKLCH, contrast), apply (CSS variables)
   palette/                 quantize + pick + extract (canvas) + fitPalette + artUrl
   core.ts                  createCore({db, fetch, onJobsChange}) -> every function the UI calls
@@ -112,6 +113,33 @@ src-tauri/
   reopens it (`RunEvent::Reopen` in lib.rs), Cmd+Q quits. Menu accelerators use
   Cmd so they never fight text fields; plain-key shortcuts stay in `shortcuts.ts`.
 
+## Collection sync facts (verified 2026-10-17 with curl against a public profile)
+
+- A public fan page `https://bandcamp.com/<username>` embeds `#pagedata[data-blob]`
+  JSON: `fan_data.fan_id`, `collection_data`/`wishlist_data` (`item_count`,
+  `last_token`, first 20 keys in `sequence`, or `pending_sequence` for the tab that
+  isn't open) and the items in `item_cache.collection|wishlist`. A missing user is a 404.
+- `POST https://bandcamp.com/api/fancollection/1/collection_items` and `/wishlist_items`
+  with `{fan_id, older_than_token, count}` work without any cookie for public profiles.
+  `count` up to at least 100 is honoured. With `count` > 20 the response's `last_token`
+  is the 20th item's token, not the last one's, so page on from the last item's own
+  `token` (verified: no overlap). An unknown fan id returns `items: []`.
+- Items carry `tralbum_type` (`a`/`t`), `tralbum_id`, `item_url` (the custom domain
+  when the artist has one) and `url_hints.subdomain`. On track items `url_hints.slug`
+  can name the album, so never build URLs from the slug. A custom-domain release is
+  also served at `https://<subdomain>.bandcamp.com/<same path>` with a 200 (no
+  redirect) and `data-tralbum.url` still names the custom domain.
+- Anonymous fan pages have `identities.fan: null` and `fan_data.is_own_page: null`.
+  A made-up `identity` cookie is ignored (page stays anonymous, 200). What a valid
+  cookie adds is NOT verified here (no account available): per bandcamp-fetch it is
+  private collections and `mp3-v0` in `data-tralbum` file maps for owned items, and the
+  sync treats a page with `identities.fan` set and `is_own_page` true as "accepted".
+- tauri-plugin-http 2.8.2 drops `Cookie` (a fetch-spec forbidden header) unless the
+  crate is built with `unsafe-headers`; its default `cookies` feature keeps a jar in
+  `<app cache>/.cookies` that stores every `Set-Cookie` and replays it. The app builds
+  with `unsafe-headers` and without `cookies`, so the identity cookie goes only where
+  core puts it (reqwest also strips an explicit `Cookie` on a cross-host redirect).
+
 ## Rules
 
 - Be polite to Bandcamp: keep `FetchQueue` serial at 1 req/s with the browser UA
@@ -120,8 +148,14 @@ src-tauri/
 - Keep parsing inside `packages/core/src/scrape/`. When markup changes: fix the
   parser, re-save fixtures, `npm test`.
 - Schema changes are a new numbered file in `src-tauri/migrations/` plus an entry
-  in `src/lib.rs`; never edit an applied migration. Columns `albums.owned`,
-  `tracks.stream_quality`, `tracks.local_path` are reserved for planned features.
+  in `src/lib.rs` (and an import in `web/src/api/browserDb.ts`); never edit an applied
+  migration. `albums.owned` mirrors the synced collection (`fan_items`), recomputed in
+  one statement; `tracks.stream_quality` is `mp3-v0` or `mp3-128`; `tracks.local_path`
+  is reserved for a planned feature.
+- The identity cookie lives only in `settings.key='bandcamp_identity'`. Read it only
+  through `services/account.ts` (`identityHeaders`), which sends it only to https
+  bandcamp.com and `*.bandcamp.com`, never to a custom domain. Never log it, put it in
+  an error message, a job row, the page cache or the self-test output.
 - Theme files are data: `applyTheme` only ever calls `style.setProperty`. Never
   interpolate theme values into CSS text. New theme fields go through
   `ThemeSchema` with bounds, and bump `version` only for breaking changes.
