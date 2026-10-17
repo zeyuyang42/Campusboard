@@ -46,21 +46,26 @@ export async function runSelfTest() {
     out.browse = { releases: browse.items.length, band: browse.band?.name, inLibrary: browse.items.filter((i) => i.album_id).length, firstTitle: browse.items[0]?.title };
     // Custom artist domain: the http scope must allow the custom host (it 303s to name.bandcamp.com),
     // and the library must key the album by the custom-domain URL from data-tralbum.
-    const hadCustom = (await core.albums()).some((x) => x.url === CUSTOM_ALBUM);
+    // Only albums that are new by id get deleted afterwards, so the real library is left as it was.
+    const before = new Set((await core.albums()).map((x) => x.id));
     out.customDomain = await core.import({ url: CUSTOM_ALBUM }).then(async (cj) => {
-      let status: string | undefined, error: unknown = null;
-      for (let i = 0; i < 60; i++) {
-        const j = await core.job(cj.id);
-        if (j && (j.status === "done" || j.status === "failed")) { status = j.status; error = j.error ?? j.items?.[0]?.error ?? null; break; }
-        await sleep(1000);
+      let status: string | undefined = "timeout", error: unknown = null;
+      try {
+        for (let i = 0; i < 60; i++) {
+          const j = await core.job(cj.id);
+          if (j && (j.status === "done" || j.status === "failed")) { status = j.status; error = j.error ?? j.items?.[0]?.error ?? null; break; }
+          await sleep(1000);
+        }
+        const a = (await core.albums()).find((x) => x.url === CUSTOM_ALBUM);
+        // force=true re-fetches the stored (custom-domain) URL through the plugin.
+        const first = a ? (await core.album(a.id))?.tracks.find((t) => t.streamable) : undefined;
+        const refreshed = first ? await core.getFreshStreamUrl(first.id, true).then((s) => new URL(s.url).hostname, (e) => String(e)) : null;
+        const b = await core.browse(CUSTOM_ARTIST).then((r) => ({ url: r.url, releases: r.items.length, inLibrary: r.items.filter((i) => i.album_id).length }), (e) => String(e));
+        return { status, error, stored: !!a, refreshedStreamHost: refreshed, browse: b };
+      } finally {
+        if (status === "timeout") await core.cancelJob(cj.id).catch(() => false);
+        for (const x of await core.albums()) if (!before.has(x.id)) await core.deleteAlbum(x.id);
       }
-      const a = (await core.albums()).find((x) => x.url === CUSTOM_ALBUM);
-      // force=true re-fetches the stored (custom-domain) URL through the plugin.
-      const first = a ? (await core.album(a.id))?.tracks.find((t) => t.streamable) : undefined;
-      const refreshed = first ? await core.getFreshStreamUrl(first.id, true).then((s) => new URL(s.url).hostname, (e) => String(e)) : null;
-      const b = await core.browse(CUSTOM_ARTIST).then((r) => ({ url: r.url, releases: r.items.length, inLibrary: r.items.filter((i) => i.album_id).length }), (e) => String(e));
-      if (a && !hadCustom) await core.deleteAlbum(a.id); // leave the real library as it was
-      return { status, error, stored: !!a, refreshedStreamHost: refreshed, browse: b };
     }, (e) => String(e));
     out.mediaSession = "mediaSession" in navigator;
     // Window permissions the menu bar and close-to-hide rely on.

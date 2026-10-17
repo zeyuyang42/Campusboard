@@ -20,6 +20,34 @@ export function isBandcampHost(host: string): boolean {
 }
 
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
+/** Suffixes that name machines on a local or private network, never a public artist site. */
+const PRIVATE_SUFFIXES = [".local", ".localhost", ".internal", ".lan", ".home.arpa", ".localdomain", ".intranet", ".corp"];
+
+/**
+ * Whether a parsed URL may be fetched as a custom Bandcamp domain: a public DNS
+ * name over http(s), no port, credentials, IP literal, bare hostname or private suffix.
+ */
+export function isPublicCustomHost(u: URL): boolean {
+  const host = u.hostname.toLowerCase().replace(/\.$/, "");
+  if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+  if (u.port || u.username || u.password) return false;
+  if (!host.includes(".") || IPV4.test(host) || host.startsWith("[") || host === "localhost") return false;
+  return !PRIVATE_SUFFIXES.some((s) => host.endsWith(s) || host === s.slice(1));
+}
+
+/**
+ * Whether a URL is one the app may fetch for Bandcamp pages: anything on
+ * bandcamp.com/bcbits.com, or a Bandcamp-shaped path (/album/x, /track/x,
+ * /music) on a public custom host. Mirrors the Tauri http scope.
+ */
+export function isFetchableBandcampUrl(url: string): boolean {
+  let u: URL;
+  try { u = new URL(url); } catch { return false; }
+  if (u.protocol !== "https:" || u.port || u.username || u.password) return false;
+  const host = u.hostname.toLowerCase();
+  if (isBandcampHost(host) || host === "bcbits.com" || host.endsWith(".bcbits.com")) return true;
+  return isPublicCustomHost(u) && /^\/(album\/[^/]+|track\/[^/]+|music)\/?$/.test(u.pathname);
+}
 
 /**
  * Normalize a user-pasted Bandcamp URL into a canonical form and classify it.
@@ -46,7 +74,7 @@ export function normalizeBandcampUrl(input: string): NormalizedUrl {
   }
   // Custom domains must look like a public domain name: no ports, credentials,
   // bare hostnames or IP literals, so a pasted link can't point the app at the LAN.
-  if (custom && (u.port || u.username || u.password || !host.includes(".") || IPV4.test(host) || host.startsWith("[") || host.endsWith(".local") || host === "localhost" || host.endsWith(".localhost"))) {
+  if (custom && !isPublicCustomHost(u)) {
     throw new ScrapeError("not_bandcamp", `${host} doesn't look like a Bandcamp site`);
   }
   const pathname = u.pathname.replace(/\/+$/, "");

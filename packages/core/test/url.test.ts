@@ -26,7 +26,7 @@ describe("normalizeBandcampUrl", () => {
     expect(() => normalizeBandcampUrl("ftp://music.example.com/album/x")).toThrow();
   });
   it("refuses custom hosts that point at the local machine or network", () => {
-    for (const u of ["http://localhost/album/x", "https://127.0.0.1/album/x", "https://192.168.1.10/music", "https://[::1]/album/x", "https://nas.local/album/x", "https://intranet/album/x", "https://music.example.com:8443/album/x", "https://user:pw@music.example.com/album/x", "https://app.localhost/album/x"]) {
+    for (const u of ["http://localhost/album/x", "https://127.0.0.1/album/x", "https://192.168.1.10/music", "https://[::1]/album/x", "https://nas.local/album/x", "https://intranet/album/x", "https://music.example.com:8443/album/x", "https://user:pw@music.example.com/album/x", "https://app.localhost/album/x", "https://svc.internal/album/x", "https://pc.lan/music", "https://nas.home.arpa/album/x", "https://box.localdomain/album/x", "https://wiki.intranet/album/x", "https://git.corp/album/x"]) {
       expect(() => normalizeBandcampUrl(u), u).toThrow(expect.objectContaining({ code: "not_bandcamp" }));
     }
   });

@@ -24,10 +24,19 @@ export interface ParsedMusicPage {
 
 const ClientItem = z.object({ page_url: z.string(), title: z.string().optional(), art_id: z.number().nullable().optional(), artist: z.string().nullable().optional(), type: z.string().optional() }).passthrough();
 
+/**
+ * Absolute, normalized album/track URL, or null. Links come from page markup a
+ * custom domain controls, so every one goes through the same check as pasted
+ * URLs (no LAN hosts, Bandcamp-shaped paths only) before anything can fetch it.
+ */
 function cleanUrl(u: string, base: string): string | null {
-  const abs = u.startsWith("http") ? u : `${base}${u}`;
-  const clean = abs.split("?")[0].split("#")[0].replace(/\/+$/, "");
-  return /\/(album|track)\/[^/]+$/.test(clean) ? clean : null;
+  const abs = /^https?:\/\//i.test(u) ? u : `${base}${u.startsWith("/") ? "" : "/"}${u}`;
+  try {
+    const n = normalizeBandcampUrl(abs);
+    return n.kind === "artist" ? null : n.url;
+  } catch {
+    return null;
+  }
 }
 const typeOf = (url: string): ItemType => (/\/track\//.test(url) ? "track" : "album");
 const artIdFrom = (s: string): number | null => {

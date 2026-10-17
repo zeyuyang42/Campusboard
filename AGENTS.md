@@ -74,7 +74,11 @@ src-tauri/
   aren't bandcamp.com are accepted only for Bandcamp-shaped paths and only
   trusted once the page has `data-tralbum`/`data-band` (`not_bandcamp` otherwise).
   The http scope therefore allows `https://*/album/*`, `/track/*` and `/music`
-  on any host; `scopeRedirects` stays off, and the redirect lands on bandcamp.com anyway.
+  on any host, with `plugins.http.scopeRedirects: true` in tauri.conf.json so
+  every redirect hop is checked too (the 303 lands on `*.bandcamp.com`, which is
+  in scope). Release links from `/music` pages go through `normalizeBandcampUrl`
+  before they are queued, and the browser-mode proxy uses the same
+  `isFetchableBandcampUrl` check on every hop.
 - The Tauri SQL plugin pools connections and has no transaction API. Writes are
   single statements or ordered so any interruption leaves a readable library
   (parents first, deletes last, every step idempotent). Multi-row inserts use

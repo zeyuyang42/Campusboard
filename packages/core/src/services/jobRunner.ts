@@ -10,6 +10,15 @@ import { upsertTralbum } from "./importService.js";
 import { cachedFetchText } from "./pageCache.js";
 import type { Job } from "../types.js";
 
+function safeReleaseUrl(u: string): string | null {
+  try {
+    const n = normalizeBandcampUrl(u);
+    return n.kind === "artist" ? null : n.url;
+  } catch {
+    return null;
+  }
+}
+
 export interface ImportRequest {
   url: string;
   force?: boolean; // re-import discography items that are already in the library
@@ -82,7 +91,8 @@ export class JobRunner {
         const parsed = parseMusicPage(html, origin);
         const have = await albumUrlsInLibrary(this.db);
         const force = this.forceFlags.get(job.id) ?? false;
-        const urls = parsed.items.map((i) => i.url).filter((u) => force || !have.has(u));
+        // Release links come from page markup: queue only URLs that pass the same check as pasted ones.
+        const urls = [...new Set(parsed.items.map((i) => safeReleaseUrl(i.url)).filter((u): u is string => !!u))].filter((u) => force || !have.has(u));
         await jobs.addJobItems(this.db, job.id, urls);
         if (urls.length === 0) {
           await jobs.setJobStatus(this.db, job.id, "done", parsed.items.length ? "Everything from this artist is already in your library" : "No releases found on this page");
