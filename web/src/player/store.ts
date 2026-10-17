@@ -70,6 +70,9 @@ function load(track: QueueTrack, autoplay: boolean, force = false) {
     } catch (e) {
       if (seq !== loadSeq) return;
       usePlayer.setState({ error: `Couldn't play "${track.title}". ${friendlyError(e)}`, status: "paused" });
+      // During a Bandcamp cooldown every stale track would fail the same way: stop here
+      // with the "try again after" message instead of skipping through the whole queue.
+      if ((e as { code?: unknown } | null)?.code === "challenge_cooldown") return;
       const { queue, index } = usePlayer.getState();
       if (autoplay && index < queue.length - 1) setTimeout(() => usePlayer.getState().next(true), 800);
     }

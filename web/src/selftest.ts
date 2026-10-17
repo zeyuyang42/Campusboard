@@ -77,6 +77,8 @@ export async function runSelfTest() {
       allRejected: deniedResults.every((r) => r.includes("not allowed on the configured scope")),
       results: Object.fromEntries(denied.map((u, i) => [u, deniedResults[i]])),
     };
+    // The challenge cooldown is read from settings through the SQL plugin; null unless Bandcamp challenged us.
+    out.challengeUntil = await core.challengeUntil().then((u) => (u ? new Date(u).toISOString() : null), (e) => String(e));
     out.mediaSession = "mediaSession" in navigator;
     // Window permissions the menu bar and close-to-hide rely on.
     const win = getCurrentWindow();

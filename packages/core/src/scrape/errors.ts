@@ -2,6 +2,8 @@ export type ScrapeErrorCode =
   | "invalid_url"
   | "not_bandcamp"
   | "client_challenge"
+  /** A recent challenge put Bandcamp requests on hold; detail is { until: ms timestamp }. */
+  | "challenge_cooldown"
   | "parse_failed"
   | "not_streamable"
   | "not_found"

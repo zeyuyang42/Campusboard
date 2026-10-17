@@ -12,6 +12,7 @@ export const keys = {
   playlist: (id: number) => ["playlist", id] as const,
   jobs: ["jobs"] as const,
   job: (id: number) => ["job", id] as const,
+  challenge: ["jobs", "challenge"] as const,
   search: (q: string) => ["search", q] as const,
 };
 
@@ -30,6 +31,9 @@ export const useJobs = () =>
   useQuery({ queryKey: keys.jobs, queryFn: async () => (await core()).jobs(), refetchInterval: (q) => (q.state.data?.some(isActive) ? 1000 : false) });
 export const useJob = (id: number | null) =>
   useQuery({ queryKey: keys.job(id ?? 0), queryFn: async () => (await core()).job(id!), enabled: !!id, refetchInterval: (q) => (isActive(q.state.data) ? 1000 : false) });
+/** When Bandcamp requests resume after a bot challenge, or null. Keyed under "jobs" so job updates refresh it. */
+export const useChallengeUntil = () =>
+  useQuery({ queryKey: keys.challenge, queryFn: async () => (await core()).challengeUntil(), refetchInterval: (q) => (q.state.data ? 5000 : false) });
 
 /** Invalidate everything that an import or edit may have changed. */
 export function useInvalidateLibrary() {

@@ -35,6 +35,24 @@ export async function setJobStatus(db: Db, id: number, status: JobStatus, error:
   await db.run("UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE id = ?", [status, error, now(), id]);
 }
 
+/**
+ * Move a job to `to` only if it is currently one of `from`, in one statement, so a
+ * concurrent cancel can't be overwritten. True if the job moved.
+ */
+export async function transitionJob(db: Db, id: number, from: JobStatus[], to: JobStatus, error: string | null = null): Promise<boolean> {
+  const r = await db.get<{ id: number }>(
+    `UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE id = ? AND status IN (${from.map(() => "?").join(",")}) RETURNING id`,
+    [to, error, now(), id, ...from],
+  );
+  return !!r;
+}
+
+/** Fail every item still queued with one reason, then recount. Each step is idempotent. */
+export async function failQueuedItems(db: Db, jobId: number, error: string): Promise<void> {
+  await db.run("UPDATE job_items SET status = 'failed', error = ? WHERE job_id = ? AND status = 'queued'", [error, jobId]);
+  await db.run("UPDATE jobs SET failed = (SELECT COUNT(*) FROM job_items WHERE job_id = ? AND status = 'failed'), updated_at = ? WHERE id = ?", [jobId, now(), jobId]);
+}
+
 export async function jobStatus(db: Db, id: number): Promise<JobStatus | null> {
   return (await db.get<{ status: JobStatus }>("SELECT status FROM jobs WHERE id = ?", [id]))?.status ?? null;
 }

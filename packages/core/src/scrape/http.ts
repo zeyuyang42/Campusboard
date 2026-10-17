@@ -1,9 +1,16 @@
 import { FETCH_TIMEOUT_MS, RATE_LIMIT_MS, USER_AGENT } from "../config.js";
 import { ScrapeError } from "./errors.js";
+import { ChallengeGate } from "./challenge.js";
+import { isChallengePage } from "./html.js";
 
 /**
  * Serial, rate-limited fetch queue. Every Bandcamp request goes through here so we
  * never exceed ~1 request/second regardless of how many callers there are.
+ *
+ * When a response is Bandcamp's "Client Challenge" page the queue trips its
+ * ChallengeGate and throws `client_challenge`. While the gate's cooldown runs, every
+ * request fails fast with `challenge_cooldown` instead of going out. Retrying after
+ * the cooldown is the caller's call (the job runner does, once).
  */
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -11,10 +18,13 @@ export class FetchQueue {
   private chain: Promise<unknown> = Promise.resolve();
   private lastStart = 0;
 
-  constructor(private fetchImpl: FetchLike, private minGapMs = RATE_LIMIT_MS) {}
+  constructor(private fetchImpl: FetchLike, private minGapMs = RATE_LIMIT_MS, readonly gate = new ChallengeGate()) {}
 
+  /** Run `fn` in turn, at most one start per minGapMs. Refuses (without waiting) during a challenge cooldown. */
   private schedule<T>(fn: () => Promise<T>): Promise<T> {
     const run = async () => {
+      // A request queued behind one that got challenged fails here, before taking a rate-limit slot.
+      this.gate.assertClear();
       const wait = this.lastStart + this.minGapMs - Date.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       this.lastStart = Date.now();
@@ -26,17 +36,24 @@ export class FetchQueue {
   }
 
   async fetchText(url: string, init: RequestInit = {}, retries = 2): Promise<string> {
+    await this.gate.ready();
+    this.gate.assertClear();
     return this.schedule(async () => {
       let lastErr: unknown;
       for (let attempt = 0; attempt <= retries; attempt++) {
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
         try {
+          // Plain headers on purpose: the bot check reacts to header sets that look inconsistent.
           const res = await this.fetchImpl(url, {
             ...init,
             signal: ctrl.signal,
             headers: { "User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9", ...(init.headers ?? {}) },
           });
+          if (!res.ok) {
+            const body = await res.text().catch(() => "");
+            if (isChallengePage(body)) throw await this.challenged(url);
+          }
           if (res.status === 404) throw new ScrapeError("not_found", `404 for ${url}`);
           if (res.status === 429 || res.status >= 500) {
             lastErr = new ScrapeError("fetch_failed", `HTTP ${res.status} for ${url}`);
@@ -44,7 +61,9 @@ export class FetchQueue {
             continue;
           }
           if (!res.ok) throw new ScrapeError("fetch_failed", `HTTP ${res.status} for ${url}`);
-          return await res.text();
+          const text = await res.text();
+          if (isChallengePage(text)) throw await this.challenged(url);
+          return text;
         } catch (e) {
           if (e instanceof ScrapeError && e.code !== "fetch_failed") throw e;
           // The http plugin (scopeRedirects on) or the dev proxy refused the URL or a redirect
@@ -62,5 +81,10 @@ export class FetchQueue {
       throw new ScrapeError("fetch_failed", `Failed to fetch ${url}: ${String(lastErr)}`);
     });
   }
-}
 
+  /** Start (or extend) the cooldown and build the error for this request. */
+  private async challenged(url: string): Promise<ScrapeError> {
+    const until = await this.gate.trip();
+    return new ScrapeError("client_challenge", `Bandcamp returned a bot challenge page for ${url}`, { until });
+  }
+}
