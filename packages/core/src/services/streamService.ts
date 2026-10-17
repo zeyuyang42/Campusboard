@@ -4,16 +4,24 @@ import type { FetchQueue } from "../scrape/http.js";
 import { parseTralbumPage } from "../scrape/parseTralbum.js";
 import { ScrapeError } from "../scrape/errors.js";
 import { upsertTralbum } from "./importService.js";
+import { identityHeaders } from "./account.js";
+import { ownedFetchUrl } from "../db/repos/fanItems.js";
 import { STREAM_SAFETY_MS } from "../config.js";
 
 const inflight = new Map<number, Promise<void>>();
 
-/** Re-scrape an album page and refresh every track's stream URL. Deduped per album. */
+/**
+ * Re-scrape an album page and refresh every track's stream URL. Deduped per album.
+ * A purchased album is fetched from its name.bandcamp.com address with the identity
+ * cookie when one is set, so its tracks come back as mp3-v0.
+ */
 export function refreshAlbum(db: Db, queue: FetchQueue, albumId: number, url: string): Promise<void> {
   let p = inflight.get(albumId);
   if (!p) {
     p = (async () => {
-      const html = await queue.fetchText(url);
+      const owned = await ownedFetchUrl(db, albumId);
+      const headers = owned ? await identityHeaders(db, owned) : {};
+      const html = await queue.fetchText(headers.Cookie ? owned! : url, { headers });
       await upsertTralbum(db, parseTralbumPage(html));
     })().finally(() => inflight.delete(albumId));
     inflight.set(albumId, p);

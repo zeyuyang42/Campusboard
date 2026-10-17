@@ -37,6 +37,12 @@ Requires macOS 13.3 or later. Your library lives in
   page per second and resume after a restart.
 - **Search**: searches Bandcamp directly; "Add" imports an album or track,
   "Browse releases" opens an artist's or label's page.
+- **Your collection**: Settings → Bandcamp account. Enter your username and press
+  **Sync now** to import what you've bought and your wishlist (public collections
+  need nothing else); the Library's **Show** menu filters to Purchased or Wishlist.
+  Optionally paste the `identity` cookie from a browser where you're logged in to
+  bandcamp.com to include a private collection and stream your purchases as MP3 V0.
+  The cookie stays in your local library database and is only sent to bandcamp.com.
 - **Playlists**: right-click any track or album, or select several tracks
   (click, Shift-click, Cmd-click) and use the bar that appears. Drag rows to
   reorder.

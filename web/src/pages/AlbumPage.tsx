@@ -32,6 +32,7 @@ export function AlbumPage() {
             {album.release_date ? `, released ${formatDate(album.release_date)}` : ""}
             {album.is_preorder ? ". Pre-order" : ""}
           </div>
+          {album.owned && <div className="owned-note">Purchased</div>}
           <div>{album.tags.map((t) => <span className="tag" key={t}>{t}</span>)}</div>
           <div className="actions">
             <PlayPauseAll tracks={album.tracks} />
