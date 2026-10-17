@@ -22,6 +22,30 @@ const CUSTOM_ALBUM = `${CUSTOM_ARTIST}/album/snowmelt-ep`;
 const SELFTEST_FAN = import.meta.env.VITE_SELFTEST_FAN as string | undefined;
 
 /**
+ * The Library filter's escaped LIKE and the release-date sort through the real SQL plugin,
+ * against the album the selftest just imported. Read-only.
+ */
+async function libraryFilterCheck(core: Awaited<ReturnType<typeof getCore>>, album: Awaited<ReturnType<Awaited<ReturnType<typeof getCore>>["album"]>>) {
+  if (!album) return { ok: false, error: "no album" };
+  const title = album.tracks.map((t) => t.title).filter((t) => t.includes(" ")).sort((a, b) => b.length - a.length)[0] ?? album.tracks[0].title;
+  const ids = async (q: string, filter: repos.AlbumFilter = "all") => (await core.albums("added", filter, q)).map((a) => a.id);
+  const byTrack = (await ids(title.toUpperCase())).includes(album.id);
+  // `_` and `%` in place of a letter and a space: as wildcards they would match the title.
+  const wild = `_${title.slice(1).replace(" ", "%")}`;
+  const rawMatch = !!(await core.db.get("SELECT 1 FROM tracks WHERE album_id = ? AND title LIKE ?", [album.id, wild]));
+  const escapedMatch = (await ids(wild)).includes(album.id);
+  const combined = (await ids(title, "wishlist")).includes(album.id) === album.wishlisted;
+  const sortedDesc = (list: { release_date: string | null }[]) => {
+    const keys = list.map((a) => (a.release_date ? Date.parse(a.release_date) : null));
+    return keys.every((k, i) => i === 0 || (k === null ? true : keys[i - 1] !== null && keys[i - 1]! >= k));
+  };
+  const bySort = await core.albums("release");
+  const artist = await core.artist(album.artist_id);
+  const ok = byTrack && rawMatch && !escapedMatch && combined && sortedDesc(bySort) && !!artist && sortedDesc(artist.albums);
+  return { ok, track: title, byTrack, wild, rawMatch, escapedMatch, combined, releaseSorted: sortedDesc(bySort), releases: bySort.length, artistSorted: artist ? sortedDesc(artist.albums) : null };
+}
+
+/**
  * The collection sync's job-guarded statements (INSERT ... SELECT FROM (VALUES) WHERE EXISTS
  * ... ON CONFLICT, a guarded DELETE, a guarded settings upsert) through the real SQL plugin:
  * each must write while its job runs and do nothing once it is cancelled. No network. The
@@ -93,6 +117,7 @@ export async function runSelfTest() {
     out.albums = albums.length;
     const album = await core.album(albums.find((a) => a.url === ALBUM)?.id ?? albums[0].id);
     out.tracks = album?.tracks.length ?? 0;
+    out.libraryFilter = await libraryFilterCheck(core, album);
     const playable = album?.tracks.filter((t) => t.streamable) ?? [];
     usePlayer.getState().playTracks(playable, 0);
     await sleep(7000);

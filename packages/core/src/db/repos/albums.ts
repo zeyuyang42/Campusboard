@@ -27,7 +27,8 @@ const FILTERS: Record<AlbumFilter, string | null> = { all: null, purchased: "al.
 
 // Bandcamp release dates are stored as sent ("01 Oct 2021 00:00:00 GMT"), which does not
 // sort as text. This turns them into YYYY + month position + DD; NULL stays NULL (last in DESC).
-const RELEASE_KEY = `(substr(al.release_date, 8, 4) || printf('%02d', instr('JanFebMarAprMayJunJulAugSepOctNovDec', substr(al.release_date, 4, 3))) || substr(al.release_date, 1, 2))`;
+// Expects the albums table aliased as `al`.
+export const RELEASE_KEY = `(substr(al.release_date, 8, 4) || printf('%02d', instr('JanFebMarAprMayJunJulAugSepOctNovDec', substr(al.release_date, 4, 3))) || substr(al.release_date, 1, 2))`;
 
 /**
  * Library sort orders, in the order the UI offers them. A new order (e.g. "played" once

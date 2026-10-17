@@ -120,7 +120,7 @@ function Artists() {
 
 function Tracks() {
   const [q, setQ] = useState("");
-  const { data, isLoading } = useTracks(q);
+  const { data, isLoading } = useTracks(useDebounced(q, 150).trim());
   return (
     <>
       <div className="toolbar">

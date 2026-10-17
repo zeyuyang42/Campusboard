@@ -38,7 +38,7 @@ export function rowToTrack(r: TrackRow): Track {
 export async function searchTracks(db: Db, q: string, limit = 500): Promise<Track[]> {
   const like = likeContains(q.trim());
   const rows = q.trim()
-    ? await db.select<TrackRow>(`${TRACK_SELECT} WHERE t.title LIKE ? ESCAPE '\\' OR al.title LIKE ? ESCAPE '\\' OR ar.name LIKE ? ESCAPE '\\' ORDER BY ar.name COLLATE NOCASE, al.title, t.track_num LIMIT ?`, [like, like, like, limit])
+    ? await db.select<TrackRow>(`${TRACK_SELECT} WHERE t.title LIKE ? ESCAPE '\\' OR t.track_artist LIKE ? ESCAPE '\\' OR al.title LIKE ? ESCAPE '\\' OR ar.name LIKE ? ESCAPE '\\' ORDER BY ar.name COLLATE NOCASE, al.title, t.track_num LIMIT ?`, [like, like, like, like, limit])
     : await db.select<TrackRow>(`${TRACK_SELECT} ORDER BY t.created_at DESC, t.id DESC LIMIT ?`, [limit]);
   return rows.map(rowToTrack);
 }

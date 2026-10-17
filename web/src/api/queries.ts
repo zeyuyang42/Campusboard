@@ -36,14 +36,22 @@ function toLibraryView(v: unknown): LibraryView {
   };
 }
 
+// library_view writes run one after another, so quick changes can't land out of order.
+let libraryViewWrites: Promise<unknown> = Promise.resolve();
+
 /** The Library's sort and Show choice, remembered in settings.key='library_view'. */
 export function useLibraryView() {
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: keys.libraryView, queryFn: async () => toLibraryView(await (await core()).getSetting(LIBRARY_VIEW_KEY)), staleTime: Infinity });
+  const q = useQuery({
+    queryKey: keys.libraryView,
+    // A settings read that fails falls back to the defaults rather than leaving the page loading.
+    queryFn: async () => toLibraryView(await core().then((c) => c.getSetting(LIBRARY_VIEW_KEY)).catch(() => null)),
+    staleTime: Infinity,
+  });
   const set = (patch: Partial<LibraryView>) => {
     const next = { ...(qc.getQueryData<LibraryView>(keys.libraryView) ?? DEFAULT_VIEW), ...patch };
     qc.setQueryData(keys.libraryView, next);
-    void core().then((c) => c.setSetting(LIBRARY_VIEW_KEY, next)).catch(() => undefined);
+    libraryViewWrites = libraryViewWrites.then(async () => (await core()).setSetting(LIBRARY_VIEW_KEY, next)).catch(() => undefined);
   };
   return { view: q.data, set };
 }

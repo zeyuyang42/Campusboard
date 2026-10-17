@@ -3,6 +3,7 @@ import { NodeDb } from "./helpers/nodeDb.js";
 import { likeContains } from "../src/db/Db.js";
 import { listAlbums, ALBUM_SORTS } from "../src/db/repos/albums.js";
 import { searchTracks } from "../src/db/repos/tracks.js";
+import { getArtist } from "../src/db/repos/artists.js";
 
 let db: NodeDb;
 let nextId = 1;
@@ -120,7 +121,19 @@ describe("listAlbums sort", () => {
   });
 });
 
+describe("getArtist", () => {
+  it("lists an artist's releases by actual release date, newest first", async () => {
+    const hotties = (await listAlbums(db)).find((a) => a.title === "Kiss Yr Frenemies")!.artist_id;
+    album(hotties, "Early EP", { release: "30 Dec 2016 00:00:00 GMT" });
+    // As text, "30 Dec 2016" would sort first.
+    expect((await getArtist(db, hotties))!.albums.map((a) => a.title)).toEqual(["Let Me Do One More", "Kiss Yr Frenemies", "Early EP"]);
+  });
+});
+
 describe("searchTracks", () => {
+  it("matches a track's own artist, like the Albums filter", async () => {
+    expect((await searchTracks(db, "guest player")).map((t) => t.title)).toEqual(["Opener"]);
+  });
   it("escapes wildcards too", async () => {
     expect((await searchTracks(db, "%")).map((t) => t.title)).toEqual(["100% Rain"]);
     expect((await searchTracks(db, "_")).map((t) => t.title)).toEqual(["Sun_Rise"]);
