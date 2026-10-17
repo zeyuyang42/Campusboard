@@ -40,6 +40,9 @@ export async function openBrowserDb(): Promise<Db> {
 }
 
 /** Route Bandcamp fetches through the Vite dev proxy, which strips CORS. */
-export function browserFetch(input: string, init?: RequestInit): Promise<Response> {
-  return fetch(`/bc-proxy/${encodeURIComponent(input)}`, init);
+export async function browserFetch(input: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(`/bc-proxy/${encodeURIComponent(input)}`, init);
+  // The proxy refused the URL or a redirect hop: fail the way the Tauri http plugin does.
+  if (res.headers.get("x-bc-proxy-denied")) throw new Error(`url not allowed on the configured scope: ${res.headers.get("x-bc-proxy-denied")}`);
+  return res;
 }

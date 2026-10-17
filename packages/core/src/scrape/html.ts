@@ -23,6 +23,15 @@ export function pageTitle(html: string): string | null {
   return m ? decodeEntities(m[1]).trim() : null;
 }
 
+/**
+ * Whether the HTML is a Bandcamp-rendered page. Every album, track and artist
+ * page carries a `data-tralbum` or `data-band` JSON attribute; a custom domain
+ * that isn't (or is no longer) Bandcamp has neither.
+ */
+export function hasBandcampMarker(html: string): boolean {
+  return /\sdata-(?:tralbum|band)="/.test(html);
+}
+
 export function stripTags(s: string): string {
   return decodeEntities(s.replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
 }

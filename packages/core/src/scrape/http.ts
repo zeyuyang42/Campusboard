@@ -47,6 +47,10 @@ export class FetchQueue {
           return await res.text();
         } catch (e) {
           if (e instanceof ScrapeError && e.code !== "fetch_failed") throw e;
+          // The http plugin (scopeRedirects on) or the dev proxy refused the URL or a redirect
+          // hop: the page led somewhere that isn't Bandcamp. Retrying can't help.
+          const denied = String(e).match(/url not allowed on the configured scope: (\S+)/);
+          if (denied) throw new ScrapeError("not_bandcamp", `${url} redirected outside Bandcamp (${denied[1]})`);
           lastErr = e;
           if (attempt === retries) break;
           await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));

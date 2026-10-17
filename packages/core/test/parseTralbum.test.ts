@@ -42,7 +42,8 @@ describe("parseTralbumPage", () => {
     }
   });
   it("raises parse_failed when data-tralbum is missing or malformed", () => {
-    expect(() => parseTralbumPage("<html><title>x</title></html>")).toThrow(/No data-tralbum/);
+    expect(() => parseTralbumPage('<html><title>x</title><div data-band="{}"></div></html>')).toThrow(/No data-tralbum/);
+    expect(() => parseTralbumPage("<html><title>x</title></html>")).toThrow(expect.objectContaining({ code: "not_bandcamp" }));
     expect(() => parseTralbumPage('<html><script data-tralbum="{&quot;id&quot;:1}"></script></html>')).toThrow(/schema mismatch/);
   });
   it("marks tracks without a file as not streamable", () => {

@@ -63,6 +63,22 @@ src-tauri/
   Keep requests plain: UA + Accept + Accept-Language.
 - Search `item_url_path` may be absolute or relative; album `img` from search
   lacks the `a` prefix real art URLs need (derive from `art_id`).
+- Custom artist domains (verified 2026-10-17 on music.sufjan.com and
+  music.zoekeating.com): `https://<custom>/album/x` answers 303 to
+  `https://<name>.bandcamp.com/album/x`, but that page's `data-tralbum.url` (and
+  ld+json `@id`) is the custom-domain URL, while album `og:url` is the subdomain.
+  Artist `/music` pages carry `data-tralbum="{"url":"https://<custom>/music"}"`
+  and relative release links. The library stores the `data-tralbum` URL, so a
+  custom-domain artist's albums live under the custom host whichever URL was
+  pasted, and search's `item_url_root` is that same custom host. Hosts that
+  aren't bandcamp.com are accepted only for Bandcamp-shaped paths and only
+  trusted once the page has `data-tralbum`/`data-band` (`not_bandcamp` otherwise).
+  The http scope therefore allows `https://*/album/*`, `/track/*` and `/music`
+  on any host, with `plugins.http.scopeRedirects: true` in tauri.conf.json so
+  every redirect hop is checked too (the 303 lands on `*.bandcamp.com`, which is
+  in scope). Release links from `/music` pages go through `normalizeBandcampUrl`
+  before they are queued, and the browser-mode proxy uses the same
+  `isFetchableBandcampUrl` check on every hop.
 - The Tauri SQL plugin pools connections and has no transaction API. Writes are
   single statements or ordered so any interruption leaves a readable library
   (parents first, deletes last, every step idempotent). Multi-row inserts use

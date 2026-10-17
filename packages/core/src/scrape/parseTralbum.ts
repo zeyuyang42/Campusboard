@@ -1,5 +1,6 @@
 import { ScrapeError } from "./errors.js";
-import { decodeEntities, readJsonAttr, pageTitle } from "./html.js";
+import { decodeEntities, readJsonAttr, pageTitle, hasBandcampMarker } from "./html.js";
+import { normalizeBandcampUrl } from "./url.js";
 import { TralbumSchema, LdJsonSchema } from "./schemas.js";
 import type { ItemType } from "../types.js";
 
@@ -54,6 +55,7 @@ export function parseTralbumPage(html: string, fetchedAt = Date.now()): ParsedTr
     throw new ScrapeError("parse_failed", "data-tralbum is not valid JSON", String(e));
   }
   if (!raw) {
+    if (!hasBandcampMarker(html)) throw new ScrapeError("not_bandcamp", `Not a Bandcamp page (title: ${pageTitle(html) ?? "?"})`);
     throw new ScrapeError("parse_failed", `No data-tralbum attribute found (title: ${pageTitle(html) ?? "?"})`);
   }
   const res = TralbumSchema.safeParse(raw);
@@ -73,8 +75,17 @@ export function parseTralbumPage(html: string, fetchedAt = Date.now()): ParsedTr
     }
   }
 
-  const pageUrl = new URL(t.url);
-  const artistUrl = `${pageUrl.protocol}//${pageUrl.host}`;
+  // t.url is the canonical address: the artist's custom domain when they have
+  // one, even if the page was fetched from name.bandcamp.com. Library URLs use it.
+  let canonical: string;
+  try {
+    const n = normalizeBandcampUrl(t.url);
+    if (n.kind === "artist") throw new Error("artist url");
+    canonical = n.url;
+  } catch {
+    throw new ScrapeError("parse_failed", `data-tralbum url is not an album or track URL: ${t.url}`);
+  }
+  const artistUrl = new URL(canonical).origin;
 
   const tracks: ParsedTrack[] = t.trackinfo.map((ti) => {
     const stream = ti.file?.["mp3-128"] ?? null;
@@ -97,7 +108,7 @@ export function parseTralbumPage(html: string, fetchedAt = Date.now()): ParsedTr
     bandcamp_id: t.id,
     artist: { band_id: t.current.band_id, name: t.artist, url: artistUrl },
     title: t.current.title,
-    url: t.url,
+    url: canonical,
     art_id: t.art_id ?? null,
     release_date: t.album_release_date ?? t.current.release_date ?? null,
     about: t.current.about ?? null,
