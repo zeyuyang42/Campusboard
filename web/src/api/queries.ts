@@ -1,9 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCore } from "./core";
-import type { Job, PlayState } from "@bc/core";
+import { repos, type Job, type PlayState } from "@bc/core";
 
 export const keys = {
-  albums: (sort: string, filter = "all") => ["albums", sort, filter] as const,
+  albums: (sort: string, filter = "all", q = "") => ["albums", sort, filter, q] as const,
   album: (id: number) => ["album", id] as const,
   artists: ["artists"] as const,
   artist: (id: number) => ["artist", id] as const,
@@ -15,10 +15,38 @@ export const keys = {
   challenge: ["jobs", "challenge"] as const,
   search: (q: string) => ["search", q] as const,
   account: ["account"] as const,
+  libraryView: ["settings", "library_view"] as const,
 };
 
 const core = getCore;
-export const useAlbums = (sort: string, filter = "all") => useQuery({ queryKey: keys.albums(sort, filter), queryFn: async () => (await core()).albums(sort as never, filter as never) });
+/** Library albums; while the filter text changes, the previous result stays on screen. */
+export const useAlbums = (sort: string, filter = "all", q = "") =>
+  useQuery({ queryKey: keys.albums(sort, filter, q.trim()), queryFn: async () => (await core()).albums(sort as never, filter as never, q), placeholderData: keepPreviousData });
+
+export type LibraryView = { sort: repos.AlbumSort; filter: repos.AlbumFilter };
+const LIBRARY_VIEW_KEY = "library_view";
+const DEFAULT_VIEW: LibraryView = { sort: "added", filter: "all" };
+const FILTERS: readonly string[] = ["all", "purchased", "wishlist"] satisfies repos.AlbumFilter[];
+
+function toLibraryView(v: unknown): LibraryView {
+  const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  return {
+    sort: (repos.ALBUM_SORTS as readonly unknown[]).includes(o.sort) ? (o.sort as repos.AlbumSort) : DEFAULT_VIEW.sort,
+    filter: FILTERS.includes(o.filter as string) ? (o.filter as repos.AlbumFilter) : DEFAULT_VIEW.filter,
+  };
+}
+
+/** The Library's sort and Show choice, remembered in settings.key='library_view'. */
+export function useLibraryView() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: keys.libraryView, queryFn: async () => toLibraryView(await (await core()).getSetting(LIBRARY_VIEW_KEY)), staleTime: Infinity });
+  const set = (patch: Partial<LibraryView>) => {
+    const next = { ...(qc.getQueryData<LibraryView>(keys.libraryView) ?? DEFAULT_VIEW), ...patch };
+    qc.setQueryData(keys.libraryView, next);
+    void core().then((c) => c.setSetting(LIBRARY_VIEW_KEY, next)).catch(() => undefined);
+  };
+  return { view: q.data, set };
+}
 export const useAlbum = (id: number) => useQuery({ queryKey: keys.album(id), queryFn: async () => (await core()).album(id), enabled: id > 0 });
 export const useArtists = () => useQuery({ queryKey: keys.artists, queryFn: async () => (await core()).artists() });
 export const useArtist = (id: number) => useQuery({ queryKey: keys.artist(id), queryFn: async () => (await core()).artist(id), enabled: id > 0 });

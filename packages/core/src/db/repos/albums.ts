@@ -1,4 +1,5 @@
 import type { Db } from "../Db.js";
+import { likeContains } from "../Db.js";
 import { dismissAlbum } from "./fanItems.js";
 import type { Album, AlbumWithTracks, Track } from "../../types.js";
 
@@ -22,18 +23,45 @@ const ALBUM_SELECT = `
   FROM albums al JOIN artists ar ON ar.id = al.artist_id`;
 
 export type AlbumFilter = "all" | "purchased" | "wishlist";
-const FILTERS: Record<AlbumFilter, string> = { all: "", purchased: "WHERE al.owned = 1", wishlist: `WHERE ${WISHLISTED}` };
+const FILTERS: Record<AlbumFilter, string | null> = { all: null, purchased: "al.owned = 1", wishlist: WISHLISTED };
 
-export type AlbumSort = "added" | "artist" | "release" | "title";
+// Bandcamp release dates are stored as sent ("01 Oct 2021 00:00:00 GMT"), which does not
+// sort as text. This turns them into YYYY + month position + DD; NULL stays NULL (last in DESC).
+const RELEASE_KEY = `(substr(al.release_date, 8, 4) || printf('%02d', instr('JanFebMarAprMayJunJulAugSepOctNovDec', substr(al.release_date, 4, 3))) || substr(al.release_date, 1, 2))`;
+
+/**
+ * Library sort orders, in the order the UI offers them. A new order (e.g. "played" once
+ * listening history exists) is one entry here plus its ORDER BY in SORTS.
+ */
+export const ALBUM_SORTS = ["added", "artist", "title", "release"] as const;
+export type AlbumSort = (typeof ALBUM_SORTS)[number];
 const SORTS: Record<AlbumSort, string> = {
   added: "al.created_at DESC, al.id DESC",
-  artist: "ar.name COLLATE NOCASE, al.release_date DESC",
-  release: "al.release_date DESC, al.title",
-  title: "al.title COLLATE NOCASE",
+  artist: `ar.name COLLATE NOCASE, ${RELEASE_KEY} DESC, al.id DESC`,
+  title: "al.title COLLATE NOCASE, ar.name COLLATE NOCASE, al.id",
+  release: `${RELEASE_KEY} DESC, al.title COLLATE NOCASE, al.id`,
 };
 
-export async function listAlbums(db: Db, sort: AlbumSort = "added", filter: AlbumFilter = "all"): Promise<Album[]> {
-  return (await db.select<AlbumRow>(`${ALBUM_SELECT} ${FILTERS[filter] ?? ""} ORDER BY ${SORTS[sort] ?? SORTS.added}`)).map(rowToAlbum);
+const MATCH = `(al.title LIKE ? ESCAPE '\\' OR ar.name LIKE ? ESCAPE '\\'
+  OR EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND (t.title LIKE ? ESCAPE '\\' OR t.track_artist LIKE ? ESCAPE '\\')))`;
+
+/**
+ * The library's albums. `q` matches album title, artist name, track titles and track
+ * artists as a substring (case-insensitive for ASCII), combined with `filter`.
+ */
+export async function listAlbums(db: Db, sort: AlbumSort = "added", filter: AlbumFilter = "all", q = ""): Promise<Album[]> {
+  const where: string[] = [];
+  const params: unknown[] = [];
+  const f = FILTERS[filter];
+  if (f) where.push(f);
+  const term = q.trim();
+  if (term) {
+    const like = likeContains(term);
+    where.push(MATCH);
+    params.push(like, like, like, like);
+  }
+  const sql = `${ALBUM_SELECT} ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY ${SORTS[sort] ?? SORTS.added}`;
+  return (await db.select<AlbumRow>(sql, params)).map(rowToAlbum);
 }
 
 export async function getAlbum(db: Db, id: number): Promise<Album | null> {
