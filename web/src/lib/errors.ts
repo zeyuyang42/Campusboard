@@ -17,7 +17,7 @@ export function friendlyError(err: unknown, fallback = "Something went wrong."):
   // The cooldown error carries its end time; say when to try again rather than "a few minutes".
   const until = typeof err === "object" && err && (err as { code?: unknown }).code === "challenge_cooldown" ? (err as { detail?: { until?: unknown } }).detail?.until : undefined;
   if (typeof until === "number") return `Bandcamp asked us to slow down. Try again after ${clockTime(until)}.`;
-  const code =typeof err === "object" && err && "code" in err ? String((err as { code: unknown }).code) : typeof err === "string" ? err.match(/^\[(\w+)\]/)?.[1] : undefined;
+  const code = typeof err === "object" && err && "code" in err ? String((err as { code: unknown }).code) : typeof err === "string" ? err.match(/^\[(\w+)\]/)?.[1] : undefined;
   if (code && MESSAGES[code]) return MESSAGES[code];
   if (typeof err === "string" && err.trim()) return err.replace(/^\[\w+\]\s*/, "");
   const msg = err instanceof Error ? err.message : "";

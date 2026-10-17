@@ -20,5 +20,7 @@ export const CHALLENGE_BACKOFF_MS = 60_000;
 export const CHALLENGE_MAX_MS = 30 * 60 * 1000;
 /** A challenge more than this long after the previous cooldown ended starts again from CHALLENGE_BACKOFF_MS. */
 export const CHALLENGE_RESET_MS = 10 * 60 * 1000;
+/** How often a job paused for a cooldown checks whether it was cancelled. */
+export const CHALLENGE_POLL_MS = 1000;
 /** settings key holding the persisted cooldown, so it survives an app restart. */
 export const CHALLENGE_SETTING_KEY = "challenge_until";

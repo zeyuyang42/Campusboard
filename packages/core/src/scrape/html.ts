@@ -26,7 +26,8 @@ export function pageTitle(html: string): string | null {
 /** Bandcamp's bot check: a page titled "Client Challenge" instead of the one asked for. */
 export function isChallengePage(html: string): boolean {
   const t = pageTitle(html);
-  return !!t && /client challenge/i.test(t);
+  // Whole-title match: an album called "Client Challenge | Artist" is not the bot check.
+  return !!t && /^\s*client challenge\s*$/i.test(t);
 }
 
 /**

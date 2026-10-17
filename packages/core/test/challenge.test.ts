@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { NodeDb } from "./helpers/nodeDb.js";
 import { fixture } from "./helpers.js";
 import { FetchQueue } from "../src/scrape/http.js";
-import { ChallengeGate, type ChallengeState } from "../src/scrape/challenge.js";
+import { ChallengeGate, clockTime, type ChallengeState } from "../src/scrape/challenge.js";
+import { isChallengePage } from "../src/scrape/html.js";
 import { ScrapeError } from "../src/scrape/errors.js";
 import { JobRunner } from "../src/services/jobRunner.js";
 import { cachedFetchText } from "../src/services/pageCache.js";
@@ -11,7 +12,7 @@ import { parseTralbumPage } from "../src/scrape/parseTralbum.js";
 import { createCore } from "../src/core.js";
 import * as jobs from "../src/db/repos/jobs.js";
 import { getSetting, setSetting } from "../src/db/repos/settings.js";
-import { CHALLENGE_BACKOFF_MS, CHALLENGE_SETTING_KEY } from "../src/config.js";
+import { CHALLENGE_BACKOFF_MS, CHALLENGE_MAX_MS, CHALLENGE_POLL_MS, CHALLENGE_SETTING_KEY } from "../src/config.js";
 
 const ALBUM_A = "https://someone.bandcamp.com/album/first";
 const ALBUM_B = "https://someone.bandcamp.com/album/second";
@@ -78,30 +79,113 @@ describe("challenge backoff", () => {
     expect(gate.until()).toBeNull();
   });
 
-  it("fails the item when the retry is challenged too, and doubles the cooldown before the next one", async () => {
-    const { runner, calls, gate } = setup(db, [fixture("challenge"), fixture("challenge"), fixture("album")]);
+  it("stops the job when a retry is challenged too: the rest fail with the reason, the cooldown doubles", async () => {
+    const urls = [ALBUM_A, ALBUM_B, "https://someone.bandcamp.com/album/third"];
+    const { runner, calls, gate } = setup(db, [fixture("challenge")]);
     await runner.whenReady();
-    const job = await runner.enqueueSelection({ urls: [ALBUM_A, ALBUM_B], label: "two" });
+    const job = await runner.enqueueSelection({ urls, label: "three" });
     await vi.advanceTimersByTimeAsync(1000);
     await vi.advanceTimersByTimeAsync(CHALLENGE_BACKOFF_MS);
+    // Two challenged requests in all, not two per release.
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
     expect(calls).toEqual([ALBUM_A, ALBUM_A]);
-    const mid = (await jobs.getJob(db, job.id))!;
-    expect(mid.items![0].status).toBe("failed");
-    expect(mid.items![0].error).toMatch(/^\[client_challenge\]/);
-    expect(mid.items![1].status).toBe("queued");
-    expect(mid.status).toBe("queued"); // paused, not failed
+    const end = (await jobs.getJob(db, job.id))!;
+    expect(end.status).toBe("failed");
+    expect(end.error).toMatch(/^\[client_challenge\]/);
+    expect(end.items!.map((i) => i.status)).toEqual(["failed", "failed", "failed"]);
+    expect(end.items![1].error).toMatch(/^\[client_challenge\] Skipped/);
+    expect([end.done, end.failed]).toEqual([0, 3]);
     const extended = (await getSetting<ChallengeState>(db, CHALLENGE_SETTING_KEY))!;
     expect(extended.cooldownMs).toBe(2 * CHALLENGE_BACKOFF_MS);
-    expect(gate.until()).toBe(extended.until);
+    expect(gate.until(extended.until - 1)).toBe(extended.until);
+  });
 
-    // Nothing goes out until the doubled cooldown ends.
-    await vi.advanceTimersByTimeAsync(CHALLENGE_BACKOFF_MS);
-    expect(calls).toHaveLength(2);
-    await vi.advanceTimersByTimeAsync(CHALLENGE_BACKOFF_MS + 1000);
-    expect(calls).toEqual([ALBUM_A, ALBUM_A, ALBUM_B]);
+  it("keeps what imported when a later item's retry is challenged", async () => {
+    const { runner, calls } = setup(db, [fixture("album"), fixture("challenge")]);
+    await runner.whenReady();
+    const job = await runner.enqueueSelection({ urls: [ALBUM_A, ALBUM_B, "https://someone.bandcamp.com/album/third"], label: "three" });
+    await vi.advanceTimersByTimeAsync(CHALLENGE_BACKOFF_MS + 5000);
+    expect(calls).toEqual([ALBUM_A, ALBUM_B, ALBUM_B]);
     const end = (await jobs.getJob(db, job.id))!;
     expect(end.status).toBe("done");
-    expect([end.done, end.failed]).toEqual([1, 1]);
+    expect(end.error).toMatch(/^\[client_challenge\]/);
+    expect([end.done, end.failed]).toEqual([1, 2]);
+  });
+
+  it("frees the runner promptly when a paused job is cancelled", async () => {
+    await setSetting(db, CHALLENGE_SETTING_KEY, { until: T0 + 20 * 60_000, cooldownMs: 20 * 60_000 });
+    const { runner, calls, gate } = setup(db, [fixture("album")]);
+    const waits = vi.spyOn(gate, "waitClear");
+    await runner.whenReady();
+    const job = await runner.enqueue({ url: ALBUM_A });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((await jobs.getJob(db, job.id))!.status).toBe("queued");
+    let waitEnded = false;
+    void (waits.mock.results[0].value as Promise<void>).then(() => { waitEnded = true; });
+    expect(await runner.cancel(job.id)).toBe(true);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(waitEnded).toBe(true); // not 20 minutes later
+    expect(gate.until()).not.toBeNull();
+    expect((await jobs.getJob(db, job.id))!.status).toBe("cancelled");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("drops a persisted cooldown that is longer than the cap or far in the future", async () => {
+    for (const bad of [
+      { until: T0 + 365 * 86_400_000, cooldownMs: 60_000 },
+      { until: T0 + 60_000, cooldownMs: 10 * 86_400_000 },
+      { until: T0 + 2 ** 40, cooldownMs: 2 ** 40 },
+      { until: "soon", cooldownMs: 60_000 },
+    ]) {
+      await setSetting(db, CHALLENGE_SETTING_KEY, bad);
+      const gate = new ChallengeGate(settingsStore(db));
+      await gate.ready();
+      expect(gate.until()).toBeNull();
+    }
+    // A plausible one is kept.
+    await setSetting(db, CHALLENGE_SETTING_KEY, { until: T0 + 5 * 60_000, cooldownMs: 5 * 60_000 });
+    const ok = new ChallengeGate(settingsStore(db));
+    await ok.ready();
+    expect(ok.until()).toBe(T0 + 5 * 60_000);
+  });
+
+  it("never holds longer than the cap from now, and never schedules a timer longer than the poll step", async () => {
+    const gate = new ChallengeGate();
+    await gate.trip(T0);
+    // The clock moves back a year after the trip.
+    expect(gate.until(T0 - 365 * 86_400_000)).toBe(T0 - 365 * 86_400_000 + CHALLENGE_MAX_MS);
+    const timer = vi.spyOn(globalThis, "setTimeout");
+    const g2 = new ChallengeGate();
+    await g2.trip(T0);
+    void g2.waitClear();
+    await vi.advanceTimersByTimeAsync(CHALLENGE_BACKOFF_MS + 10);
+    const delays = timer.mock.calls.map((c) => Number(c[1]));
+    expect(Math.max(...delays)).toBeLessThanOrEqual(CHALLENGE_POLL_MS);
+    expect(g2.until()).toBeNull();
+    timer.mockRestore();
+  });
+
+  it("refuses requests queued behind a challenge without spending a rate-limit slot", async () => {
+    const { fetch, calls } = scriptedFetch([fixture("challenge")]);
+    const queue = new FetchQueue(fetch, 1000);
+    const first = queue.fetchText(ALBUM_A).catch((e) => e);
+    const queued = [queue.fetchText(ALBUM_B).catch((e) => e), queue.fetchText(ALBUM_B).catch((e) => e)];
+    await vi.advanceTimersByTimeAsync(0);
+    expect((await first).code).toBe("client_challenge");
+    for (const p of queued) expect((await p).code).toBe("challenge_cooldown");
+    expect(calls).toEqual([ALBUM_A]);
+  });
+
+  it("matches only a page titled exactly Client Challenge", () => {
+    expect(isChallengePage(fixture("challenge"))).toBe(true);
+    expect(isChallengePage("<html><head><title> client challenge </title></head></html>")).toBe(true);
+    expect(isChallengePage("<html><head><title>Client Challenge | Some Artist</title></head></html>")).toBe(false);
+    expect(isChallengePage("<html><head><title>The Client Challenge EP, by Someone</title></head></html>")).toBe(false);
+  });
+
+  it("rounds the displayed time up to the minute", () => {
+    expect(clockTime(new Date("2026-10-17T14:05:00").getTime())).toBe("14:05");
+    expect(clockTime(new Date("2026-10-17T14:05:40").getTime())).toBe("14:06");
   });
 
   it("keeps the challenge reason on a job whose only item was challenged twice", async () => {

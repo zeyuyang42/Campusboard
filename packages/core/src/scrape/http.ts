@@ -20,8 +20,11 @@ export class FetchQueue {
 
   constructor(private fetchImpl: FetchLike, private minGapMs = RATE_LIMIT_MS, readonly gate = new ChallengeGate()) {}
 
+  /** Run `fn` in turn, at most one start per minGapMs. Refuses (without waiting) during a challenge cooldown. */
   private schedule<T>(fn: () => Promise<T>): Promise<T> {
     const run = async () => {
+      // A request queued behind one that got challenged fails here, before taking a rate-limit slot.
+      this.gate.assertClear();
       const wait = this.lastStart + this.minGapMs - Date.now();
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
       this.lastStart = Date.now();
@@ -36,8 +39,6 @@ export class FetchQueue {
     await this.gate.ready();
     this.gate.assertClear();
     return this.schedule(async () => {
-      // A request queued behind the one that got challenged must not go out either.
-      this.gate.assertClear();
       let lastErr: unknown;
       for (let attempt = 0; attempt <= retries; attempt++) {
         const ctrl = new AbortController();

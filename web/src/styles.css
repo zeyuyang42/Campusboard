@@ -371,3 +371,4 @@ details.about-wrap summary { cursor: pointer; color: var(--text-muted); margin-t
 .browse-card .check.on { background: var(--accent); border-color: var(--accent); }
 .browse-card .badge.right { left: auto; right: 8px; }
 .job .status.paused { color: var(--text-muted); }
+.challenge-paused.inline { font-size: 12px; margin-top: 6px; }
