@@ -16,3 +16,9 @@ export function focusSearch() {
   const el = document.querySelector<HTMLInputElement>("[data-search-input]");
   if (el) { el.focus(); el.select(); } else navigateTo("/search");
 }
+
+/** `/` and Find: the Library's filter field when it is on screen, otherwise the search box. */
+export function focusFind() {
+  const el = document.querySelector<HTMLInputElement>("[data-library-filter]");
+  if (el) { el.focus(); el.select(); } else focusSearch();
+}

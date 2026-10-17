@@ -43,3 +43,11 @@ export function valuesList(rows: number, cols: number): string {
   const row = `(${Array(cols).fill("?").join(",")})`;
   return Array(rows).fill(row).join(",");
 }
+
+/**
+ * A `%term%` pattern for `LIKE ? ESCAPE '\'` with the user's own `%`, `_` and `\`
+ * escaped, so they match literally. SQLite's LIKE folds ASCII case only.
+ */
+export function likeContains(term: string): string {
+  return `%${term.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+}

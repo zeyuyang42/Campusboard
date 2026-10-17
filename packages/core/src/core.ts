@@ -48,7 +48,7 @@ export function createCore(deps: CoreDeps) {
     db,
     queue,
     // library
-    albums: (sort: albums.AlbumSort = "added", filter: albums.AlbumFilter = "all") => albums.listAlbums(db, sort, filter),
+    albums: (sort: albums.AlbumSort = "added", filter: albums.AlbumFilter = "all", q = "") => albums.listAlbums(db, sort, filter, q),
     album: (id: number) => albums.getAlbumWithTracks(db, id),
     deleteAlbum: (id: number) => albums.deleteAlbum(db, id),
     refreshAlbum: async (id: number) => {

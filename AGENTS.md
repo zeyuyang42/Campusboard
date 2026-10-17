@@ -73,6 +73,8 @@ src-tauri/
   doesn't fit the app.
 - Search `item_url_path` may be absolute or relative; album `img` from search
   lacks the `a` prefix real art URLs need (derive from `art_id`).
+- `albums.release_date` is stored as Bandcamp sends it (`01 Oct 2021 00:00:00 GMT`),
+  which does not sort as text; order by `RELEASE_KEY` in `repos/albums.ts` (2026-10-18).
 - Custom artist domains (verified 2026-10-17 on music.sufjan.com and
   music.zoekeating.com): `https://<custom>/album/x` answers 303 to
   `https://<name>.bandcamp.com/album/x`, but that page's `data-tralbum.url` (and

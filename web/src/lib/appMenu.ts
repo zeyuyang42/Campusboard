@@ -3,13 +3,13 @@
 import { isTauri } from "./env";
 import { usePlayer } from "../player/store";
 import { useUi } from "../ui/store";
-import { focusSearch, navigateTo } from "./navigation";
+import { focusFind, navigateTo } from "./navigation";
 
 const actions: Record<string, () => void> = {
   "settings": () => navigateTo("/settings"),
   "import": () => navigateTo("/import"),
   "new-playlist": () => { navigateTo("/playlists"); useUi.getState().setCreatingPlaylist(true); },
-  "find": () => focusSearch(),
+  "find": () => focusFind(),
   "nav:library": () => navigateTo("/library"),
   "nav:search": () => navigateTo("/search"),
   "nav:import": () => navigateTo("/import"),
