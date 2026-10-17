@@ -7,7 +7,7 @@ import { audioEl } from "./player/audio";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { exit } from "@tauri-apps/api/app";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
-import { FAN_ITEMS_ENDPOINT, fanPageUrl, parseFanItemsResponse, parseFanPage } from "@bc/core";
+import { FAN_ITEMS_ENDPOINT, fanPageUrl, parseFanItemsResponse, parseFanPage, repos, type FanItem } from "@bc/core";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const ALBUM = "https://illuminatihotties.bandcamp.com/album/let-me-do-one-more";
@@ -20,6 +20,64 @@ const CUSTOM_ALBUM = `${CUSTOM_ARTIST}/album/snowmelt-ep`;
  * http plugin, imports one purchase and deletes it again unless it was already in the library.
  */
 const SELFTEST_FAN = import.meta.env.VITE_SELFTEST_FAN as string | undefined;
+
+/**
+ * The collection sync's job-guarded statements (INSERT ... SELECT FROM (VALUES) WHERE EXISTS
+ * ... ON CONFLICT, a guarded DELETE, a guarded settings upsert) through the real SQL plugin:
+ * each must write while its job runs and do nothing once it is cancelled. No network. The
+ * job is inserted as 'running' so the live JobRunner never picks it up, the rows use negative
+ * Bandcamp ids no real release has, and everything is removed by id afterwards.
+ */
+async function checkSyncGuards(core: Awaited<ReturnType<typeof getCore>>) {
+  const db = core.db;
+  const KEY = "selftest_sync_guard";
+  const ids = [-9001, -9002];
+  const item = (id: number): FanItem => ({ item_type: "album", bandcamp_id: id, url: `https://selftest.bandcamp.com/album/x${-id}`, fetch_url: `https://selftest.bandcamp.com/album/x${-id}`, title: "selftest", artist: null, token: null });
+  const rows = async () => (await db.select<{ bandcamp_id: number; sync_job: number }>(
+    `SELECT bandcamp_id, sync_job FROM fan_items WHERE list = 'wishlist' AND bandcamp_id IN (${ids.join(",")}) ORDER BY bandcamp_id DESC`));
+  const job = await db.get<{ id: number }>("INSERT INTO jobs (kind, input_url, status) VALUES ('collection', 'selftest://sync-guard', 'running') RETURNING id");
+  const jobId = job!.id;
+  try {
+    // While running: both rows written, the summary-style setting saved.
+    await repos.upsertFanItems(db, "wishlist", [item(ids[0]), item(ids[1])], jobId);
+    const written = await rows();
+    const savedRunning = await repos.setSettingWhileJobRuns(db, KEY, { n: 1 }, jobId);
+    // The guarded DELETE removes rows of the list not seen by this job. Only exercised
+    // while running if the real wishlist is empty, so no real membership is touched.
+    const realWishlist = (await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM fan_items WHERE list = 'wishlist' AND bandcamp_id NOT IN (${ids.join(",")})`))!.n;
+    let deleteWhileRunning: unknown = "skipped (real wishlist rows present)";
+    if (realWishlist === 0) {
+      await db.run("UPDATE fan_items SET sync_job = ? WHERE list = 'wishlist' AND bandcamp_id = ?", [jobId + 1_000_000, ids[1]]);
+      await repos.removeUnseen(db, "wishlist", jobId);
+      deleteWhileRunning = (await rows()).map((r) => r.bandcamp_id);
+      await repos.upsertFanItems(db, "wishlist", [item(ids[1])], jobId);
+    }
+
+    // Cancelled: every statement is a no-op.
+    await db.run("UPDATE jobs SET status = 'cancelled' WHERE id = ?", [jobId]);
+    await repos.upsertFanItems(db, "wishlist", [{ ...item(ids[0]), title: "changed" }], jobId);
+    const titleAfterCancel = (await db.get<{ title: string }>("SELECT title FROM fan_items WHERE list = 'wishlist' AND bandcamp_id = ?", [ids[0]]))?.title;
+    await db.run("UPDATE fan_items SET sync_job = ? WHERE list = 'wishlist' AND bandcamp_id = ?", [jobId + 1_000_000, ids[1]]);
+    await repos.removeUnseen(db, "wishlist", jobId);
+    const afterCancelDelete = (await rows()).length;
+    const savedCancelled = await repos.setSettingWhileJobRuns(db, KEY, { n: 2 }, jobId);
+    const setting = await db.get<{ value: string }>("SELECT value FROM settings WHERE key = ?", [KEY]);
+    const result = {
+      upsertWhileRunning: written.length === 2 && written.every((r) => r.sync_job === jobId),
+      settingWhileRunning: savedRunning,
+      deleteWhileRunning,
+      upsertAfterCancelIgnored: titleAfterCancel === "selftest",
+      deleteAfterCancelIgnored: afterCancelDelete === 2,
+      settingAfterCancelIgnored: !savedCancelled && setting?.value === JSON.stringify({ n: 1 }),
+    };
+    const deleteOk = realWishlist !== 0 || JSON.stringify(deleteWhileRunning) === JSON.stringify([ids[0]]);
+    return { ok: deleteOk && result.upsertWhileRunning && result.settingWhileRunning && result.upsertAfterCancelIgnored && result.deleteAfterCancelIgnored && result.settingAfterCancelIgnored, ...result };
+  } finally {
+    await db.run(`DELETE FROM fan_items WHERE bandcamp_id IN (${ids.join(",")})`);
+    await db.run("DELETE FROM settings WHERE key = ?", [KEY]);
+    await db.run("DELETE FROM jobs WHERE id = ?", [jobId]);
+  }
+}
 
 export async function runSelfTest() {
   const out: Record<string, unknown> = { startedAt: new Date().toISOString() };
@@ -85,6 +143,7 @@ export async function runSelfTest() {
       allRejected: deniedResults.every((r) => r.includes("not allowed on the configured scope")),
       results: Object.fromEntries(denied.map((u, i) => [u, deniedResults[i]])),
     };
+    out.syncGuards = await checkSyncGuards(core).catch((e) => String(e));
     out.collection = SELFTEST_FAN ? await (async () => {
       const page = parseFanPage(await core.queue.fetchText(fanPageUrl(SELFTEST_FAN)));
       // POST to bandcamp.com/api/... through the http scope, two items only.

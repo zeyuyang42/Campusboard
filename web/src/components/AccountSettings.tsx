@@ -75,9 +75,11 @@ export function AccountSettings() {
         <p className="muted">
           Last synced {new Date(last.at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}:{" "}
           {plural(last.collection, "purchase", "purchases")} and {plural(last.wishlist, "wishlist item", "wishlist items")}.
-          {!last.complete && (last.authenticated && last.cookie !== "ok"
-            ? " This sync couldn't sign in, so nothing was removed from Purchased or Wishlist."
-            : " Bandcamp stopped paging early, so items that left your lists were kept.")}
+          {!last.complete && (last.authenticated && last.cookie === "none"
+            ? " Signed out: items no longer listed weren't removed. Add your cookie and sync to update."
+            : last.authenticated && last.cookie !== "ok"
+              ? " This sync couldn't sign in, so nothing was removed from Purchased or Wishlist."
+              : " Bandcamp stopped paging early, so items that left your lists were kept.")}
         </p>
       )}
       {cookieLine && <p className={cookieLine.error ? "error" : "muted"}>{cookieLine.text}</p>}
