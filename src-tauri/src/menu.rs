@@ -171,15 +171,19 @@ fn focused_label<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
 enum CloseTarget {
     Mini,
     Main,
+    Nothing,
 }
 
 /// The mini window is borderless, so AppKit's performClose: (the predefined Close Window
 /// item) refuses it; Close Window is a custom item that decides here instead.
+/// No focused webview window means a native panel (About, a dialog) has focus: do
+/// nothing rather than hide the main window. tao gives no handle to that panel, so it
+/// can't be sent performClose:; such panels close with their own button or Esc.
 fn close_target(focused: Option<&str>) -> CloseTarget {
-    if focused == Some(crate::mini::LABEL) {
-        CloseTarget::Mini
-    } else {
-        CloseTarget::Main
+    match focused {
+        Some(crate::mini::LABEL) => CloseTarget::Mini,
+        Some(_) => CloseTarget::Main,
+        None => CloseTarget::Nothing,
     }
 }
 
@@ -200,6 +204,7 @@ pub fn close_window<R: Runtime>(app: &AppHandle<R>, focused: Option<&str>) {
                 }
             }
         }
+        CloseTarget::Nothing => {}
     }
 }
 
@@ -238,7 +243,7 @@ mod tests {
     fn close_window_hides_the_mini_window_only_when_it_is_focused() {
         assert_eq!(close_target(Some("mini")), CloseTarget::Mini);
         assert_eq!(close_target(Some("main")), CloseTarget::Main);
-        assert_eq!(close_target(None), CloseTarget::Main);
+        assert_eq!(close_target(None), CloseTarget::Nothing);
     }
 
     #[test]

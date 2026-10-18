@@ -135,8 +135,11 @@ src-tauri/
   (save the play state and hide the main window), which is harmless.
 - ⌘W is a custom Close Window item (`menu.rs` `close_window`), not the predefined
   one: AppKit's `performClose:` refuses the borderless mini window. It hides the
-  mini window when that is focused, and otherwise sends the main window the usual
-  close request.
+  mini window when that is focused, and sends the main window the usual close
+  request when the main window is focused. With a native panel focused (About), it
+  does nothing, because tao gives no handle to send that panel `performClose:`.
+  Whenever Rust shows the mini window, it also sends the main window a `hello`, so
+  the state stream never waits on WebKit's `visibilitychange`.
 - Window behaviour follows Music.app: closing hides the window and playback
   continues (`persist.ts` prevents the close and calls `hide()`), the Dock icon
   reopens it (`RunEvent::Reopen` in lib.rs), Cmd+Q quits. Menu accelerators use

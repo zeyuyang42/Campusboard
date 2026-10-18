@@ -63,6 +63,8 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>, focus_first: bool) -> tauri::Resul
                 w.unminimize()?;
             }
             w.show()?;
+            // Restart the state stream without waiting for WebKit's visibilitychange.
+            let _ = app.emit_to("main", "mini:command", serde_json::json!({ "type": "hello" }));
             w.set_focus()
         }
         _ => {

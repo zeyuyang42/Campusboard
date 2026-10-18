@@ -442,16 +442,22 @@ async function miniPlayerCheck() {
     const playingWhileHidden = usePlayer.getState().status === "playing";
     await sleep(2500);
     const quietWhileHidden = miniBridgeInfo().sent === sent0;
+    // Shown again (the dock button's path): Rust says hello itself, so the stream restarts
+    // without relying on WebKit's visibilitychange, and the mini window shows the current track.
+    await invoke("toggle_mini_player"); await sleep(600);
+    const liveAfterReshow = miniBridgeInfo().live;
+    const reshown = await ask({ do: "state" });
+    const reshowTitleOk = !!reshown && reshown.title === usePlayer.getState().current()?.title;
     // Close Window on the main window still sends it a close request, which hides it.
     await invoke("selftest_menu", { id: "close-window", focused: "main" }); await sleep(800);
     const mainCloseHides = (await win.isVisible()) === false;
     await win.show(); await win.setFocus().catch(() => undefined); await sleep(300);
     const menuOk = forgedMenuIgnored && menuDispatched && controlActed && controlKeptHidden;
-    const closeOk = liveBeforeClose && miniClosed && mainUntouched && !liveAfterClose && quietWhileHidden && mainCloseHides;
+    const closeOk = liveBeforeClose && miniClosed && mainUntouched && !liveAfterClose && quietWhileHidden && mainCloseHides && liveAfterReshow && reshowTitleOk;
     Object.assign(out, {
       opened, titleOk, wasPlaying, paused, shownPaused, resumed, seeked, rejectsBad, mainShown, commands, perms,
       forgedMenuIgnored, menuDispatched, controlActed, controlKeptHidden,
-      liveBeforeClose, miniClosed, mainUntouched, liveAfterClose, playingWhileHidden, quietWhileHidden, mainCloseHides,
+      liveBeforeClose, miniClosed, mainUntouched, liveAfterClose, playingWhileHidden, quietWhileHidden, liveAfterReshow, reshowTitleOk, mainCloseHides,
       info: miniBridgeInfo(),
     });
     out.ok = opened && out.visible === true && titleOk && perms && playbackOk && rejectsBad && mainShown && menuOk && closeOk;
