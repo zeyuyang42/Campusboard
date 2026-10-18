@@ -47,7 +47,7 @@ web/src/
 src-tauri/
   src/lib.rs               registers sql/http/dialog/fs/opener/window-state plugins, migrations, Dock reopen
   src/backup.rs            database backup destination check + atomic copy (Rust-side save dialog)
-  src/menu.rs              native menu bar; custom items emit a `menu` event handled by web/src/lib/appMenu.ts
+  src/menu.rs              native menu bar; custom items run `window.__bcMenu(id)` in the main webview (web/src/lib/appMenu.ts)
   src/mini.rs              creates/toggles the `mini` window (Window > Mini Player, dock button command)
   migrations/*.sql         schema; every statement is IF NOT EXISTS so an old library.db can be adopted
   capabilities/default.json  URL scope for http (bandcamp.com, bcbits.com, custom-domain paths; LAN denied), fs scope ($APPDATA), window permissions, app commands
@@ -122,7 +122,21 @@ src-tauri/
   until it is added there and granted (normally to `default.json`, the main window).
 - The mini player window has no audio and no core (verified 2026-10-18, selftest
   `miniPlayer`): it drives the main window's store over `mini:state` /
-  `mini:command` events, which keep working with the main window hidden.
+  `mini:command` events, which keep working with the main window hidden. The
+  main window sends state only between the mini window's `hello` and `bye`.
+- Event permissions have no scope: a window with `core:event:allow-emit-to` can
+  send any event name to any window, and a listener with the default (Any)
+  target receives events emitted to every window. So anything the main window
+  listens for can be sent, and anything emitted can be read, by the mini window.
+  Validate every event payload, and don't carry anything that must stay private
+  to the main window in events. Menu actions therefore go from Rust to the main
+  page with `webview.eval` (`window.__bcMenu`), not as a `menu` event. A forged
+  `tauri://close-requested` from the mini window would only do what ⌘W does
+  (save the play state and hide the main window), which is harmless.
+- ⌘W is a custom Close Window item (`menu.rs` `close_window`), not the predefined
+  one: AppKit's `performClose:` refuses the borderless mini window. It hides the
+  mini window when that is focused, and otherwise sends the main window the usual
+  close request.
 - Window behaviour follows Music.app: closing hides the window and playback
   continues (`persist.ts` prevents the close and calls `hide()`), the Dock icon
   reopens it (`RunEvent::Reopen` in lib.rs), Cmd+Q quits. Menu accelerators use

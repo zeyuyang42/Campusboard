@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  buildMiniState, extrapolatePosition, miniStateKey, MiniStateThrottle, parseMiniCommand, parseMiniState, type MiniState,
+  buildMiniState, extrapolatePosition, miniLiveAfter, miniStateKey, MiniStateThrottle, parseMiniCommand, parseMiniState, type MiniState,
 } from "../src/services/miniPlayer.js";
 import { DEFAULT_THEME } from "../src/theme/index.js";
 
@@ -13,7 +13,7 @@ const base = (over: Partial<MiniState> = {}): MiniState => ({
 
 describe("parseMiniCommand", () => {
   it("accepts the known commands and drops extra fields", () => {
-    for (const type of ["hello", "toggle", "play", "pause", "next", "prev", "showMain"]) {
+    for (const type of ["hello", "bye", "toggle", "play", "pause", "next", "prev", "showMain"]) {
       expect(parseMiniCommand({ type, extra: "x" })).toEqual({ type });
     }
     expect(parseMiniCommand({ type: "seek", sec: 12.5 })).toEqual({ type: "seek", sec: 12.5 });
@@ -107,6 +107,28 @@ describe("MiniStateThrottle", () => {
     expect(t.next(base(), 10)).toBe(false);
     t.reset();
     expect(t.next(base(), 20)).toBe(true);
+  });
+});
+
+describe("miniLiveAfter", () => {
+  it("starts on hello, stops on bye, and is left alone by everything else", () => {
+    expect(parseMiniCommand({ type: "bye" })).toEqual({ type: "bye" });
+    expect(miniLiveAfter(false, { type: "hello" })).toBe(true);
+    expect(miniLiveAfter(true, { type: "bye" })).toBe(false);
+    for (const cmd of [{ type: "toggle" }, { type: "seek", sec: 3 }, { type: "showMain" }] as const) {
+      expect(miniLiveAfter(true, cmd)).toBe(true);
+      expect(miniLiveAfter(false, cmd)).toBe(false);
+    }
+  });
+
+  it("open, hide, reopen: sends only while open", () => {
+    let live = false;
+    const sent: boolean[] = [];
+    for (const type of ["hello", "toggle", "bye", "next", "hello"] as const) {
+      live = miniLiveAfter(live, { type });
+      sent.push(live);
+    }
+    expect(sent).toEqual([true, true, false, false, true]);
   });
 });
 

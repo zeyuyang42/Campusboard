@@ -1,8 +1,8 @@
-//! Native macOS menu bar. Custom items emit a `menu` event with their id; the
-//! web app maps ids to actions in `web/src/lib/appMenu.ts`.
+//! Native macOS menu bar. Custom items run `window.__bcMenu(id)` in the main webview
+//! (see `dispatch`); the web app maps ids to actions in `web/src/lib/appMenu.ts`.
 
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 
 fn item<R: Runtime>(app: &AppHandle<R>, id: &str, label: &str, accel: Option<&str>) -> tauri::Result<MenuItem<R>> {
     MenuItem::with_id(app, id, label, true, accel)
@@ -44,7 +44,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             &item(app, "import", "Import from Link…", Some("CmdOrCtrl+I"))?,
             &item(app, "new-playlist", "New Playlist", Some("CmdOrCtrl+N"))?,
             &sep()?,
-            &PredefinedMenuItem::close_window(app, None)?,
+            &item(app, "close-window", "Close Window", Some("CmdOrCtrl+W"))?,
         ],
     )?;
 
@@ -112,7 +112,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             &sep()?,
             &item(app, "mini-player", "Mini Player", Some("CmdOrCtrl+Shift+M"))?,
             &sep()?,
-            &PredefinedMenuItem::close_window(app, None)?,
+            &item(app, "close-window:window-menu", "Close Window", None)?,
         ],
     )?;
 
@@ -126,18 +126,97 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     Menu::with_items(app, &[&app_menu, &file, &edit, &view, &controls, &window, &help])
 }
 
-/// Custom items bring the (possibly hidden) main window forward and hand the
-/// id to the web app. Predefined items never reach this handler. Mini Player is
-/// the exception: it toggles the mini window and leaves the main one as it is.
+/// Playback items act on the player wherever the user is (the mini window included),
+/// so they don't bring the main window forward.
+const CONTROLS: &[&str] = &["play-pause", "next", "previous", "volume-up", "volume-down", "shuffle", "repeat"];
+
+/// Custom items bring the (possibly hidden) main window forward and hand the id to the
+/// web app. Predefined items never reach this handler. Exceptions: Mini Player toggles
+/// the mini window, Close Window closes the focused window, and Controls items leave
+/// the windows as they are.
 pub fn on_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
     if id == "mini-player" {
-        if let Err(e) = crate::mini::toggle(app) {
+        if let Err(e) = crate::mini::toggle(app, true) {
             eprintln!("mini player: {e}");
         }
         return;
     }
-    show_main(app);
-    let _ = app.emit("menu", id.to_string());
+    if id.starts_with("close-window") {
+        close_window(app, focused_label(app).as_deref());
+        return;
+    }
+    if !CONTROLS.contains(&id) {
+        show_main(app);
+    }
+    dispatch(app, id);
+}
+
+/// Run a menu action in the main window. Evaluated in that webview rather than sent as an
+/// event: the mini window may listen to and emit any event name (event permissions have
+/// no scope), so it must not be able to read or forge menu actions that way.
+fn dispatch<R: Runtime>(app: &AppHandle<R>, id: &str) {
+    if let (Some(w), Ok(arg)) = (app.get_webview_window("main"), serde_json::to_string(id)) {
+        let _ = w.eval(format!("window.__bcMenu && window.__bcMenu({arg})"));
+    }
+}
+
+fn focused_label<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
+    app.webview_windows()
+        .into_iter()
+        .find(|(_, w)| w.is_focused().unwrap_or(false))
+        .map(|(label, _)| label)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum CloseTarget {
+    Mini,
+    Main,
+}
+
+/// The mini window is borderless, so AppKit's performClose: (the predefined Close Window
+/// item) refuses it; Close Window is a custom item that decides here instead.
+fn close_target(focused: Option<&str>) -> CloseTarget {
+    if focused == Some(crate::mini::LABEL) {
+        CloseTarget::Mini
+    } else {
+        CloseTarget::Main
+    }
+}
+
+/// Close Window (⌘W): hide the mini window when it is focused. Otherwise send the main
+/// window the same close request the red button (and the old predefined item) sends,
+/// which persist.ts turns into a hide after saving the play state.
+pub fn close_window<R: Runtime>(app: &AppHandle<R>, focused: Option<&str>) {
+    match close_target(focused) {
+        CloseTarget::Mini => {
+            if let Some(w) = app.get_webview_window(crate::mini::LABEL) {
+                crate::mini::hide(app, &w);
+            }
+        }
+        CloseTarget::Main => {
+            if let Some(w) = app.get_webview_window("main") {
+                if w.is_visible().unwrap_or(false) {
+                    let _ = w.close();
+                }
+            }
+        }
+    }
+}
+
+/// Selftest helper (debug builds only): run a menu item through the same handler a click
+/// uses. Close Window takes the focused label from the caller, since a selftest window
+/// started from a terminal may never get focus.
+#[tauri::command]
+pub fn selftest_menu(app: AppHandle, id: String, focused: Option<String>) -> Result<(), String> {
+    if !cfg!(debug_assertions) {
+        return Err("selftest only".into());
+    }
+    if id.starts_with("close-window") {
+        close_window(&app, focused.as_deref());
+    } else {
+        on_event(&app, &id);
+    }
+    Ok(())
 }
 
 /// Show and focus the main window; used by menu items and Dock reopen.
@@ -148,5 +227,25 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
         }
         let _ = w.show();
         let _ = w.set_focus();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn close_window_hides_the_mini_window_only_when_it_is_focused() {
+        assert_eq!(close_target(Some("mini")), CloseTarget::Mini);
+        assert_eq!(close_target(Some("main")), CloseTarget::Main);
+        assert_eq!(close_target(None), CloseTarget::Main);
+    }
+
+    #[test]
+    fn controls_do_not_raise_the_main_window() {
+        for id in ["play-pause", "next", "previous", "volume-up", "volume-down", "shuffle", "repeat"] {
+            assert!(CONTROLS.contains(&id));
+        }
+        assert!(!CONTROLS.contains(&"now-playing") && !CONTROLS.contains(&"settings"));
     }
 }

@@ -43,6 +43,7 @@ export interface MiniState {
 
 export type MiniCommand =
   | { type: "hello" } // the mini window opened or became visible: send the full state now
+  | { type: "bye" } // the mini window was hidden: stop sending until the next hello
   | { type: "toggle" }
   | { type: "play" }
   | { type: "pause" }
@@ -51,7 +52,7 @@ export type MiniCommand =
   | { type: "seek"; sec: number }
   | { type: "showMain" };
 
-const SIMPLE = new Set(["hello", "toggle", "play", "pause", "next", "prev", "showMain"]);
+const SIMPLE = new Set(["hello", "bye", "toggle", "play", "pause", "next", "prev", "showMain"]);
 /** Longer than any track; the store clamps to the real duration anyway. */
 const MAX_SEEK_SEC = 24 * 3600;
 const STATUSES = new Set<string>(["idle", "loading", "playing", "paused"]);
@@ -158,6 +159,17 @@ export class MiniStateThrottle {
 
   /** Forget the last state (the mini window asked for it): the next one is always sent. */
   reset() { this.last = null; }
+}
+
+/**
+ * Whether the main window should be sending state after `cmd`: `hello` (opened or shown)
+ * turns it on, `bye` (hidden) turns it off, anything else leaves it as it was. A command
+ * from a window that never said hello doesn't turn it on either.
+ */
+export function miniLiveAfter(live: boolean, cmd: MiniCommand): boolean {
+  if (cmd.type === "hello") return true;
+  if (cmd.type === "bye") return false;
+  return live;
 }
 
 /** The position to show `elapsedMs` after `state` arrived. */

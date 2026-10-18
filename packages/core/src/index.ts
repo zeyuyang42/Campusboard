@@ -8,7 +8,7 @@ export {
   type NowPlayingMetadata, type NowPlayingArtwork, type SessionPlaybackState, type PositionState,
 } from "./services/nowPlaying.js";
 export {
-  MINI_EVENTS, parseMiniCommand, parseMiniState, buildMiniState, miniStateKey, MiniStateThrottle, extrapolatePosition,
+  MINI_EVENTS, parseMiniCommand, parseMiniState, buildMiniState, miniStateKey, MiniStateThrottle, extrapolatePosition, miniLiveAfter,
   type MiniState, type MiniCommand, type MiniTrack, type MiniPalette, type MiniStatus, type MiniSource,
 } from "./services/miniPlayer.js";
 export { getFreshStreamUrl, refreshAlbum } from "./services/streamService.js";

@@ -5,7 +5,7 @@
 //! when it is created and saves them at exit.
 
 use tauri::window::Color;
-use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 
 pub const LABEL: &str = "mini";
 /// Compact strip; web/src/mini/window.ts has the same sizes and the square-art one.
@@ -20,23 +20,44 @@ enum Toggle {
     Hide,
 }
 
-/// What Window > Mini Player does: hide a visible, unminimized mini window, otherwise bring it up.
-fn toggle_action(exists: bool, visible: bool, minimized: bool) -> Toggle {
-    match (exists, visible && !minimized) {
-        (false, _) => Toggle::Create,
-        (true, true) => Toggle::Hide,
-        (true, false) => Toggle::Show,
+/// Hide a showing mini window, otherwise bring it up. With `focus_first` (Window > Mini
+/// Player, ⌘⇧M) a showing window that isn't focused, e.g. buried under other apps with
+/// keep-on-top off, is brought forward instead; the dock button hides it outright.
+fn toggle_action(exists: bool, visible: bool, minimized: bool, focused: bool, focus_first: bool) -> Toggle {
+    if !exists {
+        return Toggle::Create;
+    }
+    if visible && !minimized && (focused || !focus_first) {
+        Toggle::Hide
+    } else {
+        Toggle::Show
     }
 }
 
-pub fn toggle<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+/// Hide the mini window and tell the main window to stop sending it state. The page's
+/// visibilitychange sends the same `bye`; this one doesn't depend on WebKit reporting it.
+pub fn hide<R: Runtime>(app: &AppHandle<R>, w: &tauri::WebviewWindow<R>) {
+    let _ = w.hide();
+    let _ = app.emit_to("main", "mini:command", serde_json::json!({ "type": "bye" }));
+}
+
+pub fn toggle<R: Runtime>(app: &AppHandle<R>, focus_first: bool) -> tauri::Result<()> {
     let existing = app.get_webview_window(LABEL);
     let action = match &existing {
-        Some(w) => toggle_action(true, w.is_visible().unwrap_or(false), w.is_minimized().unwrap_or(false)),
-        None => toggle_action(false, false, false),
+        Some(w) => toggle_action(
+            true,
+            w.is_visible().unwrap_or(false),
+            w.is_minimized().unwrap_or(false),
+            w.is_focused().unwrap_or(false),
+            focus_first,
+        ),
+        None => Toggle::Create,
     };
     match (action, existing) {
-        (Toggle::Hide, Some(w)) => w.hide(),
+        (Toggle::Hide, Some(w)) => {
+            hide(app, &w);
+            Ok(())
+        }
         (Toggle::Show, Some(w)) => {
             if w.is_minimized().unwrap_or(false) {
                 w.unminimize()?;
@@ -70,7 +91,7 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 /// The dock bar's mini player button (main window only, see capabilities/default.json).
 #[tauri::command]
 pub fn toggle_mini_player(app: AppHandle) -> Result<(), String> {
-    toggle(&app).map_err(|e| e.to_string())
+    toggle(&app, false).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -79,11 +100,19 @@ mod tests {
 
     #[test]
     fn toggles_like_a_window_menu_item() {
-        assert_eq!(toggle_action(false, false, false), Toggle::Create);
-        assert_eq!(toggle_action(true, true, false), Toggle::Hide);
-        assert_eq!(toggle_action(true, false, false), Toggle::Show);
-        // Minimized counts as not showing: bring it back rather than hiding it.
-        assert_eq!(toggle_action(true, true, true), Toggle::Show);
+        for focus_first in [true, false] {
+            assert_eq!(toggle_action(false, false, false, false, focus_first), Toggle::Create);
+            assert_eq!(toggle_action(true, true, false, true, focus_first), Toggle::Hide);
+            assert_eq!(toggle_action(true, false, false, false, focus_first), Toggle::Show);
+            // Minimized counts as not showing: bring it back rather than hiding it.
+            assert_eq!(toggle_action(true, true, true, false, focus_first), Toggle::Show);
+        }
+    }
+
+    #[test]
+    fn the_shortcut_brings_a_buried_window_forward_and_the_dock_button_hides_it() {
+        assert_eq!(toggle_action(true, true, false, false, true), Toggle::Show);
+        assert_eq!(toggle_action(true, true, false, false, false), Toggle::Hide);
     }
 
     #[test]

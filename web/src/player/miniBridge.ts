@@ -3,14 +3,14 @@
 // while playing) and maps its commands to player store actions, so the store stays the only
 // owner of the audio element and Now Playing keeps following it. Works with this window
 // hidden: closing it only hides it and its page keeps running.
-import { buildMiniState, MINI_EVENTS, MiniStateThrottle, parseMiniCommand, type MiniCommand } from "@bc/core";
+import { buildMiniState, MINI_EVENTS, miniLiveAfter, MiniStateThrottle, parseMiniCommand, type MiniCommand } from "@bc/core";
 import { usePlayer } from "./store";
 import { useTheme } from "../theme/store";
 import { appliedPalette, onPaletteChange } from "../theme/usePalette";
 import { createBus, type MiniBus } from "../mini/bus";
 import { isTauri } from "../lib/env";
 
-const info = { hellos: 0, sent: 0, commands: 0, rejected: 0, lastCommand: null as string | null };
+const info = { live: false, hellos: 0, byes: 0, sent: 0, commands: 0, rejected: 0, lastCommand: null as string | null };
 /** Counters for the selftest. */
 export const miniBridgeInfo = () => ({ ...info });
 
@@ -27,6 +27,7 @@ function run(cmd: MiniCommand, sendNow: () => void) {
   const p = usePlayer.getState();
   switch (cmd.type) {
     case "hello": info.hellos++; sendNow(); return;
+    case "bye": info.byes++; return;
     case "toggle": p.toggle(); return;
     case "play": p.play(); return;
     case "pause": p.pause(); return;
@@ -68,10 +69,12 @@ export async function initMiniBridge() {
     if (!cmd) { info.rejected++; return; }
     info.commands++;
     info.lastCommand = cmd.type;
+    info.live = miniLiveAfter(info.live, cmd);
     run(cmd, () => push(true));
   });
-  // Before the first hello nobody is listening; skip the work (and the IPC) until then.
-  const live = () => info.hellos > 0;
+  // Only while the mini window is showing: hello (opened, shown) starts it, bye (hidden,
+  // from the page or from Rust) stops it.
+  const live = () => info.live;
   usePlayer.subscribe(() => { if (live()) push(false); });
   useTheme.subscribe(() => { if (live()) push(false); });
   onPaletteChange(() => { if (live()) push(false); });

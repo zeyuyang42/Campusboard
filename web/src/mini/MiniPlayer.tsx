@@ -12,10 +12,16 @@ import { formatDuration } from "../lib/format";
 let bus: MiniBus | null = null;
 const send = (cmd: MiniCommand) => void bus?.send(MINI_EVENTS.command, cmd).catch(() => undefined);
 
+let lastTheme: string | null = null;
 function paint(s: MiniState) {
   const root = document.documentElement;
-  const theme = parseTheme(s.theme).theme;
-  if (theme) applyTheme(theme, root);
+  // The theme rides along with every tick; re-validate and re-apply it only when it changed.
+  const themeJson = JSON.stringify(s.theme ?? null);
+  if (themeJson !== lastTheme) {
+    lastTheme = themeJson;
+    const theme = parseTheme(s.theme).theme;
+    if (theme) applyTheme(theme, root);
+  }
   const p = s.palette;
   if (p) {
     root.style.setProperty("--accent", p.accent);
@@ -49,9 +55,10 @@ function useMiniState() {
       send({ type: "hello" });
     })();
     // Shown again after being hidden: the main window may have changed track meanwhile.
-    const onVis = () => { if (document.visibilityState === "visible") send({ type: "hello" }); };
+    // Hidden: the main window stops sending state until the next hello.
+    const onVis = () => send({ type: document.visibilityState === "visible" ? "hello" : "bye" });
     document.addEventListener("visibilitychange", onVis);
-    void initMiniWindow();
+    void initMiniWindow(() => send({ type: "bye" }));
     return () => { cancelled = true; off?.(); document.removeEventListener("visibilitychange", onVis); };
   }, []);
   return st;
@@ -137,7 +144,7 @@ export function MiniPlayer() {
               {tall ? <StripIcon size={15} /> : <SquareIcon size={15} />}
             </button>
             <button className="mini-btn small" data-cmd="showMain" title="Show main window" onClick={() => send({ type: "showMain" })}><ExpandIcon size={15} /></button>
-            <button className="mini-btn small" title="Close mini player" onClick={() => void hideMini()}><CloseIcon size={15} /></button>
+            <button className="mini-btn small" title="Close mini player" onClick={() => { send({ type: "bye" }); void hideMini(); }}><CloseIcon size={15} /></button>
           </div>
         </div>
         <Seek position={position} duration={s?.duration ?? 0} />
@@ -163,6 +170,8 @@ function useSelftestHook(s: MiniState | null) {
         const req = payload as { do?: string; cmd?: string; sec?: number; id?: number };
         if (req.do === "click") (document.querySelector(`[data-cmd="${String(req.cmd)}"]`) as HTMLButtonElement | null)?.click();
         if (req.do === "seek" && typeof req.sec === "number") send({ type: "seek", sec: req.sec });
+        // What a compromised page here could try: the main window must ignore it.
+        if (req.do === "forgeMenu") await b.send("menu", "queue");
         const report: Record<string, unknown> = {
           id: req.id,
           title: document.querySelector('[data-testid="mini-title"]')?.textContent ?? null,

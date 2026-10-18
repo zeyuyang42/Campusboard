@@ -412,16 +412,57 @@ async function miniPlayerCheck() {
     const perms = report?.setOnTop === "ok" && report?.drag === "ok" && report?.sqlDenied === true && report?.commandDenied === true;
     // Without playback (the stream didn't start) only the command path is checked.
     const playbackOk = wasPlaying ? paused && shownPaused && resumed && seeked : commands >= 4;
-    Object.assign(out, { opened, titleOk, wasPlaying, paused, shownPaused, resumed, seeked, rejectsBad, mainShown, commands, perms, info: miniBridgeInfo() });
-    out.ok = opened && out.visible === true && titleOk && perms && playbackOk && rejectsBad && mainShown;
+
+    // Menu actions reach this page only from Rust (menu.rs `dispatch`): a `menu` event
+    // emitted by the mini window does nothing, the real handler does.
+    const queueOpen = () => usePlayer.getState().queueOpen;
+    const q0 = queueOpen();
+    await ask({ do: "forgeMenu" }); await sleep(400);
+    const forgedMenuIgnored = queueOpen() === q0;
+    await invoke("selftest_menu", { id: "queue" }); await sleep(400);
+    const menuDispatched = queueOpen() !== q0;
+    await invoke("selftest_menu", { id: "queue" }); await sleep(300);
+    // Controls items leave the windows alone: with the main window hidden, Play/Pause acts
+    // on the player and the main window stays hidden.
+    await win.hide(); await sleep(300);
+    const st0 = usePlayer.getState().status;
+    await invoke("selftest_menu", { id: "play-pause" }); await sleep(900);
+    const controlActed = usePlayer.getState().status !== st0;
+    const controlKeptHidden = (await win.isVisible()) === false;
+    await invoke("selftest_menu", { id: "play-pause" }); await sleep(1500);
+    await win.show(); await sleep(300);
+    // Close Window with the mini window focused hides it (and nothing else), and the bridge
+    // stops sending state until the next hello.
+    const liveBeforeClose = miniBridgeInfo().live;
+    await invoke("selftest_menu", { id: "close-window", focused: "mini" }); await sleep(800);
+    const miniClosed = (await mini?.isVisible().catch(() => null)) === false;
+    const mainUntouched = await win.isVisible();
+    const liveAfterClose = miniBridgeInfo().live;
+    const sent0 = miniBridgeInfo().sent;
+    const playingWhileHidden = usePlayer.getState().status === "playing";
+    await sleep(2500);
+    const quietWhileHidden = miniBridgeInfo().sent === sent0;
+    // Close Window on the main window still sends it a close request, which hides it.
+    await invoke("selftest_menu", { id: "close-window", focused: "main" }); await sleep(800);
+    const mainCloseHides = (await win.isVisible()) === false;
+    await win.show(); await win.setFocus().catch(() => undefined); await sleep(300);
+    const menuOk = forgedMenuIgnored && menuDispatched && controlActed && controlKeptHidden;
+    const closeOk = liveBeforeClose && miniClosed && mainUntouched && !liveAfterClose && quietWhileHidden && mainCloseHides;
+    Object.assign(out, {
+      opened, titleOk, wasPlaying, paused, shownPaused, resumed, seeked, rejectsBad, mainShown, commands, perms,
+      forgedMenuIgnored, menuDispatched, controlActed, controlKeptHidden,
+      liveBeforeClose, miniClosed, mainUntouched, liveAfterClose, playingWhileHidden, quietWhileHidden, mainCloseHides,
+      info: miniBridgeInfo(),
+    });
+    out.ok = opened && out.visible === true && titleOk && perms && playbackOk && rejectsBad && mainShown && menuOk && closeOk;
   } finally {
     off();
     await win.show().catch(() => undefined);
     await win.setFocus().catch(() => undefined);
     if (opened) {
-      await invoke("toggle_mini_player").catch(() => undefined); // hides it
-      await sleep(400);
       const mini = await WebviewWindow.getByLabel("mini");
+      if (await mini?.isVisible().catch(() => false)) await invoke("toggle_mini_player").catch(() => undefined); // hides it
+      await sleep(400);
       out.hiddenAfter = (await mini?.isVisible().catch(() => null)) === false;
       if (!out.hiddenAfter) out.ok = false;
     }

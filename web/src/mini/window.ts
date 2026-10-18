@@ -42,10 +42,14 @@ export async function setTall(tall: boolean): Promise<void> {
   }
 }
 
-/** Closing (Cmd+W) hides, like the main window; ⌘⇧M or the dock button shows it again. */
-export async function initMiniWindow(): Promise<void> {
+/**
+ * A close request hides, like the main window; ⌘⇧M or the dock button shows it again.
+ * (⌘W itself is handled in Rust, menu.rs `close_window`: AppKit won't performClose: a
+ * borderless window.) `onHide` runs first so the main window can stop sending state.
+ */
+export async function initMiniWindow(onHide: () => void): Promise<void> {
   const w = await win();
   if (!w) return;
   await w.setAlwaysOnTop(savedOnTop()).catch(() => undefined);
-  await w.onCloseRequested((e) => { e.preventDefault(); void w.hide(); });
+  await w.onCloseRequested((e) => { e.preventDefault(); onHide(); void w.hide(); });
 }
