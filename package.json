@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "dev": "tauri dev",
+    "dev:copy-library": "node scripts/dev-copy-library.mjs",
     "build": "tauri build",
     "tauri": "tauri",
     "web:dev": "npm run dev -w web",

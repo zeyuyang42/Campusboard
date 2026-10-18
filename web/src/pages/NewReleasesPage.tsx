@@ -47,7 +47,8 @@ function ReleaseCard({ release, onDismiss }: { release: NewRelease; onDismiss: (
   const { data: job } = useJob(jobId);
   const [err, setErr] = useState<string | null>(null);
   const importing = imp.isPending || (!!job && (job.status === "queued" || job.status === "running"));
-  const failed = job?.status === "failed" ? (job.items?.[0]?.error ?? job.error ?? "Import failed") : null;  const start = async () => {
+  const failed = job?.status === "failed" ? (job.items?.[0]?.error ?? job.error ?? "Import failed") : null;
+  const start = async () => {
     setErr(null);
     try { setJobId((await imp.mutateAsync({ url: release.url })).id); } catch (e) { setErr(friendlyError(e)); }
   };

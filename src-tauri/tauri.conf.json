@@ -42,7 +42,6 @@
     "macOS": { "minimumSystemVersion": "13.3" }
   },
   "plugins": {
-    "sql": { "preload": ["sqlite:library.db"] },
     "http": { "scopeRedirects": true }
   }
 }

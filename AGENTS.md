@@ -8,7 +8,8 @@ it does; this file is about how to change it safely.
 
 ```bash
 npm install                      # Node 22.5+, Rust 1.90+, Xcode CLT
-npm run dev                      # tauri dev: Vite :5173 + the app window (hot reload)
+npm run dev                      # tauri dev: Vite :5173 + the app window (hot reload); uses library-dev.db
+npm run dev:copy-library         # snapshot the installed app's library.db into library-dev.db (read-only on the source; --force to replace)
 npm run build                    # tauri build -> src-tauri/target/release/bundle/{macos,dmg}
 npm test                         # vitest in packages/core, offline, uses node:sqlite + saved HTML fixtures
 npm run typecheck                # core + web
@@ -121,6 +122,23 @@ src-tauri/
   periods weren't measured, so `PlayCounter` doesn't rely on frequent reports: a
   playhead step counts if it fits the wall-clock time since the last report at
   the current `playbackRate` (+1.5 s slack); anything larger is treated as a seek.
+- Library database per build (verified 2026-10-18): release builds open
+  `library.db`, debug builds (`npm run dev`, the selftest) open `library-dev.db` in
+  the same app data dir. `db_url()` in lib.rs chooses with `cfg!(debug_assertions)`,
+  preloads it (the `sql` preload is set in code, not tauri.conf.json) and the web
+  side asks for the name with the `library_db_url` command. Before this split, dev
+  runs applied branch migrations to the real library. For debug builds only,
+  `BCP_DB_PATH=<absolute path>` opens a scratch file and `BC_NO_DIALOG=1` skips the
+  startup alert (exit code 2 = newer library, 3 = edited migration, 1 = other).
+- tauri-plugin-sql 2.5 runs sqlx's migrator with `ignore_missing = false`. A build
+  that lacks a migration recorded in `_sqlx_migrations` fails with `VersionMissing`;
+  editing an applied migration file, even a comment, changes its checksum and fails
+  with `VersionMismatch`. Either way plugin setup fails, so `build()` errors and the
+  app shows a native alert (rfd) pointing to the latest release, then exits. Recovery
+  for a library migrated by a newer build when you must run the older one: quit the
+  app and `DELETE FROM _sqlx_migrations WHERE version > N` (N = the older build's
+  last migration). That is safe because every migration is IF NOT EXISTS, so the
+  newer build re-records them later; the newer tables stay and are ignored.
 - Listening history (`plays`): a play counts once per playback after
   min(50%, 4 min) of listened time, for tracks over 30 s (`services/playRule.ts`).
   `played_at` is when the play counted, not when the track started, and
@@ -172,7 +190,7 @@ src-tauri/
   parser, re-save fixtures, `npm test`.
 - Schema changes are a new numbered file in `src-tauri/migrations/` plus an entry
   in `src/lib.rs` (and an import in `web/src/api/browserDb.ts`); never edit an applied
-  migration. `albums.owned` mirrors the synced collection (`fan_items`), recomputed in
+  migration, not even a comment (`VersionMismatch`, see above). `albums.owned` mirrors the synced collection (`fan_items`), recomputed in
   one statement; `tracks.stream_quality` is `mp3-v0` or `mp3-128`; `tracks.local_path`
   is reserved for a planned feature.
 - The identity cookie lives only in `settings.key='bandcamp_identity'`. Read it only
@@ -198,7 +216,7 @@ src-tauri/
 - The player store is the only code that touches `audioEl`. UI calls store actions.
 - Keep it personal-use: always render the "Buy on Bandcamp" link on album pages.
 - The `sqlite3` CLI has foreign keys OFF by default; prefer the app's own
-  functions over manual deletes in `library.db`.
+  functions over manual deletes in `library.db` / `library-dev.db`.
 
 ## Verifying changes
 
@@ -210,8 +228,9 @@ src-tauri/
    through the sidebar links. Vite proxies Bandcamp at `/bc-proxy/<encoded url>`.
 3. Runtime: `VITE_SELFTEST=1 npm run dev`, then read
    `SELECT value FROM settings WHERE key='selftest'` from
-   `~/Library/Application Support/com.bandcampplayer.app/library.db`.
-   Extend `web/src/selftest.ts` when adding features that touch Tauri plugins.
+   `~/Library/Application Support/com.bandcampplayer.app/library-dev.db` (debug
+   builds never open `library.db`). It starts empty; `npm run dev:copy-library`
+   seeds it from the real library when a test needs real data. Extend `web/src/selftest.ts` when adding features that touch Tauri plugins.
 4. Screenshots of the real window need Screen Recording permission for the
    terminal (`screencapture -l <windowid>`); without it, use browser mode.
 5. Release: `npm run build`; open the `.app` from `src-tauri/target/release/bundle/macos/`.

@@ -307,6 +307,26 @@ describe("new releases checker", () => {
     expect((await releases.listNewReleases(db)).map((r) => r.title)).toEqual(["Brand New Thing"]);
   });
 
+  it("an import still succeeds when settling its new release throws", async () => {
+    const { queue, bodies } = setup();
+    const POOL = `${ORIGIN}/track/pool-hopping`;
+    bodies[POOL] = fixture("track");
+    // Every Db call goes to the real database except the settle UPDATE, which fails.
+    const failing: typeof db = Object.create(db);
+    failing.run = (sql, params) =>
+      sql.includes("UPDATE artist_releases SET status = 'seen'") ? Promise.reject(new Error("disk I/O error")) : db.run(sql, params);
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runner = new JobRunner(failing, queue);
+    await runner.whenReady();
+    const job = await runner.enqueue({ url: POOL });
+    await vi.advanceTimersByTimeAsync(100);
+    const done = (await jobs.getJob(db, job.id))!;
+    expect(done.status).toBe("done");
+    expect(done.items?.[0]).toMatchObject({ status: "done", error: null });
+    expect(err).toHaveBeenCalledWith(expect.stringContaining("disk I/O error"));
+    err.mockRestore();
+  });
+
   it("a tick and Check now never overlap: the busy flag is taken before any await", async () => {
     const { checker, calls } = setup({ [MUSIC]: fixture("music") }, 1000);
     const a = checker.tick();
