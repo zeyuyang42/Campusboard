@@ -16,6 +16,11 @@
     "core:window:allow-show",
     "core:window:allow-set-focus",
     "core:app:allow-exit",
+    "allow-library-db-url",
+    "allow-backup-library",
+    "allow-selftest-take-backup",
+    "allow-toggle-mini-player",
+    "allow-selftest-menu",
     "sql:default",
     "sql:allow-execute",
     {

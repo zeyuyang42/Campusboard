@@ -1,0 +1,80 @@
+/* Mini player window. Tokens are written by applyTheme() and the palette from the main
+   window's state; these are the fallbacks until the first state arrives. */
+:root {
+  --surface: #23262D;
+  --surface-raised: #2C3038;
+  --surface-hover: #353942;
+  --line: rgba(255, 255, 255, 0.08);
+  --text: #F1EEE9;
+  --text-muted: #9A9AA6;
+  --accent-fallback: #5BB6D1;
+  --accent: var(--accent-fallback);
+  --ambient-1: transparent;
+  --ambient-2: transparent;
+  --ambient-strength: 0.6;
+  --radius-sm: 6px;
+  --font-display: "Bricolage Grotesque Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-ui: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  color-scheme: dark;
+}
+:root[data-theme="light"] { color-scheme: light; }
+@property --accent { syntax: "<color>"; inherits: true; initial-value: #5BB6D1; }
+@property --ambient-1 { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --ambient-2 { syntax: "<color>"; inherits: true; initial-value: transparent; }
+:root { transition: --accent 0.6s ease, --ambient-1 0.6s ease, --ambient-2 0.6s ease; }
+@media (prefers-reduced-motion: reduce) { :root { transition: none; } }
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; overflow: hidden; }
+html { background: var(--surface); }
+body { color: var(--text); font-family: var(--font-ui); font-size: 13px; line-height: 1.35; -webkit-font-smoothing: antialiased;
+  user-select: none; -webkit-user-select: none; cursor: default; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: default; }
+button:disabled { opacity: 0.4; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 4px; }
+button:focus:not(:focus-visible) { outline: none; }
+
+.mini { position: relative; height: 100%; display: grid; overflow: hidden; }
+.mini-ambient { position: absolute; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(90% 120% at 100% 0%, color-mix(in oklab, var(--ambient-1) calc(var(--ambient-strength) * 45%), transparent), transparent 75%),
+    radial-gradient(80% 120% at 40% 100%, color-mix(in oklab, var(--ambient-2) calc(var(--ambient-strength) * 55%), transparent), transparent 75%),
+    var(--surface); }
+.mini > :not(.mini-ambient) { position: relative; }
+
+.mini-art { background: var(--surface-hover); overflow: hidden; }
+.mini-art img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.mini-art-cover { position: absolute; inset: 0; }
+
+.mini-body { min-width: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 9px 12px 6px; }
+.mini-text { min-width: 0; }
+.mini-title { font-family: var(--font-display); font-weight: 620; font-size: 13.5px; letter-spacing: -0.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini-artist { color: var(--text-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.mini-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.mini-buttons { display: flex; align-items: center; gap: 2px; margin-left: -6px; }
+.mini-tools { display: flex; align-items: center; gap: 0; opacity: 0; }
+.mini:hover .mini-tools, .mini-tools:focus-within { opacity: 1; }
+.mini-btn { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--text-muted); flex: none; }
+.mini-btn:hover:not(:disabled) { color: var(--text); background: color-mix(in oklab, var(--text) 10%, transparent); }
+.mini-btn.small { width: 24px; height: 24px; }
+.mini-btn.on { color: var(--accent); }
+.mini-btn.play { width: 30px; height: 30px; color: var(--surface); background: var(--text); }
+.mini-btn.play:hover:not(:disabled) { color: var(--surface); background: var(--accent); }
+
+.mini-seek { display: flex; align-items: center; gap: 8px; font-size: 10.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.mini-seek .bar { flex: 1; height: 12px; display: flex; align-items: center; }
+.mini-seek .track { width: 100%; height: 3px; border-radius: 2px; background: color-mix(in oklab, var(--text) 18%, transparent); position: relative; }
+.mini-seek .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--text); }
+.mini-seek .bar:hover .fill { background: var(--accent); }
+
+/* Compact strip: art on the left at the window's full height. */
+.mini.compact { grid-template-columns: auto minmax(0, 1fr); }
+.mini.compact .mini-art { height: 100vh; aspect-ratio: 1; }
+
+/* Square art: the art fills the width, the controls sit underneath. */
+.mini.tall { grid-template-rows: auto minmax(0, 1fr); }
+.mini.tall .mini-art { height: min(100vw, calc(100vh - 96px)); aspect-ratio: 1; justify-self: center; }
+.mini.tall .mini-body { padding: 10px 14px 8px; gap: 4px; }
+.mini.tall .mini-title { font-size: 15px; }
+.mini.tall .mini-tools { opacity: 1; }

@@ -52,6 +52,11 @@ Requires macOS 13.3 or later. Your library lives in
   reorder.
 - **Now playing**: press `N` or click the artwork in the dock for a full view
   with queue and lyrics.
+- **Mini player**: Window → Mini Player (`⌘⇧M`) or the mini player button in
+  the dock opens a small window that stays on top of other apps (the pin
+  button turns that off), with the artwork, the track, a seek bar and the
+  transport controls. The square button switches to a large-artwork layout.
+  It keeps working with the main window closed.
 - **Themes**: Settings → pick a preset, adjust colors, fonts, corner radius,
   density, the album-art wash and an optional background image. Export writes a
   `.theme.json` you can send to a friend; Import loads one.

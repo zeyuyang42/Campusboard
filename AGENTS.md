@@ -29,7 +29,7 @@ packages/core/src/
   scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, fan (collection/wishlist), schemas
   db/Db.ts                 async Db interface {select,get,run}; SQL uses "?" and toDollar() rewrites to $n for the Tauri plugin
   db/repos/                one module per table; booleans stored 0/1, converted at the repo boundary
-  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping), libraryTransfer (library export/import file, VACUUM INTO backup)
+  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping), miniPlayer (mini window state/command protocol, throttle), libraryTransfer (library export/import file, VACUUM INTO backup)
   theme/                   schema (zod), presets, color math (OKLCH, contrast), apply (CSS variables)
   palette/                 quantize + pick + extract (canvas) + fitPalette + artUrl
   core.ts                  createCore({db, fetch, onJobsChange}) -> every function the UI calls
@@ -39,15 +39,19 @@ web/src/
   api/queries.ts           TanStack Query hooks and mutations (names are stable; pages depend on them)
   player/store.ts          zustand store owning the single <audio>; load() asks core for a fresh stream URL
   player/mediaSession.ts   Now Playing widget + media keys: navigator.mediaSession fed from the store, handlers call store actions
+  player/miniBridge.ts     main-window side of the mini player: broadcasts MiniState, maps validated MiniCommands to store actions
+  mini/                    the mini player window (mini.html entry): no store, no audio, no getCore; bus.ts = Tauri events or BroadcastChannel
   theme/store.ts           theme state, persisted in settings.key='theme'; usePalette.ts maps art colors to CSS vars
   ui/menu.ts + components/MenuHost.tsx   the one context menu / playlist picker for the whole app
   components/, pages/      plain CSS in styles.css driven by tokens on :root
 src-tauri/
   src/lib.rs               registers sql/http/dialog/fs/opener/window-state plugins, migrations, Dock reopen
   src/backup.rs            database backup destination check + atomic copy (Rust-side save dialog)
-  src/menu.rs              native menu bar; custom items emit a `menu` event handled by web/src/lib/appMenu.ts
+  src/menu.rs              native menu bar; custom items run `window.__bcMenu(id)` in the main webview (web/src/lib/appMenu.ts)
+  src/mini.rs              creates/toggles the `mini` window (Window > Mini Player, dock button command)
   migrations/*.sql         schema; every statement is IF NOT EXISTS so an old library.db can be adopted
-  capabilities/default.json  URL scope for http (bandcamp.com, bcbits.com, custom-domain paths; LAN denied), fs scope ($APPDATA), window permissions
+  capabilities/default.json  URL scope for http (bandcamp.com, bcbits.com, custom-domain paths; LAN denied), fs scope ($APPDATA), window permissions, app commands
+  capabilities/mini.json   the mini window: events, drag, hide, set-always-on-top, set-size only
   tauri.conf.json          window (Overlay title bar), CSP, bundle targets, min macOS 13.3
 ```
 
@@ -113,6 +117,29 @@ src-tauri/
 - `core:window:default` does not include `allow-start-dragging`, so the
   `data-tauri-drag-region` band only works because the capability file grants
   it explicitly, along with hide/show/minimize/toggle-maximize/set-focus.
+- App commands are listed in `build.rs` (AppManifest), so each needs an
+  `allow-<command>` entry in a capability; a new `#[tauri::command]` is unreachable
+  until it is added there and granted (normally to `default.json`, the main window).
+- The mini player window has no audio and no core (verified 2026-10-18, selftest
+  `miniPlayer`): it drives the main window's store over `mini:state` /
+  `mini:command` events, which keep working with the main window hidden. The
+  main window sends state only between the mini window's `hello` and `bye`.
+- Event permissions have no scope: a window with `core:event:allow-emit-to` can
+  send any event name to any window, and a listener with the default (Any)
+  target receives events emitted to every window. So anything the main window
+  listens for can be sent, and anything emitted can be read, by the mini window.
+  Validate every event payload, and don't carry anything that must stay private
+  to the main window in events. Menu actions therefore go from Rust to the main
+  page with `webview.eval` (`window.__bcMenu`), not as a `menu` event. A forged
+  `tauri://close-requested` from the mini window would only do what ⌘W does
+  (save the play state and hide the main window), which is harmless.
+- ⌘W is a custom Close Window item (`menu.rs` `close_window`), not the predefined
+  one: AppKit's `performClose:` refuses the borderless mini window. It hides the
+  mini window when that is focused, and sends the main window the usual close
+  request when the main window is focused. With a native panel focused (About), it
+  does nothing, because tao gives no handle to send that panel `performClose:`.
+  Whenever Rust shows the mini window, it also sends the main window a `hello`, so
+  the state stream never waits on WebKit's `visibilitychange`.
 - Window behaviour follows Music.app: closing hides the window and playback
   continues (`persist.ts` prevents the close and calls `hide()`), the Dock icon
   reopens it (`RunEvent::Reopen` in lib.rs), Cmd+Q quits. Menu accelerators use

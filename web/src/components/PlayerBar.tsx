@@ -4,7 +4,8 @@ import { ArtImage } from "./ArtImage";
 import { NextIcon, PauseIcon, PlayIcon, PrevIcon, QueueIcon, RepeatIcon, RepeatOneIcon, ShuffleIcon, VolumeIcon } from "./Icons";
 import { SeekBar } from "./SeekBar";
 import { useUi } from "../ui/store";
-import { ExpandIcon, MenuIcon } from "./Icons";
+import { ExpandIcon, MenuIcon, MiniPlayerIcon } from "./Icons";
+import { toggleMiniPlayer } from "../player/miniBridge";
 
 export function PlayerBar() {
   const s = usePlayer();
@@ -45,6 +46,7 @@ export function PlayerBar() {
           <button className="icon-btn" onClick={() => s.setVolume(s.volume === 0 ? 0.8 : 0)} title="Mute"><VolumeIcon muted={s.volume === 0} /></button>
           <input type="range" min={0} max={1} step={0.02} value={s.volume} onChange={(e) => s.setVolume(Number(e.target.value))} />
         </div>
+        <button className="icon-btn" title="Mini player (⌘⇧M)" onClick={() => void toggleMiniPlayer().catch(() => undefined)}><MiniPlayerIcon /></button>
         <button className={`icon-btn ${s.queueOpen ? "on" : ""}`} title="Queue (Q)" onClick={() => s.setQueueOpen(!s.queueOpen)}><QueueIcon /></button>
         <button className={`icon-btn keep ${nowPlayingOpen ? "on" : ""}`} title="Now playing (N)" disabled={!cur} onClick={() => setNowPlayingOpen(!nowPlayingOpen)}><ExpandIcon /></button>
       </div>

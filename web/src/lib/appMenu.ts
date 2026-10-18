@@ -1,5 +1,5 @@
 // Bridge from the native menu bar (src-tauri/src/menu.rs) to app actions.
-// Rust emits a `menu` event whose payload is the item id.
+// Rust runs window.__bcMenu(<item id>) in the main webview (see initAppMenu).
 import { isTauri } from "./env";
 import { usePlayer } from "../player/store";
 import { useUi } from "../ui/store";
@@ -35,8 +35,12 @@ export function runMenuAction(id: string): boolean {
   return true;
 }
 
+/**
+ * Rust (menu.rs `dispatch`) evaluates `window.__bcMenu(id)` in this webview. Not an event:
+ * the mini window can listen to and emit any event name, so a `menu` event could be read
+ * or forged from there; this function exists only in the main window's page.
+ */
 export async function initAppMenu() {
   if (!isTauri) return;
-  const { listen } = await import("@tauri-apps/api/event");
-  await listen<string>("menu", (e) => { runMenuAction(e.payload); });
+  (window as unknown as { __bcMenu?: (id: unknown) => void }).__bcMenu = (id) => { if (typeof id === "string") runMenuAction(id); };
 }
