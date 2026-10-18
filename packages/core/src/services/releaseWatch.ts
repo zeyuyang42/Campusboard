@@ -93,9 +93,11 @@ export class ReleaseChecker {
     this.opts.onChange?.();
   }
 
-  /** Why a check may not run right now, or null when it may. */
-  async blocked(): Promise<Exclude<SkipReason, "none_due"> | null> {
-    if (this.busy) return "busy";
+  /**
+   * Why a check may not run right now (setting off, cooldown, a job), or null when it may.
+   * The busy flag is claimed separately and synchronously, see claim().
+   */
+  async blocked(): Promise<Exclude<SkipReason, "none_due" | "busy"> | null> {
     if (!(await this.enabled())) return "off";
     await this.queue.gate.ready();
     if (this.queue.gate.until()) return "cooldown";
@@ -103,13 +105,28 @@ export class ReleaseChecker {
     return null;
   }
 
+  /**
+   * Take the busy flag, synchronously and before any await, so a tick, Check now and a
+   * single-artist check can never run at the same time. False if it is already taken.
+   */
+  private claim(): boolean {
+    if (this.busy) return false;
+    this.busy = true;
+    return true;
+  }
+
   /** One background step: check the most overdue artist, if any is due and nothing blocks. */
   async tick(now = Date.now()): Promise<ArtistCheckResult | { skipped: SkipReason }> {
-    const why = await this.blocked();
-    if (why) return { skipped: why };
-    const artist = await releases.nextDueArtist(this.db, now, this.intervalMs);
-    if (!artist) return { skipped: "none_due" };
-    return this.guarded(() => this.check(artist));
+    if (!this.claim()) return { skipped: "busy" };
+    try {
+      const why = await this.blocked();
+      if (why) return { skipped: why };
+      const artist = await releases.nextDueArtist(this.db, now, this.intervalMs);
+      if (!artist) return { skipped: "none_due" };
+      return await this.check(artist);
+    } finally {
+      this.busy = false;
+    }
   }
 
   /**
@@ -118,52 +135,49 @@ export class ReleaseChecker {
    * and it stops as soon as the setting goes off, a cooldown starts or a job is queued.
    */
   async checkNow(): Promise<{ checked: number; found: number; stopped: SkipReason | null }> {
-    if (this.sweeping) return { checked: 0, found: 0, stopped: "busy" };
+    if (!this.claim()) return { checked: 0, found: 0, stopped: "busy" };
     this.sweeping = true;
     this.opts.onChange?.();
     try {
-      const why = await this.blocked();
-      if (why) return { checked: 0, found: 0, stopped: why };
-      return await this.guarded(async () => {
-        let checked = 0, found = 0;
-        for (const artist of await releases.watchedArtists(this.db)) {
-          // Same conditions as a tick, minus our own busy flag.
-          if (!(await this.enabled())) return { checked, found, stopped: "off" as const };
-          if (this.queue.gate.until()) return { checked, found, stopped: "cooldown" as const };
-          if (await this.db.get("SELECT 1 FROM jobs WHERE status IN ('queued','running') LIMIT 1")) return { checked, found, stopped: "job" as const };
-          const r = await this.check(artist);
-          checked++;
-          found += r.found;
-          this.opts.onChange?.();
-        }
-        return { checked, found, stopped: null };
-      });
+      let checked = 0, found = 0;
+      const artists = await releases.watchedArtists(this.db);
+      for (const artist of artists) {
+        // Re-checked before every artist: a job or cooldown may start during the sweep.
+        const why = await this.blocked();
+        if (why) return { checked, found, stopped: why };
+        const r = await this.check(artist);
+        checked++;
+        found += r.found;
+        this.opts.onChange?.();
+      }
+      if (!artists.length) {
+        const why = await this.blocked();
+        if (why) return { checked, found, stopped: why };
+      }
+      return { checked, found, stopped: null };
     } finally {
+      this.busy = false;
       this.sweeping = false;
       this.opts.onChange?.();
     }
   }
 
-  /** Check one artist now (the selftest's single request). Respects the busy flag and cooldown. */
+  /** Check one artist now (the selftest's single request). Respects the busy flag; the queue enforces the cooldown. */
   async checkArtist(artistId: number): Promise<ArtistCheckResult> {
-    const artist = await this.db.get<releases.WatchedArtist>("SELECT id, url, name FROM artists WHERE id = ?", [artistId]);
-    if (!artist) return { artist_id: artistId, status: "skipped", releases: 0, inserted_ids: [], found: 0, error: "no such artist" };
-    if (this.busy) return { artist_id: artistId, status: "skipped", releases: 0, inserted_ids: [], found: 0, error: "busy" };
-    return this.guarded(() => this.check(artist));
+    const skipped = (error: string): ArtistCheckResult => ({ artist_id: artistId, status: "skipped", releases: 0, inserted_ids: [], found: 0, error });
+    if (!this.claim()) return skipped("busy");
+    try {
+      const artist = await this.db.get<releases.WatchedArtist>("SELECT id, url, name FROM artists WHERE id = ?", [artistId]);
+      if (!artist) return skipped("no such artist");
+      return await this.check(artist);
+    } finally {
+      this.busy = false;
+    }
   }
 
   async status(): Promise<ReleaseCheckStatus> {
     const s = await releases.watchSummary(this.db);
     return { enabled: await this.enabled(), ...s, running: this.sweeping };
-  }
-
-  private async guarded<T>(fn: () => Promise<T>): Promise<T> {
-    this.busy = true;
-    try {
-      return await fn();
-    } finally {
-      this.busy = false;
-    }
   }
 
   /**
@@ -190,22 +204,32 @@ export class ReleaseChecker {
       const watch = await releases.getWatch(this.db, artist.id);
       const baseline = !watch?.baselined;
       const have = await albumUrlsInLibrary(this.db);
-      const rows = new Map<string, releases.ReleaseRow>();
+      // Matched on the path under this artist, not the full URL: when an artist adds, changes
+      // or drops a custom domain every URL on the page changes host, and that must neither
+      // re-list the back catalogue as new nor miss what the library already holds.
+      const known = await releases.knownPaths(this.db, artist.id);
+      const inLibrary = await releases.libraryPaths(this.db, artist.id);
+      const onPage = new Set<string>();
+      const fresh: releases.ReleaseRow[] = [];
       for (const it of parsed.items) {
         // Links come from page markup a custom domain controls: anything that fails the
         // pasted-URL check (LAN hosts, odd paths) is dropped, never stored or shown.
         const url = releaseUrl(it.url);
-        if (!url || rows.has(url)) continue;
-        rows.set(url, {
+        if (!url) continue;
+        const path = releases.releasePath(url);
+        if (onPage.has(path)) continue;
+        onPage.add(path);
+        if (known.has(path)) continue;
+        fresh.push({
           url, item_type: /\/track\//.test(url) ? "track" : "album", title: it.title, art_id: it.art_id ?? null,
-          artist_override: it.artist ?? null, status: baseline || have.has(url) ? "seen" : "new",
+          artist_override: it.artist ?? null, status: baseline || have.has(url) || inLibrary.has(path) ? "seen" : "new",
         });
       }
-      const inserted = await releases.insertReleases(this.db, artist.id, [...rows.values()]);
+      const inserted = await releases.insertReleases(this.db, artist.id, fresh);
       await releases.settleImported(this.db);
       await releases.markChecked(this.db, artist.id, at, true, null);
       return {
-        ...base, status: baseline ? "baseline" : "checked", releases: rows.size,
+        ...base, status: baseline ? "baseline" : "checked", releases: onPage.size,
         inserted_ids: inserted.map((r) => r.id), found: inserted.filter((r) => r.status === "new").length,
       };
     } catch (e) {

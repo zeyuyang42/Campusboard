@@ -10,6 +10,8 @@ import { deleteAlbum } from "../src/db/repos/albums.js";
 import { setSetting } from "../src/db/repos/settings.js";
 import * as releases from "../src/db/repos/releases.js";
 import { createCore } from "../src/core.js";
+import { JobRunner } from "../src/services/jobRunner.js";
+import * as jobs from "../src/db/repos/jobs.js";
 import {
   RELEASE_CHECK_INTERVAL_MS, RELEASE_CHECK_SETTING_KEY, RELEASE_CHECK_START_DELAY_MS, RELEASE_CHECK_TICK_MS,
 } from "../src/config.js";
@@ -242,6 +244,83 @@ describe("new releases checker", () => {
     vi.setSystemTime(T0 + 2 * RELEASE_CHECK_INTERVAL_MS);
     expect(await checker.tick()).toEqual({ skipped: "none_due" });
     expect(calls).toHaveLength(1);
+  });
+
+  it("an artist adding, changing or dropping a custom domain doesn't re-list the back catalogue", async () => {
+    const { checker, bodies } = setup();
+    await checker.tick();
+    // Same page, now served under a custom domain: data-tralbum names the new origin, links stay relative.
+    const custom = (host: string, ...extra: string[]) => musicWith(...extra).replace(
+      /data-tralbum="\{&quot;url&quot;:&quot;https:\/\/illuminatihotties\.bandcamp\.com\/music&quot;\}"/,
+      `data-tralbum="{&quot;url&quot;:&quot;https://${host}/music&quot;}"`,
+    );
+    bodies[MUSIC] = custom("music.illuminatihotties.com");
+    vi.setSystemTime(T0 + RELEASE_CHECK_INTERVAL_MS);
+    expect(await checker.tick()).toMatchObject({ status: "checked", releases: 20, found: 0, inserted_ids: [] });
+    expect(await releases.countNewReleases(db)).toBe(0);
+    // A genuinely new release on the new domain is still found.
+    bodies[MUSIC] = custom("music.illuminatihotties.com", gridItem("/album/brand-new-thing", "Brand New Thing"));
+    vi.setSystemTime(T0 + 2 * RELEASE_CHECK_INTERVAL_MS);
+    expect(await checker.tick()).toMatchObject({ found: 1 });
+    expect((await releases.listNewReleases(db)).map((r) => r.url)).toEqual(["https://music.illuminatihotties.com/album/brand-new-thing"]);
+    // Changed again, then dropped: still nothing new beyond that one.
+    bodies[MUSIC] = custom("another-domain.example.org", gridItem("/album/brand-new-thing", "Brand New Thing"));
+    vi.setSystemTime(T0 + 3 * RELEASE_CHECK_INTERVAL_MS);
+    expect(await checker.tick()).toMatchObject({ found: 0 });
+    bodies[MUSIC] = musicWith(gridItem("/album/brand-new-thing", "Brand New Thing"));
+    vi.setSystemTime(T0 + 4 * RELEASE_CHECK_INTERVAL_MS);
+    expect(await checker.tick()).toMatchObject({ found: 0 });
+    expect(await releases.countNewReleases(db)).toBe(1);
+  });
+
+  it("matches the library by path too: an album stored under another host isn't new", async () => {
+    const { checker, bodies } = setup();
+    await checker.tick();
+    // The album was stored under a custom domain; the page lists it under bandcamp.com.
+    db.raw.prepare("UPDATE albums SET url = 'https://music.example.org/album/let-me-do-one-more'").run();
+    db.raw.prepare("DELETE FROM artist_releases WHERE url = ?").run(`${ORIGIN}/album/let-me-do-one-more`);
+    vi.setSystemTime(T0 + RELEASE_CHECK_INTERVAL_MS);
+    expect(await checker.tick()).toMatchObject({ found: 0 });
+    // And a 'new' row for it is hidden and settled by the same rule.
+    db.raw.prepare("UPDATE artist_releases SET status = 'new' WHERE url = ?").run(`${ORIGIN}/album/let-me-do-one-more`);
+    expect(await releases.countNewReleases(db)).toBe(0);
+    await releases.settleImported(db);
+    expect(db.raw.prepare("SELECT status FROM artist_releases WHERE url = ?").get(`${ORIGIN}/album/let-me-do-one-more`)).toEqual({ status: "seen" });
+  });
+
+  it("a successful import job settles the release on the core side, even a single already in an album", async () => {
+    const { checker, bodies, queue } = setup();
+    await checker.tick();
+    const POOL = `${ORIGIN}/track/pool-hopping`;
+    bodies[MUSIC] = musicWith(gridItem("/track/pool-hopping", "Pool Hopping"), gridItem("/album/brand-new-thing", "Brand New Thing"));
+    bodies[POOL] = fixture("track");
+    vi.setSystemTime(T0 + RELEASE_CHECK_INTERVAL_MS);
+    await checker.tick();
+    expect(await releases.countNewReleases(db)).toBe(2);
+    const runner = new JobRunner(db, queue);
+    await runner.whenReady();
+    const job = await runner.enqueue({ url: POOL });
+    await vi.advanceTimersByTimeAsync(100);
+    expect((await jobs.getJob(db, job.id))!.status).toBe("done");
+    // Its track lives in let-me-do-one-more, so its own URL never enters albums: settled by the job.
+    expect(db.raw.prepare("SELECT status FROM artist_releases WHERE url = ?").get(POOL)).toEqual({ status: "seen" });
+    expect((await releases.listNewReleases(db)).map((r) => r.title)).toEqual(["Brand New Thing"]);
+  });
+
+  it("a tick and Check now never overlap: the busy flag is taken before any await", async () => {
+    const { checker, calls } = setup({ [MUSIC]: fixture("music") }, 1000);
+    const a = checker.tick();
+    const b = checker.checkNow();
+    const c = checker.tick();
+    const d = checker.checkArtist(artistId());
+    expect(await b).toEqual({ checked: 0, found: 0, stopped: "busy" });
+    expect(await c).toEqual({ skipped: "busy" });
+    expect(await d).toMatchObject({ status: "skipped", error: "busy" });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(await a).toMatchObject({ status: "baseline" });
+    expect(calls).toHaveLength(1);
+    // And free again afterwards.
+    expect(await checker.tick()).toEqual({ skipped: "none_due" });
   });
 
   it("vacuumOrphans sweeps rows of artists deleted with foreign keys off", async () => {

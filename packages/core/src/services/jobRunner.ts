@@ -11,6 +11,7 @@ import { cachedFetchText } from "./pageCache.js";
 import { ACCOUNT_KEY, SYNC_KEY, identityHeaders } from "./account.js";
 import { fetchFanList, normalizeFanUsername, parseFanPage, fanPageUrl, type FanList, type FanListResult } from "../scrape/fan.js";
 import * as fan from "../db/repos/fanItems.js";
+import { settleRelease } from "../db/repos/releases.js";
 import { getSetting, setSettingWhileJobRuns } from "../db/repos/settings.js";
 import type { CookieStatus, Job, SyncSummary } from "../types.js";
 
@@ -155,6 +156,7 @@ export class JobRunner {
           const have = job.kind === "collection" ? await fan.libraryAlbumForFetchUrl(this.db, item.url) : null;
           if (have !== null) {
             await jobs.setItemResult(this.db, item.id, job.id, true, have, null);
+            await settleRelease(this.db, item.url, have);
             this.onChange();
             continue;
           }
@@ -164,6 +166,8 @@ export class JobRunner {
           if (html === null) return;
           const albumId = await upsertTralbum(this.db, parseTralbumPage(html));
           await jobs.setItemResult(this.db, item.id, job.id, true, albumId, null);
+          // An imported release is no longer new (New releases), even if it's removed again later.
+          await settleRelease(this.db, item.url, albumId);
         } catch (e) {
           const msg = e instanceof ScrapeError ? `[${e.code}] ${e.message}` : String(e);
           console.error(`[job ${job.id}] ${item.url}: ${msg}`);

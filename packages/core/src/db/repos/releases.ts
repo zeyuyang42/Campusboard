@@ -99,12 +99,29 @@ export async function isMuted(db: Db, artistId: number): Promise<boolean> {
 }
 
 /**
- * What the New releases page lists: 'new' rows whose URL isn't in the library, isn't a
- * synced purchase or wishlist item the user removed from the library (fan_dismissed), and
+ * SQL for the path of a stored URL ("/album/slug", "/track/slug"). Every stored URL is a
+ * normalizeBandcampUrl result, "https://<host>/<kind>/<slug>", so the path starts at the
+ * first "/" after the 8-character scheme. Releases are matched per artist on this path,
+ * ignoring the host, so an artist adding, changing or dropping a custom domain doesn't
+ * turn the back catalogue into "new" releases.
+ */
+export const pathSql = (col: string) => `substr(${col}, instr(substr(${col}, 9), '/') + 8)`;
+
+/** "/album/slug" for a normalized release URL (the JS twin of pathSql). */
+export function releasePath(url: string): string {
+  return url.slice(url.indexOf("/", 8));
+}
+
+/** The library holds this release: same URL, or the same path under the same artist. */
+const IN_ALBUMS = `EXISTS (SELECT 1 FROM albums a WHERE a.url = r.url OR (a.artist_id = r.artist_id AND ${pathSql("a.url")} = ${pathSql("r.url")}))`;
+
+/**
+ * What the New releases page lists: 'new' rows that aren't in the library (IN_ALBUMS), aren't
+ * a synced purchase or wishlist item the user removed from the library (fan_dismissed), and
  * whose artist isn't muted.
  */
 const LISTED = `r.status = 'new'
-  AND NOT EXISTS (SELECT 1 FROM albums a WHERE a.url = r.url)
+  AND NOT ${IN_ALBUMS}
   AND NOT EXISTS (SELECT 1 FROM fan_items f JOIN fan_dismissed d ON d.item_type = f.item_type AND d.bandcamp_id = f.bandcamp_id
                   WHERE f.url = r.url OR f.fetch_url = r.url)
   AND COALESCE((SELECT w.muted FROM release_watch w WHERE w.artist_id = r.artist_id), 0) = 0`;
@@ -122,9 +139,33 @@ export async function countNewReleases(db: Db): Promise<number> {
   return (await db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM artist_releases r JOIN artists ar ON ar.id = r.artist_id WHERE ${LISTED}`))?.n ?? 0;
 }
 
+/** Paths of every release stored for an artist (any status, any host). */
+export async function knownPaths(db: Db, artistId: number): Promise<Set<string>> {
+  const rows = await db.select<{ url: string }>("SELECT url FROM artist_releases WHERE artist_id = ?", [artistId]);
+  return new Set(rows.map((r) => releasePath(r.url)));
+}
+
+/** Paths of an artist's albums in the library (any host). */
+export async function libraryPaths(db: Db, artistId: number): Promise<Set<string>> {
+  const rows = await db.select<{ url: string }>("SELECT url FROM albums WHERE artist_id = ?", [artistId]);
+  return new Set(rows.map((r) => releasePath(r.url)));
+}
+
 /** A new release that made it into the library is no longer new, even if it's removed again later. */
 export async function settleImported(db: Db): Promise<void> {
-  await db.run("UPDATE artist_releases SET status = 'seen' WHERE status = 'new' AND url IN (SELECT url FROM albums)");
+  await db.run(`UPDATE artist_releases AS r SET status = 'seen' WHERE r.status = 'new' AND ${IN_ALBUMS}`);
+}
+
+/**
+ * An import job item succeeded: the release it fetched (same URL, or the same path under the
+ * artist of the album it landed in) is no longer new. One statement.
+ */
+export async function settleRelease(db: Db, url: string, albumId: number): Promise<void> {
+  await db.run(
+    `UPDATE artist_releases SET status = 'seen' WHERE status = 'new'
+     AND (url = ? OR (artist_id = (SELECT artist_id FROM albums WHERE id = ?) AND ${pathSql("url")} = ?))`,
+    [url, albumId, releasePath(url)],
+  );
 }
 
 /** Dismiss the given new releases, 100 ids per statement. Returns how many changed. */

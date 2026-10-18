@@ -183,6 +183,43 @@ async function newReleasesCheck(core: Awaited<ReturnType<typeof getCore>>, album
 }
 
 /**
+ * Window permissions the menu bar and close-to-hide rely on. Each step runs on its own, so a
+ * throw is recorded with diagnostics (which window methods exist, what was thrown) instead
+ * of aborting the run, and the window is always shown again at the end.
+ */
+async function windowCheck() {
+  const win = getCurrentWindow();
+  const errors: Record<string, unknown> = {};
+  const step = async <T>(name: string, fn: () => Promise<T>): Promise<T | null> => {
+    try {
+      return await fn();
+    } catch (e) {
+      errors[name] = {
+        error: String(e), type: typeof e, ctor: (e as object | null)?.constructor?.name ?? null,
+        winType: typeof win, label: (win as { label?: unknown })?.label ?? null,
+        methods: Object.fromEntries(["isVisible", "isMaximized", "isMinimized", "isFocused", "hide", "show"].map((m) => [m, typeof (win as unknown as Record<string, unknown>)[m]])),
+      };
+      return null;
+    }
+  };
+  await step("toggleMaximize", () => win.toggleMaximize()); await sleep(400);
+  const maximized = await step("isMaximized", () => win.isMaximized());
+  await step("toggleMaximizeBack", () => win.toggleMaximize()); await sleep(400);
+  await step("minimize", () => win.minimize()); await sleep(400);
+  const minimized = await step("isMinimized", () => win.isMinimized());
+  await step("unminimize", () => win.unminimize()); await sleep(400);
+  await step("hide", () => win.hide()); await sleep(300);
+  const visibleWhileHidden = await step("isVisibleHidden", () => win.isVisible());
+  await step("show", () => win.show());
+  await step("setFocus", () => win.setFocus()); await sleep(300);
+  const visibleAgain = await step("isVisibleAgain", () => win.isVisible());
+  const focused = await step("isFocused", () => win.isFocused());
+  const result = { maximized, minimized, hidden: visibleWhileHidden === false, visibleAgain, focused, errors };
+  // `focused` is informational: a background terminal can keep focus from the window.
+  return { ok: Object.keys(errors).length === 0 && maximized === true && minimized === true && result.hidden && visibleAgain === true, ...result };
+}
+
+/**
  * Background listening: hide the window (what closing it does) for 20 s while a track plays,
  * and measure how often timeupdate still arrives and whether listening history keeps
  * accumulating. Observes the audio element without changing it.
@@ -336,23 +373,13 @@ export async function runSelfTest() {
     out.challengeUntil = await core.challengeUntil().then((u) => (u ? new Date(u).toISOString() : null), (e) => String(e));
     out.mediaSession = "mediaSession" in navigator;
     // Window permissions the menu bar and close-to-hide rely on.
-    const win = getCurrentWindow();
-    await win.toggleMaximize(); await sleep(400);
-    const maximized = await win.isMaximized();
-    await win.toggleMaximize(); await sleep(400);
-    await win.minimize(); await sleep(400);
-    const minimized = await win.isMinimized();
-    await win.unminimize(); await sleep(400);
-    await win.hide(); await sleep(300);
-    const hidden = !(await win.isVisible());
-    await win.show(); await win.setFocus(); await sleep(300);
-    out.window = { maximized, minimized, hidden, visibleAgain: await win.isVisible(), focused: await win.isFocused() };
+    out.window = await windowCheck();
     // startDragging needs a live mouse-down to do anything, but a missing
     // capability rejects the call outright; record what it says.
-    out.dragPermission = await win.startDragging().then(() => "ok", (e) => String(e));
+    out.dragPermission = await getCurrentWindow().startDragging().then(() => "ok", (e) => String(e));
     // Overall ok needs every block that reports its own `ok` to pass. The listed blocks must
     // be present as objects: one caught and stored as a string threw.
-    const required = ["libraryFilter", "history", "hiddenPlayback", "syncGuards", "newReleases"];
+    const required = ["libraryFilter", "history", "hiddenPlayback", "syncGuards", "newReleases", "window"];
     const failed = Object.entries(out)
       .filter(([k, v]) => required.includes(k) || (!!v && typeof v === "object" && "ok" in v))
       .filter(([, v]) => (v as { ok?: unknown } | null)?.ok !== true)

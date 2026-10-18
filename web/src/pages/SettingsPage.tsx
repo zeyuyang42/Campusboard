@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { friendlyError } from "../lib/errors";
 import { PRESETS, parseThemeJson, type Theme } from "@bc/core";
 import { useTheme } from "../theme/store";
 import { appInfo, pickBackgroundImage, pickTextFile, revealDataDir, saveTextFile } from "../lib/files";
@@ -188,8 +189,20 @@ const STOPPED: Record<string, string> = {
 function NewReleaseSettings() {
   const { data: status } = useReleaseCheckStatus();
   const { setEnabled, checkNow } = useReleaseMutations();
+  // One pass at a time: a second click (before the button re-renders disabled) is ignored,
+  // so its immediate "busy" answer can't replace the real pass's result.
+  const inFlight = useRef(false);
+  const [result, setResult] = useState<{ checked: number; found: number; stopped: string | null } | null>(null);
   const running = !!status?.running || checkNow.isPending;
-  const result = checkNow.data;
+  const runCheck = () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setResult(null);
+    checkNow.mutate(undefined, {
+      onSuccess: (r) => { if (r.stopped !== "busy") setResult(r); },
+      onSettled: () => { inFlight.current = false; },
+    });
+  };
   const last = status?.last_check_at ? new Date(status.last_check_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : null;
   return (
     <section id="releases">
@@ -203,7 +216,7 @@ function NewReleaseSettings() {
         Check for new releases
       </label>
       <div className="row">
-        <button className="btn" disabled={!status?.enabled || running || !status.artists} onClick={() => checkNow.mutate()}>{running ? "Checking…" : "Check now"}</button>
+        <button className="btn" disabled={!status?.enabled || running || !status.artists} onClick={runCheck}>{running ? "Checking…" : "Check now"}</button>
         <span className="muted">
           {last ? `Last checked ${last}.` : "Not checked yet."}
           {status && status.muted > 0 ? ` ${status.muted} artist${status.muted === 1 ? "" : "s"} muted.` : ""}
@@ -215,7 +228,7 @@ function NewReleaseSettings() {
           Checked {result.checked} artist{result.checked === 1 ? "" : "s"}{result.found ? `, found ${result.found} new` : ", nothing new"}.
         </p>
       )}
-      {checkNow.error && <div className="notice error">Couldn't check. {String((checkNow.error as Error).message ?? checkNow.error)}</div>}
+      {checkNow.error && <div className="notice error">Couldn't check. {friendlyError(checkNow.error)}</div>}
     </section>
   );
 }

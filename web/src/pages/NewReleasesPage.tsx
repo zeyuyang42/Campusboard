@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { NewRelease } from "@bc/core";
 import { useImport, useJob, useNewReleases, useReleaseCheckStatus, useReleaseMutations } from "../api/queries";
@@ -47,12 +47,7 @@ function ReleaseCard({ release, onDismiss }: { release: NewRelease; onDismiss: (
   const { data: job } = useJob(jobId);
   const [err, setErr] = useState<string | null>(null);
   const importing = imp.isPending || (!!job && (job.status === "queued" || job.status === "running"));
-  const failed = job?.status === "failed" ? (job.items?.[0]?.error ?? job.error ?? "Import failed") : null;
-  // Imported: the list drops it by URL, but a single whose track already sits in a library
-  // album keeps its own URL out of the library, so settle it here either way.
-  const imported = job?.status === "done" && job.done > 0;
-  useEffect(() => { if (imported) onDismiss(); }, [imported]); // eslint-disable-line react-hooks/exhaustive-deps
-  const start = async () => {
+  const failed = job?.status === "failed" ? (job.items?.[0]?.error ?? job.error ?? "Import failed") : null;  const start = async () => {
     setErr(null);
     try { setJobId((await imp.mutateAsync({ url: release.url })).id); } catch (e) { setErr(friendlyError(e)); }
   };

@@ -60,6 +60,14 @@ export default defineConfig({
   plugins: [react(), bandcampProxy()],
   resolve: { alias: { "@bc/core": path.resolve(__dirname, "../packages/core/src/index.ts") } },
   clearScreen: false,
+  // Pre-bundle every Tauri package up front, including ones only reached through dynamic
+  // imports, so the dep optimizer never re-bundles (and swaps chunks) mid-session.
+  optimizeDeps: {
+    include: [
+      "@tauri-apps/api/app", "@tauri-apps/api/core", "@tauri-apps/api/event", "@tauri-apps/api/path", "@tauri-apps/api/window",
+      "@tauri-apps/plugin-dialog", "@tauri-apps/plugin-fs", "@tauri-apps/plugin-http", "@tauri-apps/plugin-opener", "@tauri-apps/plugin-sql",
+    ],
+  },
   envPrefix: ["VITE_", "TAURI_ENV_*"],
   server: {
     port: 5173,
