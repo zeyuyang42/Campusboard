@@ -18,7 +18,10 @@ export class TauriDb implements Db {
 }
 
 export async function openDb(): Promise<Db> {
-  // Migrations registered in src-tauri/src/lib.rs run on load; the file lives in the app's config dir.
-  const db = await Database.load("sqlite:library.db");
+  // Rust picks the file (library.db in release builds, library-dev.db in debug builds) and
+  // has already run the migrations from src-tauri/src/lib.rs by preloading it.
+  const { invoke } = await import("@tauri-apps/api/core");
+  const url = await invoke<string>("library_db_url");
+  const db = await Database.load(url);
   return new TauriDb(db);
 }

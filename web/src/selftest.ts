@@ -362,7 +362,7 @@ export async function runSelfTest() {
           for (const x of await core.albums()) if (!before.has(x.id)) await core.deleteAlbum(x.id);
         }
       }
-      // The new table and the filtered queries run against the real library.db.
+      // The new table and the filtered queries run against the app's library database (library-dev.db here).
       const [purchased, wishlist] = await Promise.all([core.albums("added", "purchased"), core.albums("added", "wishlist")]);
       return {
         fanId: page.fan_id > 0, counts: [page.collection.count, page.wishlist.count], firstBatch: [page.collection.items.length, page.wishlist.items.length],

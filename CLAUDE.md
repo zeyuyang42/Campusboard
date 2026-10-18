@@ -7,7 +7,8 @@
 - Before claiming a change works: `npm test`, `npm run typecheck`, then exercise
   the UI in browser mode with Playwright and, for anything touching Tauri plugins
   (database, HTTP, dialogs, fs), run `VITE_SELFTEST=1 npm run dev` and read the
-  self-test row as described in AGENTS.md. Chrome browser tools and window
+  self-test row from `library-dev.db` (not `library.db`) as described in AGENTS.md.
+  Dev runs must never open the installed app's `library.db`. Chrome browser tools and window
   screenshots may be unavailable in this environment; browser mode is the
   reliable visual check.
 - Only one Vite server can own port 5173: stop a browser-mode server before

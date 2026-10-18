@@ -156,7 +156,7 @@ export class JobRunner {
           const have = job.kind === "collection" ? await fan.libraryAlbumForFetchUrl(this.db, item.url) : null;
           if (have !== null) {
             await jobs.setItemResult(this.db, item.id, job.id, true, have, null);
-            await settleRelease(this.db, item.url, have);
+            await this.settle(item.url, have);
             this.onChange();
             continue;
           }
@@ -167,7 +167,7 @@ export class JobRunner {
           const albumId = await upsertTralbum(this.db, parseTralbumPage(html));
           await jobs.setItemResult(this.db, item.id, job.id, true, albumId, null);
           // An imported release is no longer new (New releases), even if it's removed again later.
-          await settleRelease(this.db, item.url, albumId);
+          await this.settle(item.url, albumId);
         } catch (e) {
           const msg = e instanceof ScrapeError ? `[${e.code}] ${e.message}` : String(e);
           console.error(`[job ${job.id}] ${item.url}: ${msg}`);
@@ -197,6 +197,18 @@ export class JobRunner {
     } finally {
       this.forceFlags.delete(job.id);
       this.onChange();
+    }
+  }
+
+  /**
+   * Mark an imported release as no longer new. Bookkeeping only: the import already
+   * succeeded, so a failure here is logged and never turns the item into a failure.
+   */
+  private async settle(url: string, albumId: number): Promise<void> {
+    try {
+      await settleRelease(this.db, url, albumId);
+    } catch (e) {
+      console.error(`[jobs] settling new release ${url}: ${String(e)}`);
     }
   }
 
