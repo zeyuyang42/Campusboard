@@ -22,6 +22,8 @@ import { ART_FETCH_TIMEOUT_MS, CHALLENGE_SETTING_KEY, RATE_LIMIT_MS } from "./co
 import { ChallengeGate, type ChallengeState } from "./scrape/challenge.js";
 import { clearAccount, getAccount, setIdentityCookie, setUsername, PRIVATE_SETTING_KEYS } from "./services/account.js";
 import { recomputeOwned } from "./db/repos/fanItems.js";
+import * as releases from "./db/repos/releases.js";
+import { ReleaseChecker, type ReleaseCheckerOptions } from "./services/releaseWatch.js";
 import type { BrowseResult, PlayState, SearchResult } from "./types.js";
 
 export interface CoreDeps {
@@ -29,6 +31,10 @@ export interface CoreDeps {
   fetch: FetchLike;
   /** Called whenever an import job changes state. */
   onJobsChange?: () => void;
+  /** Called when the new-releases checker stored something or its status changed. */
+  onReleasesChange?: () => void;
+  /** Timing overrides for the new-releases checker (tests). */
+  releaseCheck?: Omit<ReleaseCheckerOptions, "onChange">;
 }
 
 /** Everything the UI needs, as plain async functions over one database. */
@@ -40,6 +46,7 @@ export function createCore(deps: CoreDeps) {
   }, () => deps.onJobsChange?.());
   const queue = new FetchQueue(deps.fetch, RATE_LIMIT_MS, gate);
   const runner = new JobRunner(db, queue, deps.onJobsChange);
+  const checker = new ReleaseChecker(db, queue, { ...deps.releaseCheck, onChange: () => deps.onReleasesChange?.() });
   void prunePageCache(db);
   void vacuumOrphans(db);
   // Cheap, and repairs flags if the app quit between a sync's membership and flag writes.
@@ -81,6 +88,21 @@ export function createCore(deps: CoreDeps) {
     cancelJob: (id: number) => runner.cancel(id),
     /** When Bandcamp requests resume after a bot challenge (ms timestamp), or null if they aren't on hold. */
     challengeUntil: async (): Promise<number | null> => { await gate.ready(); return gate.until(); },
+    // new releases from library artists
+    /** Start the background checker (the first check comes a few minutes later). Not started by createCore. */
+    startReleaseChecks: () => checker.start(),
+    stopReleaseChecks: () => checker.stop(),
+    newReleases: () => releases.listNewReleases(db),
+    newReleaseCount: () => releases.countNewReleases(db),
+    dismissReleases: async (ids: number[]) => { const n = await releases.dismissReleases(db, ids); deps.onReleasesChange?.(); return n; },
+    releaseCheckStatus: () => checker.status(),
+    setReleaseChecksEnabled: (on: boolean) => checker.setEnabled(on),
+    /** Check every unmuted library artist now, one request each through the queue. */
+    checkReleasesNow: () => checker.checkNow(),
+    /** Check one artist now (used by the selftest). */
+    checkArtistReleases: (artistId: number) => checker.checkArtist(artistId),
+    artistReleasesMuted: (artistId: number) => releases.isMuted(db, artistId),
+    setArtistReleasesMuted: async (artistId: number, muted: boolean) => { await releases.setMuted(db, artistId, muted); deps.onReleasesChange?.(); },
     // playlists
     playlists: () => playlists.listPlaylists(db),
     playlist: (id: number) => playlists.getPlaylist(db, id),

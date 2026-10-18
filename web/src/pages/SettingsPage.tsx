@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { friendlyError } from "../lib/errors";
 import { PRESETS, parseThemeJson, type Theme } from "@bc/core";
 import { useTheme } from "../theme/store";
 import { appInfo, pickBackgroundImage, pickTextFile, revealDataDir, saveTextFile } from "../lib/files";
 import { isTauri } from "../lib/env";
 import { AccountSettings } from "../components/AccountSettings";
 import { ConfirmButton } from "../components/ConfirmButton";
-import { useClearHistory, usePlayCount } from "../api/queries";
+import { useClearHistory, usePlayCount, useReleaseCheckStatus, useReleaseMutations } from "../api/queries";
 import { formatPlays } from "../lib/format";
 
 const SHORTCUTS: [string, string][] = [
@@ -49,6 +50,8 @@ export function SettingsPage() {
       {notice && <div className={`notice ${notice.kind}`}>{notice.text}</div>}
 
       <AccountSettings />
+
+      <NewReleaseSettings />
 
       <ListeningHistory />
 
@@ -173,6 +176,60 @@ export function SettingsPage() {
         {isTauri && <button className="btn" onClick={() => void revealDataDir()}>Open data folder</button>}
       </section>
     </div>
+  );
+}
+
+const STOPPED: Record<string, string> = {
+  job: "Paused while an import runs.",
+  cooldown: "Paused: Bandcamp asked us to slow down.",
+  off: "Checking is turned off.",
+  busy: "A check is already running.",
+};
+
+function NewReleaseSettings() {
+  const { data: status } = useReleaseCheckStatus();
+  const { setEnabled, checkNow } = useReleaseMutations();
+  // One pass at a time: a second click (before the button re-renders disabled) is ignored,
+  // so its immediate "busy" answer can't replace the real pass's result.
+  const inFlight = useRef(false);
+  const [result, setResult] = useState<{ checked: number; found: number; stopped: string | null } | null>(null);
+  const running = !!status?.running || checkNow.isPending;
+  const runCheck = () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setResult(null);
+    checkNow.mutate(undefined, {
+      onSuccess: (r) => { if (r.stopped !== "busy") setResult(r); },
+      onSettled: () => { inFlight.current = false; },
+    });
+  };
+  const last = status?.last_check_at ? new Date(status.last_check_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : null;
+  return (
+    <section id="releases">
+      <h2>New releases</h2>
+      <p className="muted">
+        While the app is open it looks at one artist from your library every few minutes, each at most once a day,
+        and lists releases that appear after that artist's first look under New releases. It waits while imports run.
+      </p>
+      <label className="check-row">
+        <input type="checkbox" checked={setEnabled.isPending ? setEnabled.variables : (status?.enabled ?? true)} disabled={!status || setEnabled.isPending} onChange={(e) => setEnabled.mutate(e.target.checked)} />
+        Check for new releases
+      </label>
+      <div className="row">
+        <button className="btn" disabled={!status?.enabled || running || !status.artists} onClick={runCheck}>{running ? "Checking…" : "Check now"}</button>
+        <span className="muted">
+          {last ? `Last checked ${last}.` : "Not checked yet."}
+          {status && status.muted > 0 ? ` ${status.muted} artist${status.muted === 1 ? "" : "s"} muted.` : ""}
+        </span>
+      </div>
+      {result && !running && (
+        <p className="muted">
+          {result.stopped && STOPPED[result.stopped] ? `${STOPPED[result.stopped]} ` : ""}
+          Checked {result.checked} artist{result.checked === 1 ? "" : "s"}{result.found ? `, found ${result.found} new` : ", nothing new"}.
+        </p>
+      )}
+      {checkNow.error && <div className="notice error">Couldn't check. {friendlyError(checkNow.error)}</div>}
+    </section>
   );
 }
 

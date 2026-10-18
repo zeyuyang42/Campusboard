@@ -190,3 +190,42 @@ export interface AccountInfo {
   hasCookie: boolean;
   lastSync: SyncSummary | null;
 }
+
+/** A release on a library artist's /music page that appeared after the artist's first check. */
+export interface NewRelease {
+  id: number;
+  artist_id: number;
+  /** The release's own artist on a label page, else the library artist's name. */
+  artist_name: string;
+  url: string;
+  item_type: ItemType;
+  title: string;
+  art_id: number | null;
+  /** UTC `YYYY-MM-DD HH:MM:SS`, when a check first saw it. */
+  first_seen: string;
+}
+
+/** The new-releases checker as Settings shows it. */
+export interface ReleaseCheckStatus {
+  enabled: boolean;
+  /** ms timestamp of the most recent artist check, or null if none yet. */
+  last_check_at: number | null;
+  /** Library artists the checker covers (not muted). */
+  artists: number;
+  muted: number;
+  /** A "Check now" pass is running. */
+  running: boolean;
+}
+
+/** What one artist check did. */
+export interface ArtistCheckResult {
+  artist_id: number;
+  status: "baseline" | "checked" | "failed" | "skipped";
+  /** Releases on the page that passed URL normalisation. */
+  releases: number;
+  /** Rows this check inserted into artist_releases. */
+  inserted_ids: number[];
+  /** Of those, how many are new (always 0 for a baseline). */
+  found: number;
+  error?: string;
+}

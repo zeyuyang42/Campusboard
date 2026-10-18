@@ -18,6 +18,10 @@ export const keys = {
   libraryView: ["settings", "library_view"] as const,
   recentlyPlayed: ["history", "recent"] as const,
   playCount: ["history", "count"] as const,
+  newReleases: ["releases", "list"] as const,
+  newReleaseCount: ["releases", "count"] as const,
+  releaseStatus: ["releases", "status"] as const,
+  artistMuted: (id: number) => ["releases", "muted", id] as const,
 };
 
 const core = getCore;
@@ -92,7 +96,7 @@ export const useChallengeUntil = () =>
 export function useInvalidateLibrary() {
   const qc = useQueryClient();
   return () => {
-    for (const k of ["albums", "album", "artists", "artist", "tracks", "search", "playlists", "playlist", "history"]) void qc.invalidateQueries({ queryKey: [k] });
+    for (const k of ["albums", "album", "artists", "artist", "tracks", "search", "playlists", "playlist", "history", "releases"]) void qc.invalidateQueries({ queryKey: [k] });
   };
 }
 
@@ -137,6 +141,26 @@ export function useAlbumMutations() {
   return {
     remove: useMutation({ mutationFn: async (id: number) => (await core()).deleteAlbum(id), onSuccess: inv }),
     refresh: useMutation({ mutationFn: async (id: number) => (await core()).refreshAlbum(id), onSuccess: inv }),
+  };
+}
+
+/** Releases library artists published after their first check (see core's ReleaseChecker). */
+export const useNewReleases = () => useQuery({ queryKey: keys.newReleases, queryFn: async () => (await core()).newReleases() });
+export const useNewReleaseCount = () => useQuery({ queryKey: keys.newReleaseCount, queryFn: async () => (await core()).newReleaseCount() });
+/** The checker's setting and last check; polls while a Check now pass runs. */
+export const useReleaseCheckStatus = () =>
+  useQuery({ queryKey: keys.releaseStatus, queryFn: async () => (await core()).releaseCheckStatus(), refetchInterval: (q) => (q.state.data?.running ? 1000 : false) });
+export const useArtistReleasesMuted = (id: number) =>
+  useQuery({ queryKey: keys.artistMuted(id), queryFn: async () => (await core()).artistReleasesMuted(id), enabled: id > 0 });
+
+export function useReleaseMutations() {
+  const qc = useQueryClient();
+  const inv = () => { void qc.invalidateQueries({ queryKey: ["releases"] }); };
+  return {
+    dismiss: useMutation({ mutationFn: async (ids: number[]) => (await core()).dismissReleases(ids), onSuccess: inv }),
+    setEnabled: useMutation({ mutationFn: async (on: boolean) => (await core()).setReleaseChecksEnabled(on), onSuccess: inv }),
+    checkNow: useMutation({ mutationFn: async () => (await core()).checkReleasesNow(), onMutate: () => { setTimeout(inv, 50); }, onSettled: inv }),
+    setMuted: useMutation({ mutationFn: async ({ id, muted }: { id: number; muted: boolean }) => (await core()).setArtistReleasesMuted(id, muted), onSuccess: inv }),
   };
 }
 

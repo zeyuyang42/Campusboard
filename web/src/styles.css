@@ -372,6 +372,13 @@ details.about-wrap summary { cursor: pointer; color: var(--text-muted); margin-t
 
 /* ---------- browse page ---------- */
 .browse-card { cursor: pointer; }
+.release-card .art { display: block; }
+.release-card .sub a:hover { text-decoration: underline; }
+.release-actions { display: flex; gap: 6px; margin-top: 8px; }
+.release-error { font-size: 12.5px; margin-top: 6px; }
+.check-row, .settings label.check-row { display: flex; flex-direction: row; align-items: center; gap: 8px; font-weight: 500; }
+.artist-mute { margin-top: 28px; font-size: 13px; font-weight: 400; width: fit-content; }
+.check-row input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
 .browse-card .art { border-width: 2px; border-color: transparent; }
 .browse-card.checked .art { border-color: var(--accent); }
 .browse-card.owned { opacity: .7; }
