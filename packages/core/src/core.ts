@@ -133,7 +133,8 @@ export function createCore(deps: CoreDeps) {
     recentlyPlayed: (limit = 12) => plays.recentlyPlayedAlbums(db, limit),
     mostPlayed: (limit = 12) => plays.mostPlayedAlbums(db, limit),
     playCount: () => plays.countPlays(db),
-    clearHistory: () => plays.clearPlays(db),
+    /** Forget all plays, and plays an imported library still has waiting (so they don't come back). */
+    clearHistory: async () => { await importPending.clearPendingPlays(db); return plays.clearPlays(db); },
     savePlayState: (s: PlayState) => playState.setPlayState(db, s),
     // Bandcamp account (the identity cookie is write-only from the UI's side)
     account: () => getAccount(db),

@@ -2,20 +2,23 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { NodeDb } from "./helpers/nodeDb.js";
 import { fixture } from "./helpers.js";
 import { parseTralbumPage } from "../src/scrape/parseTralbum.js";
-import { upsertTralbum } from "../src/services/importService.js";
+import { upsertTralbum, vacuumOrphans } from "../src/services/importService.js";
 import { FetchQueue } from "../src/scrape/http.js";
 import { JobRunner } from "../src/services/jobRunner.js";
-import { createPlaylist, addTracks, getPlaylist, listPlaylists } from "../src/db/repos/playlists.js";
+import { createPlaylist, addTracks, getPlaylist, listPlaylists, deletePlaylist } from "../src/db/repos/playlists.js";
 import { getSetting, setSetting } from "../src/db/repos/settings.js";
 import { setIdentityCookie, setUsername, getAccount } from "../src/services/account.js";
 import { recomputeOwned } from "../src/db/repos/fanItems.js";
 import { setMuted, isMuted } from "../src/db/repos/releases.js";
-import { countPending } from "../src/db/repos/importPending.js";
+import { countPending, clearPending } from "../src/db/repos/importPending.js";
+import { createCore } from "../src/core.js";
+import { parseTheme } from "../src/theme/schema.js";
+import type { Db } from "../src/db/Db.js";
 import * as jobs from "../src/db/repos/jobs.js";
 import { PRESETS } from "../src/theme/presets.js";
 import {
   exportLibrary, importLibrary, parseLibraryExport, previewLibraryImport, backupDatabase,
-  LIBRARY_EXPORT_VERSION, type LibraryExport,
+  LIBRARY_EXPORT_VERSION, MAX_LIBRARY_FILE_CHARS, MAX_PLAYLIST_ENTRIES, MAX_PLAYS, type LibraryExport,
 } from "../src/services/libraryTransfer.js";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,9 +30,10 @@ const CUSTOM_ALBUM = "https://music.zoekeating.com/album/snowmelt-ep";
 const COOKIE = "7%09abcDEF%3D%3D%09%7B%22id%22%3A1%7D";
 
 /** A fake Bandcamp serving the two album fixtures. `gate` holds a URL's answer until released. */
-function fakeBandcamp(gate?: { url: string; open: Promise<void> }) {
+function fakeBandcamp(gate?: { url: string; open: Promise<void> }, missing: string[] = []) {
   const calls: string[] = [];
   const pages: Record<string, () => string> = { [ALBUM]: () => fixture("album"), [CUSTOM_ALBUM]: () => fixture("custom-album") };
+  for (const m of missing) delete pages[m];
   const fetch = async (url: string) => {
     calls.push(url);
     if (gate && url === gate.url) await gate.open;
@@ -309,5 +313,171 @@ describe("database backup", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("hostile and oversized files", () => {
+  it("never queues, fetches or stores LAN, IP-literal, port or mismatched addresses", async () => {
+    const dst = new NodeDb();
+    const f = fakeBandcamp();
+    const album = (url: string, id: number, extra: Partial<LibraryExport["albums"][number]> = {}) =>
+      ({ url, item_type: "album" as const, bandcamp_id: id, title: "x", artist: "x", artist_url: null, band_id: null, owned: true, wishlisted: false, fetch_url: null, ...extra });
+    const real = data.albums.find((a) => a.url === ALBUM)!;
+    const custom = data.albums.find((a) => a.url === CUSTOM_ALBUM)!;
+    const hostile: LibraryExport = {
+      ...data,
+      albums: [
+        // A real album whose fetch URL points at some other release: the mark is dropped.
+        { ...real, fetch_url: "https://other.bandcamp.com/album/y" },
+        // A custom-domain album whose fetch URL isn't on bandcamp.com: dropped too.
+        { ...custom, owned: true, fetch_url: "https://music.zoekeating.com/album/snowmelt-ep" },
+        album("https://192.168.1.10/album/x", 9001),
+        album("https://10.0.0.1/album/x", 9002, { fetch_url: "https://10.0.0.1/album/x" }),
+        album("https://nas.lan/album/x", 9003),
+        album("https://evil.example.com:8443/album/x", 9004),
+        album("https://localhost/album/x", 9005),
+        album("https://router/album/x", 9006),
+        album("https://bandcamp.com/album/x", 9007),
+      ],
+      new_releases: {
+        ...data.new_releases,
+        dismissed: [
+          ...data.new_releases.dismissed,
+          { band_id: 1, url: "https://10.0.0.1/album/z", item_type: "album", title: "z", art_id: null, artist_override: null },
+          { band_id: 1, url: "https://evil.example.com/admin/panel", item_type: "album", title: "z", art_id: null, artist_override: null },
+          { band_id: 1, url: "https://nas.local/track/z", item_type: "track", title: "z", art_id: null, artist_override: null },
+        ],
+      },
+    };
+    const parsed = parseLibraryExport(JSON.stringify(hostile));
+    expect(parsed.error).toBeUndefined();
+    const preview = await previewLibraryImport(dst, parsed.data!);
+    expect(preview.albums).toMatchObject({ total: 9, new: 2, invalid: 7 });
+    const r = await importLibrary(dst, runnerFor(dst, f), parsed.data!);
+    await waitJob(dst, r.job!.id);
+    expect(f.calls.sort()).toEqual([ALBUM, CUSTOM_ALBUM].sort());
+    expect((await dst.select<{ url: string }>("SELECT url FROM job_items")).map((x) => x.url).sort()).toEqual([ALBUM, CUSTOM_ALBUM].sort());
+    expect(await dst.select("SELECT url FROM albums WHERE url NOT IN (?, ?)", [ALBUM, CUSTOM_ALBUM])).toEqual([]);
+    // No marks survive: one mismatched, one off bandcamp.com, the rest invalid.
+    expect(await dst.select("SELECT * FROM fan_items")).toEqual([]);
+    expect((await dst.get<{ owned: number }>("SELECT owned FROM albums WHERE url = ?", [ALBUM]))!.owned).toBe(0);
+    const stored = [
+      ...(await dst.select<{ url: string }>("SELECT url FROM artist_releases")).map((x) => x.url),
+      ...(await dst.select<{ url: string | null }>("SELECT release_url AS url FROM import_pending")).map((x) => x.url),
+    ];
+    expect(stored.filter((u) => u && !u.startsWith("https://illuminatihotties.bandcamp.com/"))).toEqual([]);
+  });
+
+  it("keeps a mark whose fetch URL is the same release on name.bandcamp.com", async () => {
+    const dst = new NodeDb();
+    const custom = data.albums.find((a) => a.url === CUSTOM_ALBUM)!;
+    const file = { ...data, albums: [{ ...custom, owned: true, fetch_url: "https://zoekeating.bandcamp.com/album/snowmelt-ep" }] };
+    await waitJob(dst, (await importLibrary(dst, runnerFor(dst), file)).job!.id);
+    expect(await dst.select("SELECT list, url, fetch_url FROM fan_items")).toEqual([
+      { list: "collection", url: CUSTOM_ALBUM, fetch_url: "https://zoekeating.bandcamp.com/album/snowmelt-ep" },
+    ]);
+    expect((await dst.get<{ owned: number }>("SELECT owned FROM albums WHERE url = ?", [CUSTOM_ALBUM]))!.owned).toBe(1);
+  });
+
+  it("refuses files over the size and entry caps, and malformed usernames, with a sentence", () => {
+    expect(parseLibraryExport(" ".repeat(MAX_LIBRARY_FILE_CHARS + 1)).error).toMatch(/too large to import \(over 50 MB\)/);
+    const ref = data.playlists[0].tracks[0];
+    const per = Math.ceil((MAX_PLAYLIST_ENTRIES + 1) / 2);
+    const many = { ...data, playlists: [0, 1].map((i) => ({ key: `k:${i}`, name: `p${i}`, created_at: "x", tracks: Array(per).fill(ref) })) };
+    expect(parseLibraryExport(JSON.stringify(many)).error).toMatch(/playlists hold more than 200,000 tracks/);
+    const play = data.history![0];
+    expect(parseLibraryExport(JSON.stringify({ ...data, history: Array(MAX_PLAYS + 1).fill(play) })).error).toMatch(/too large to import/);
+    expect(parseLibraryExport(JSON.stringify({ ...data, account: { username: "not a user/../x" } })).error).toMatch(/account\.username: not a Bandcamp username/);
+  });
+
+  it("refuses theme background file names that leave the backgrounds folder", () => {
+    const bg = (value: string) => parseTheme({ ...PRESETS[0], background: { source: "file", value, blur: 0, dim: 0 } });
+    expect(bg("1760000000-photo.jpg").theme).toBeDefined();
+    for (const bad of ["../library.db", "backgrounds/../x", "..", ".hidden", "a/b.png"]) expect(bg(bad).error, bad).toMatch(/plain file name/);
+    const file = { ...data, settings: { ...data.settings, theme: { theme: { ...PRESETS[0], background: { source: "file", value: "../library.db", blur: 0, dim: 0 } } } } };
+    expect(parseLibraryExport(JSON.stringify(file)).error).toMatch(/settings\.theme/);
+  });
+});
+
+describe("waiting entries", () => {
+  it("a failed album keeps its playlist entries and plays waiting, and Stop waiting forgets them", async () => {
+    const dst = new NodeDb();
+    const r = await importLibrary(dst, runnerFor(dst, fakeBandcamp(undefined, [CUSTOM_ALBUM])), data);
+    const job = await waitJob(dst, r.job!.id);
+    expect(job).toMatchObject({ status: "done", done: 1, failed: 1 });
+    // Mix keeps its custom-album entry waiting, and the custom album's play waits too.
+    expect(await countPending(dst)).toEqual({ tracks: 1, plays: 1, other: 1 });
+    const mix = (await listPlaylists(dst)).find((p) => p.name === "Mix")!;
+    expect((await getPlaylist(dst, mix.id))!.tracks).toHaveLength(2);
+    // Importing the file again once the album is reachable fills the gap in place.
+    const again = await importLibrary(dst, runnerFor(dst), data);
+    await waitJob(dst, again.job!.id);
+    expect((await getPlaylist(dst, mix.id))!.tracks.map((t) => t.track_id)).toEqual(data.playlists[0].tracks.map((t) => t.track_id));
+    expect(await countPending(dst)).toEqual({ tracks: 0, plays: 0, other: 0 });
+  });
+
+  it("Stop waiting forgets everything still pending", async () => {
+    const dst = new NodeDb();
+    const r = await importLibrary(dst, runnerFor(dst, fakeBandcamp(undefined, [ALBUM, CUSTOM_ALBUM])), data);
+    await waitJob(dst, r.job!.id);
+    const before = await countPending(dst);
+    expect(before.tracks + before.plays + before.other).toBeGreaterThan(0);
+    expect(await clearPending(dst)).toBe(before.tracks + before.plays + before.other);
+    expect(await countPending(dst)).toEqual({ tracks: 0, plays: 0, other: 0 });
+  });
+
+  it("deleting an imported playlist drops its waiting entries and its link", async () => {
+    const dst = new NodeDb();
+    const r = await importLibrary(dst, runnerFor(dst, fakeBandcamp(undefined, [ALBUM, CUSTOM_ALBUM])), data);
+    await waitJob(dst, r.job!.id);
+    expect((await countPending(dst)).tracks).toBe(3);
+    const mix = (await listPlaylists(dst)).find((p) => p.name === "Mix")!;
+    await deletePlaylist(dst, mix.id);
+    expect((await countPending(dst)).tracks).toBe(0);
+    expect(await dst.get("SELECT 1 AS x FROM imported_playlists WHERE playlist_id = ?", [mix.id])).toBeNull();
+    // With foreign keys off (the sqlite3 CLI), vacuumOrphans sweeps the same rows.
+    const empty = (await listPlaylists(dst)).find((p) => p.name === "Empty")!;
+    await dst.run("INSERT INTO import_pending (kind, dedupe_key, playlist_id, position, album_url, track_title) VALUES ('playlist_track', 'pl:x', ?, 0, ?, 't')", [empty.id, ALBUM]);
+    dst.raw.exec("PRAGMA foreign_keys = OFF");
+    await dst.run("DELETE FROM playlists WHERE id = ?", [empty.id]);
+    dst.raw.exec("PRAGMA foreign_keys = ON");
+    await vacuumOrphans(dst);
+    expect(await dst.select("SELECT * FROM import_pending WHERE playlist_id = ?", [empty.id])).toEqual([]);
+    expect(await dst.select("SELECT * FROM imported_playlists WHERE playlist_id = ?", [empty.id])).toEqual([]);
+  });
+
+  it("clearing history also forgets plays still waiting, so they don't come back", async () => {
+    const dst = new NodeDb();
+    let open!: () => void;
+    const f = fakeBandcamp({ url: CUSTOM_ALBUM, open: new Promise<void>((res) => { open = res; }) });
+    const core = createCore({ db: dst, fetch: f.fetch });
+    const r = await importLibrary(dst, runnerFor(dst, f), data);
+    for (let i = 0; i < 400 && !f.calls.includes(CUSTOM_ALBUM); i++) await new Promise((res) => setTimeout(res, 5));
+    expect((await countPending(dst)).plays).toBe(1);
+    await core.clearHistory();
+    open();
+    await waitJob(dst, r.job!.id);
+    expect(await core.playCount()).toBe(0);
+  });
+
+  it("an import interrupted between claiming and linking a playlist doesn't duplicate it", async () => {
+    const dst = new NodeDb();
+    // Fail the first link write, as if the app quit right after creating the playlist.
+    let failed = false;
+    const flaky: Db = {
+      select: (sql, p) => dst.select(sql, p),
+      get: (sql, p) => dst.get(sql, p),
+      run: async (sql, p) => {
+        if (!failed && sql.startsWith("UPDATE imported_playlists")) { failed = true; throw new Error("killed"); }
+        return dst.run(sql, p);
+      },
+    };
+    await expect(importLibrary(flaky, runnerFor(dst), data)).rejects.toThrow("killed");
+    expect((await listPlaylists(dst)).map((p) => p.name)).toEqual(["Mix"]);
+    const r = await importLibrary(dst, runnerFor(dst), data);
+    await waitJob(dst, r.job!.id);
+    const shape = await playlistShape(dst);
+    expect(Object.keys(shape).sort()).toEqual(["Empty", "Mix"]);
+    expect(shape.Mix).toEqual(data.playlists[0].tracks.map((t) => t.track_id));
   });
 });

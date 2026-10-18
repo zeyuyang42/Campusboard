@@ -44,6 +44,7 @@ web/src/
   components/, pages/      plain CSS in styles.css driven by tokens on :root
 src-tauri/
   src/lib.rs               registers sql/http/dialog/fs/opener/window-state plugins, migrations, Dock reopen
+  src/backup.rs            database backup destination check + atomic copy (Rust-side save dialog)
   src/menu.rs              native menu bar; custom items emit a `menu` event handled by web/src/lib/appMenu.ts
   migrations/*.sql         schema; every statement is IF NOT EXISTS so an old library.db can be adopted
   capabilities/default.json  URL scope for http (bandcamp.com, bcbits.com, custom-domain paths; LAN denied), fs scope ($APPDATA), window permissions
@@ -189,8 +190,14 @@ src-tauri/
   (0007) that the job runner resolves after every item; `imported_playlists`
   makes re-imports idempotent. Saving goes through the dialog plugin, which adds
   exactly the chosen file to the fs scope at runtime, so the capability file
-  stays $APPDATA-only. Backups use `VACUUM INTO` a fresh file in $APPDATA, then
-  copy it to the chosen path (SQLite won't overwrite an existing file).
+  stays $APPDATA-only. Every URL from a file goes through `normalizeBandcampUrl`
+  before it is queued or stored; Purchased/Wishlist `fetch_url`s must be on
+  bandcamp.com and name the same release path. Backups `VACUUM INTO` a fresh
+  `backup-<ms>.tmp.db` in $APPDATA; the Rust `backup_library` command
+  (`src/backup.rs`) shows the save dialog itself, refuses the data/config folders
+  and the live database by (device, inode) after canonicalizing, and copies
+  through a temp file + rename. Stale snapshots are swept at startup. A backup
+  contains the identity cookie; the export never does.
 
 ## Collection sync facts (verified 2026-10-17 with curl against a public profile)
 

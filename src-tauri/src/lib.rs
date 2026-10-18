@@ -1,4 +1,8 @@
+mod backup;
 mod menu;
+
+use std::path::PathBuf;
+use tauri::Manager;
 
 use tauri_plugin_sql::{Migration, MigrationKind};
 use tauri_plugin_window_state::StateFlags;
@@ -71,6 +75,86 @@ fn db_url() -> String {
 #[tauri::command]
 fn library_db_url() -> String {
     db_url()
+}
+
+/// The live database file, resolved the way the sql plugin resolves `db_url()` (relative
+/// names live in the app config folder).
+fn live_db_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    let url = db_url();
+    let p = PathBuf::from(url.strip_prefix("sqlite:").unwrap_or(&url));
+    if p.is_absolute() {
+        Some(p)
+    } else {
+        app.path().app_config_dir().ok().map(|d| d.join(p))
+    }
+}
+
+/// Save a database snapshot the frontend wrote with VACUUM INTO (`$APPDATA/<tmp_name>`) to a
+/// place the user picks in the native save dialog. The destination never comes from the
+/// webview in release builds; it is checked (backup::check_dest) and written atomically.
+/// `debug_dest` (debug builds only, for the selftest) replaces the dialog with a
+/// `selftest-*.db` path. The snapshot is always removed. Returns the saved path, or None
+/// if the dialog was cancelled.
+#[tauri::command]
+async fn backup_library(app: tauri::AppHandle, tmp_name: String, default_name: String, debug_dest: Option<String>) -> Result<Option<String>, String> {
+    if !backup::is_snapshot_name(&tmp_name) {
+        return Err("invalid snapshot name".into());
+    }
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let snapshot = data_dir.join(&tmp_name);
+    let result = save_snapshot(&app, &snapshot, &data_dir, &default_name, debug_dest);
+    let _ = std::fs::remove_file(&snapshot);
+    result
+}
+
+fn save_snapshot(app: &tauri::AppHandle, snapshot: &std::path::Path, data_dir: &std::path::Path, default_name: &str, debug_dest: Option<String>) -> Result<Option<String>, String> {
+    let dest = match debug_dest {
+        Some(d) => {
+            let p = PathBuf::from(&d);
+            let named = p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("selftest-"));
+            if !cfg!(debug_assertions) || !named {
+                return Err("debug destinations are only for the selftest in dev builds".into());
+            }
+            p
+        }
+        None => {
+            use tauri_plugin_dialog::DialogExt;
+            let picked = app
+                .dialog()
+                .file()
+                .set_file_name(default_name)
+                .add_filter("SQLite database", &["db"])
+                .blocking_save_file();
+            match picked.and_then(|f| f.into_path().ok()) {
+                Some(p) => p,
+                None => return Ok(None),
+            }
+        }
+    };
+    let mut protected = vec![data_dir.to_path_buf()];
+    if let Ok(c) = app.path().app_config_dir() {
+        protected.push(c);
+    }
+    let live: Vec<PathBuf> = live_db_path(app).into_iter().collect();
+    let target = backup::check_dest(&dest, &protected, &live)?;
+    backup::atomic_copy(snapshot, &target).map_err(|e| format!("Couldn't write the backup ({e})."))?;
+    Ok(Some(target.to_string_lossy().into_owned()))
+}
+
+/// Selftest helper (debug builds only): the first 15 bytes of a `selftest-*.db` backup in
+/// the temp folder, then delete it.
+#[tauri::command]
+fn selftest_take_backup(path: String) -> Result<String, String> {
+    let p = PathBuf::from(&path);
+    let tmp = std::fs::canonicalize(std::env::temp_dir()).map_err(|e| e.to_string())?;
+    let parent = p.parent().and_then(|d| std::fs::canonicalize(d).ok());
+    let named = p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("selftest-"));
+    if !cfg!(debug_assertions) || !named || parent.as_deref() != Some(tmp.as_path()) {
+        return Err("only selftest backups in the temp folder".into());
+    }
+    let bytes = std::fs::read(&p).map_err(|e| e.to_string())?;
+    std::fs::remove_file(&p).map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&bytes[..bytes.len().min(15)]).into_owned())
 }
 
 const RELEASES_URL: &str = "https://github.com/zeyuyang42/bandcamp-player/releases/latest";
@@ -180,7 +264,14 @@ pub fn run() {
         )
         .menu(|handle| menu::build(handle))
         .on_menu_event(|app, event| menu::on_event(app, event.id().as_ref()))
-        .invoke_handler(tauri::generate_handler![library_db_url])
+        .setup(|app| {
+            // Snapshots left by a backup interrupted mid-VACUUM can be as large as the library.
+            if let Ok(dir) = app.path().app_data_dir() {
+                backup::sweep_snapshots(&dir);
+            }
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![library_db_url, backup_library, selftest_take_backup])
         .build(context)
         .unwrap_or_else(|e| startup_failed(&e));
 

@@ -28,6 +28,10 @@ export const ThemeSchema = z.object({
       blur: z.number().min(0).max(40),
       dim: z.number().min(0).max(1),
     })
+    // A file background names one file in the backgrounds folder: no folders, no "..".
+    .refine((b) => b.source !== "file" || b.value === "" || /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(b.value), {
+      message: "a background file must be a plain file name", path: ["value"],
+    })
     .default({ source: "none", value: "", blur: 12, dim: 0.5 }),
 });
 

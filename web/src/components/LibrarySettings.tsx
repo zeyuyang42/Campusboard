@@ -85,7 +85,7 @@ export function LibrarySettings() {
         {isTauri && <button className="btn" disabled={!!busy} onClick={doBackup}>{busy === "backup" ? "Backing up…" : "Back up library database…"}</button>}
       </div>
       {isTauri
-        ? <p className="muted">A database backup is a complete copy of the library file, made while the app keeps running.</p>
+        ? <p className="muted">A database backup is a complete copy of the library file, made while the app keeps running. Unlike the export, it contains your Bandcamp identity cookie if one is saved, so keep it private and don't share it.</p>
         : <p className="muted">Database backups need the app: in the browser the library lives only in memory.</p>}
 
       {pending && (

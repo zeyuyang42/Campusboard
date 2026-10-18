@@ -31,11 +31,19 @@ CREATE TABLE IF NOT EXISTS import_pending (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ix_import_pending_kind ON import_pending(kind);
+-- After each imported album only the rows for that album, its tracks or its artist are read.
+CREATE INDEX IF NOT EXISTS ix_import_pending_album ON import_pending(album_url);
+CREATE INDEX IF NOT EXISTS ix_import_pending_track ON import_pending(track_bcid);
+CREATE INDEX IF NOT EXISTS ix_import_pending_band ON import_pending(band_id);
 
 -- Playlists created from a library file, by "<source library id>:<source playlist id>", so
--- importing the same library again never creates them twice. Deleting the playlist drops the
--- row, so a later import may bring it back.
+-- importing the same library again never creates them twice. The row is written first as a
+-- claim (name chosen, playlist_id NULL), then the playlist, then playlist_id, so an import
+-- interrupted in between adopts its own playlist on the next run instead of making a second.
+-- Deleting the playlist drops the row, so a later import may bring it back.
 CREATE TABLE IF NOT EXISTS imported_playlists (
   source_key TEXT PRIMARY KEY,
-  playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE
+  name TEXT NOT NULL,
+  claimed_at TEXT NOT NULL,
+  playlist_id INTEGER REFERENCES playlists(id) ON DELETE CASCADE
 );

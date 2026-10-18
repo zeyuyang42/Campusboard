@@ -9,7 +9,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { exit } from "@tauri-apps/api/app";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { BaseDirectory } from "@tauri-apps/api/path";
-import { exists, readFile, readTextFile, remove } from "@tauri-apps/plugin-fs";
+import { exists, readTextFile, remove } from "@tauri-apps/plugin-fs";
+import { invoke } from "@tauri-apps/api/core";
+import { appDataDir, join } from "@tauri-apps/api/path";
 import { backupLibraryDatabase, exportLibraryFile } from "./lib/libraryFile";
 import { FAN_ITEMS_ENDPOINT, fanPageUrl, parseFanItemsResponse, parseFanPage, repos, type FanItem } from "@bc/core";
 
@@ -188,9 +190,11 @@ async function newReleasesCheck(core: Awaited<ReturnType<typeof getCore>>, album
 
 /**
  * Library export and database backup through the real fs and SQL plugins, without dialogs:
- * the dev-only path argument writes into $APPDATA. The export is read back, validated and
- * previewed against this same library (which must find nothing new), then deleted; the
- * backup must be an SQLite file (VACUUM INTO through the plugin), then is deleted too.
+ * the dev-only path argument writes the export into $APPDATA. It is read back, validated and
+ * previewed against this same library (which must find nothing new), then deleted. The
+ * backup (VACUUM INTO through the SQL plugin, then the Rust backup command) goes to the temp
+ * folder and must be an SQLite file; it is read and deleted by a debug-only command. The
+ * Rust destination check must refuse the data folder, also spelled in another case.
  * Changes nothing in the library.
  */
 async function libraryFileCheck(core: Awaited<ReturnType<typeof getCore>>) {
@@ -210,14 +214,20 @@ async function libraryFileCheck(core: Awaited<ReturnType<typeof getCore>>) {
     await remove(name, { baseDir: AppData });
     const removed = !(await exists(name, { baseDir: AppData }));
     const path = await backupLibraryDatabase(backup);
-    const head = new TextDecoder().decode((await readFile(backup, { baseDir: AppData })).slice(0, 15));
-    await remove(backup, { baseDir: AppData });
-    const backupRemoved = !(await exists(backup, { baseDir: AppData }));
+    const head = path ? await invoke<string>("selftest_take_backup", { path }) : null;
+    // The guard: a snapshot name that doesn't exist, so nothing is copied even if it failed open.
+    const dataDir = await appDataDir();
+    const refused: Record<string, string> = {};
+    for (const [label, dir] of [["dataDir", dataDir], ["caseVariant", dataDir.replace("Application Support", "application support")]] as const) {
+      refused[label] = await invoke("backup_library", { tmpName: "backup-1.tmp.db", defaultName: "x.db", debugDest: await join(dir, `selftest-guard-${stamp}.db`) })
+        .then((r) => `allowed: ${String(r)}`, (e) => String(e));
+    }
+    const guardOk = Object.values(refused).every((r) => r.includes("outside the app's data folder"));
     const ok = !!parsed.data && cookieAbsent && removed && counts?.albums === albums.length && counts.playlists === playlists.length && counts.plays === plays
-      && preview?.albums.new === 0 && preview.playlists.new === 0 && head === "SQLite format 3" && backupRemoved;
-    return { ok, error: parsed.error ?? null, bytes: text.length, counts, cookieAbsent, removed, preview: preview && { albums: preview.albums, playlists: preview.playlists.new }, backup: { written: !!path, head, removed: backupRemoved } };
+      && preview?.albums.new === 0 && preview.playlists.new === 0 && head === "SQLite format 3" && guardOk;
+    return { ok, error: parsed.error ?? null, bytes: text.length, counts, cookieAbsent, removed, preview: preview && { albums: preview.albums, playlists: preview.playlists.new }, backup: { written: !!path, head, refused } };
   } finally {
-    for (const f of [name, backup]) await remove(f, { baseDir: AppData }).catch(() => undefined);
+    await remove(name, { baseDir: AppData }).catch(() => undefined);
   }
 }
 

@@ -160,7 +160,7 @@ export class JobRunner {
           if (have !== null) {
             await jobs.setItemResult(this.db, item.id, job.id, true, have, null);
             await this.settle(item.url, have);
-            await this.resolveImports();
+            await this.resolveImports(have);
             this.onChange();
             continue;
           }
@@ -173,7 +173,7 @@ export class JobRunner {
           // An imported release is no longer new (New releases), even if it's removed again later.
           await this.settle(item.url, albumId);
           // Playlist entries, plays and preferences from an imported library that waited for this album.
-          await this.resolveImports();
+          await this.resolveImports(albumId);
         } catch (e) {
           const msg = e instanceof ScrapeError ? `[${e.code}] ${e.message}` : String(e);
           console.error(`[job ${job.id}] ${item.url}: ${msg}`);
@@ -219,10 +219,13 @@ export class JobRunner {
     }
   }
 
-  /** Resolve what an imported library left waiting. Bookkeeping too: logged, never an item failure. */
-  private async resolveImports(): Promise<void> {
+  /**
+   * Resolve what an imported library left waiting: for one album after its item, everything
+   * at the end of the job. Bookkeeping too: logged, never an item failure.
+   */
+  private async resolveImports(albumId?: number): Promise<void> {
     try {
-      await resolvePending(this.db);
+      await resolvePending(this.db, albumId);
     } catch (e) {
       console.error(`[jobs] resolving imported library entries: ${String(e)}`);
     }
