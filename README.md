@@ -57,7 +57,9 @@ Requires macOS 13.3 or later. Your library lives in
   `.theme.json` you can send to a friend; Import loads one.
 
 Closing the window keeps the music playing; click the Dock icon to bring it
-back, and press `⌘Q` to quit. The window remembers its size and position.
+back, and press `⌘Q` to quit. The current track shows in Control Center's Now
+Playing, and the keyboard's media keys and AirPods control playback, with the
+window open or closed. The window remembers its size and position.
 
 Shortcuts: `Space` play/pause, `←`/`→` seek 5 s, `Shift+←`/`→` previous/next,
 `↑`/`↓` volume, `S` shuffle, `R` repeat, `Q` queue, `N` now playing,
@@ -129,5 +131,5 @@ src-tauri/       Rust shell: plugins, migrations, capabilities, bundle config
 ## Not yet
 
 Syncing purchased items with your Bandcamp login (higher-quality streams),
-offline caching, Windows/Linux builds, Mac media keys (depends on the webview),
+offline caching, Windows/Linux builds,
 custom artist domains. Tracked as issues labelled `feature`.
