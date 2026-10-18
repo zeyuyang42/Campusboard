@@ -110,6 +110,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             &PredefinedMenuItem::minimize(app, None)?,
             &PredefinedMenuItem::maximize(app, Some("Zoom"))?,
             &sep()?,
+            &item(app, "mini-player", "Mini Player", Some("CmdOrCtrl+Shift+M"))?,
+            &sep()?,
             &PredefinedMenuItem::close_window(app, None)?,
         ],
     )?;
@@ -125,8 +127,15 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 }
 
 /// Custom items bring the (possibly hidden) main window forward and hand the
-/// id to the web app. Predefined items never reach this handler.
+/// id to the web app. Predefined items never reach this handler. Mini Player is
+/// the exception: it toggles the mini window and leaves the main one as it is.
 pub fn on_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
+    if id == "mini-player" {
+        if let Err(e) = crate::mini::toggle(app) {
+            eprintln!("mini player: {e}");
+        }
+        return;
+    }
     show_main(app);
     let _ = app.emit("menu", id.to_string());
 }

@@ -64,7 +64,7 @@ export default defineConfig({
   // imports, so the dep optimizer never re-bundles (and swaps chunks) mid-session.
   optimizeDeps: {
     include: [
-      "@tauri-apps/api/app", "@tauri-apps/api/core", "@tauri-apps/api/event", "@tauri-apps/api/path", "@tauri-apps/api/window",
+      "@tauri-apps/api/app", "@tauri-apps/api/core", "@tauri-apps/api/event", "@tauri-apps/api/path", "@tauri-apps/api/webviewWindow", "@tauri-apps/api/window",
       "@tauri-apps/plugin-dialog", "@tauri-apps/plugin-fs", "@tauri-apps/plugin-http", "@tauri-apps/plugin-opener", "@tauri-apps/plugin-sql",
     ],
   },
@@ -75,5 +75,10 @@ export default defineConfig({
     watch: { ignored: ["**/src-tauri/target/**"] },
     fs: { allow: [path.resolve(__dirname, "..")] },
   },
-  build: { outDir: "dist", emptyOutDir: true, target: "safari16" },
+  // Two pages: the app, and the mini player window (its own entry so it never loads the
+  // player store, the audio element or the database; see web/src/mini/main.tsx).
+  build: {
+    outDir: "dist", emptyOutDir: true, target: "safari16",
+    rollupOptions: { input: { main: path.resolve(__dirname, "index.html"), mini: path.resolve(__dirname, "mini.html") } },
+  },
 });

@@ -1,0 +1,78 @@
+// Main-window side of the mini player (web/src/mini/). The mini window has no audio and no
+// core: this module broadcasts a compact state to it (on change, plus a 1 s position tick
+// while playing) and maps its commands to player store actions, so the store stays the only
+// owner of the audio element and Now Playing keeps following it. Works with this window
+// hidden: closing it only hides it and its page keeps running.
+import { buildMiniState, MINI_EVENTS, MiniStateThrottle, parseMiniCommand, type MiniCommand } from "@bc/core";
+import { usePlayer } from "./store";
+import { useTheme } from "../theme/store";
+import { appliedPalette, onPaletteChange } from "../theme/usePalette";
+import { createBus, type MiniBus } from "../mini/bus";
+import { isTauri } from "../lib/env";
+
+const info = { hellos: 0, sent: 0, commands: 0, rejected: 0, lastCommand: null as string | null };
+/** Counters for the selftest. */
+export const miniBridgeInfo = () => ({ ...info });
+
+async function showMain() {
+  if (!isTauri) { window.focus(); return; }
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  const w = getCurrentWindow();
+  await w.unminimize().catch(() => undefined);
+  await w.show().catch(() => undefined);
+  await w.setFocus().catch(() => undefined);
+}
+
+function run(cmd: MiniCommand, sendNow: () => void) {
+  const p = usePlayer.getState();
+  switch (cmd.type) {
+    case "hello": info.hellos++; sendNow(); return;
+    case "toggle": p.toggle(); return;
+    case "play": p.play(); return;
+    case "pause": p.pause(); return;
+    case "next": p.next(); return;
+    case "prev": p.prev(); return;
+    case "seek": if (p.current()) p.seek(cmd.sec); return;
+    case "showMain": void showMain(); return;
+  }
+}
+
+/** Open the mini player, or hide it when it is showing (Window > Mini Player does the same). */
+export async function toggleMiniPlayer() {
+  if (isTauri) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("toggle_mini_player");
+  } else {
+    // Browser mode: a popup speaking the same protocol over BroadcastChannel.
+    window.open("/mini.html", "bc-mini", "popup,width=340,height=100");
+  }
+}
+
+let started = false;
+export async function initMiniBridge() {
+  if (started) return;
+  started = true;
+  let bus: MiniBus;
+  try { bus = await createBus("mini"); } catch { return; }
+  const throttle = new MiniStateThrottle(1000);
+  const current = () => buildMiniState(usePlayer.getState(), appliedPalette(), useTheme.getState().theme);
+  const push = (force: boolean) => {
+    const s = current();
+    if (force) throttle.reset();
+    if (!throttle.next(s, performance.now())) return;
+    info.sent++;
+    void bus.send(MINI_EVENTS.state, s).catch(() => undefined);
+  };
+  await bus.on(MINI_EVENTS.command, (payload) => {
+    const cmd = parseMiniCommand(payload);
+    if (!cmd) { info.rejected++; return; }
+    info.commands++;
+    info.lastCommand = cmd.type;
+    run(cmd, () => push(true));
+  });
+  // Before the first hello nobody is listening; skip the work (and the IPC) until then.
+  const live = () => info.hellos > 0;
+  usePlayer.subscribe(() => { if (live()) push(false); });
+  useTheme.subscribe(() => { if (live()) push(false); });
+  onPaletteChange(() => { if (live()) push(false); });
+}

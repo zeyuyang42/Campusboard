@@ -14,7 +14,7 @@ const SHORTCUTS: [string, string][] = [
   ["Space", "Play or pause"], ["← →", "Seek 5 seconds"], ["⇧← ⇧→", "Previous or next track"], ["↑ ↓", "Volume"],
   ["S", "Shuffle"], ["R", "Repeat"], ["Q", "Queue"], ["N", "Now playing"], ["/", "Search"], ["Esc", "Close a panel"],
   ["⌘P", "Play or pause"], ["⌘← ⌘→", "Previous or next track"], ["⌘↑ ⌘↓", "Volume"], ["⌘⇧S  ⌘⇧R", "Shuffle, repeat"],
-  ["⌘⇧N  ⌘⇧Q", "Now playing, queue"], ["⌘1 – ⌘4", "Library, Search, Import, Playlists"], ["⌘[ ⌘]", "Back, forward"],
+  ["⌘⇧N  ⌘⇧Q", "Now playing, queue"], ["⌘⇧M", "Mini player"], ["⌘1 – ⌘4", "Library, Search, Import, Playlists"], ["⌘[ ⌘]", "Back, forward"],
   ["⌘F", "Find"], ["⌘I", "Import from link"], ["⌘N", "New playlist"], ["⌘,", "Settings"],
   ["⌘W", "Close the window (music keeps playing)"], ["⌘Q", "Quit"], ["⌃⌘F", "Full screen"],
 ];

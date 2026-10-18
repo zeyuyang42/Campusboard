@@ -7,6 +7,10 @@ export {
   nowPlayingMetadata, sessionPlaybackState, finiteDuration, positionState, PositionThrottle,
   type NowPlayingMetadata, type NowPlayingArtwork, type SessionPlaybackState, type PositionState,
 } from "./services/nowPlaying.js";
+export {
+  MINI_EVENTS, parseMiniCommand, parseMiniState, buildMiniState, miniStateKey, MiniStateThrottle, extrapolatePosition,
+  type MiniState, type MiniCommand, type MiniTrack, type MiniPalette, type MiniStatus, type MiniSource,
+} from "./services/miniPlayer.js";
 export { getFreshStreamUrl, refreshAlbum } from "./services/streamService.js";
 export { JobRunner, type ImportRequest, type ImportSelectionRequest } from "./services/jobRunner.js";
 export { cachedFetchText, prunePageCache } from "./services/pageCache.js";

@@ -3,6 +3,7 @@ import { initMediaSession } from "./mediaSession";
 import { initShortcuts } from "./shortcuts";
 import { initPersistence } from "./persist";
 import { initAppMenu } from "../lib/appMenu";
+import { initMiniBridge } from "./miniBridge";
 
 let done = false;
 export function initPlayer(_qc: QueryClient) {
@@ -12,4 +13,5 @@ export function initPlayer(_qc: QueryClient) {
   initShortcuts();
   void initPersistence();
   void initAppMenu();
+  void initMiniBridge();
 }

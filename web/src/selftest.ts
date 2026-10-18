@@ -13,6 +13,8 @@ import { exists, readTextFile, remove } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { backupLibraryDatabase, exportLibraryFile } from "./lib/libraryFile";
+import { miniBridgeInfo } from "./player/miniBridge";
+import { MINI_EVENTS } from "@bc/core";
 import { FAN_ITEMS_ENDPOINT, fanPageUrl, parseFanItemsResponse, parseFanPage, repos, type FanItem } from "@bc/core";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -354,6 +356,79 @@ async function mediaSessionCheck() {
   }
 }
 
+/**
+ * Mini player (web/src/mini/): open the window, check it received and rendered the state,
+ * then, with the main window hidden (what closing it does), have it press its own buttons
+ * and seek, and check the store followed. The mini window also reports whether its window
+ * permissions work and that the database and app commands are refused to it. Muted like the
+ * rest of the run; the mini window is hidden again at the end.
+ */
+async function miniPlayerCheck() {
+  const { emitTo } = await import("@tauri-apps/api/event");
+  const { getCurrentWebviewWindow, WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  const me = getCurrentWebviewWindow();
+  const replies = new Map<number, Record<string, unknown>>();
+  const off = await me.listen<Record<string, unknown>>("mini:selftest-result", (e) => { if (typeof e.payload?.id === "number") replies.set(e.payload.id, e.payload); });
+  let n = 0;
+  const ask = async (req: Record<string, unknown>, timeoutMs = 4000) => {
+    const id = ++n;
+    await emitTo("mini", "mini:selftest", { ...req, id });
+    for (let t = 0; t < timeoutMs && !replies.has(id); t += 100) await sleep(100);
+    return replies.get(id) ?? null;
+  };
+  const win = getCurrentWindow();
+  const out: Record<string, unknown> = {};
+  let opened = false;
+  try {
+    const hellos0 = miniBridgeInfo().hellos;
+    await invoke("toggle_mini_player");
+    for (let t = 0; t < 10000 && miniBridgeInfo().hellos === hellos0; t += 100) await sleep(100);
+    opened = miniBridgeInfo().hellos > hellos0;
+    const mini = await WebviewWindow.getByLabel("mini");
+    out.visible = (await mini?.isVisible().catch((e) => String(e))) ?? null;
+    await sleep(800);
+    const report = await ask({ do: "report" });
+    const cur = usePlayer.getState().current();
+    out.report = report;
+    const titleOk = !!report && !!cur && report.title === cur.title;
+    const wasPlaying = usePlayer.getState().status === "playing" && !audioEl.paused;
+    await win.hide(); await sleep(300);
+    const c0 = miniBridgeInfo().commands;
+    await ask({ do: "click", cmd: "toggle" }); await sleep(900);
+    const paused = audioEl.paused && usePlayer.getState().status === "paused";
+    const shownPaused = (await ask({ do: "state" }))?.status === "paused";
+    await ask({ do: "click", cmd: "toggle" }); await sleep(1800);
+    const resumed = !audioEl.paused;
+    const target = Math.min(15, Math.max(1, (usePlayer.getState().duration || 30) - 5));
+    await ask({ do: "seek", sec: target }); await sleep(900);
+    const seeked = Math.abs(audioEl.currentTime - target) < 3;
+    // A malformed command (as if from the mini window) is dropped, not run.
+    const rejected0 = miniBridgeInfo().rejected;
+    await emitTo("main", MINI_EVENTS.command, { type: "setVolume", v: 0 }); await sleep(300);
+    const rejectsBad = miniBridgeInfo().rejected === rejected0 + 1;
+    await ask({ do: "click", cmd: "showMain" }); await sleep(800);
+    const mainShown = await win.isVisible();
+    const commands = miniBridgeInfo().commands - c0;
+    const perms = report?.setOnTop === "ok" && report?.drag === "ok" && report?.sqlDenied === true && report?.commandDenied === true;
+    // Without playback (the stream didn't start) only the command path is checked.
+    const playbackOk = wasPlaying ? paused && shownPaused && resumed && seeked : commands >= 4;
+    Object.assign(out, { opened, titleOk, wasPlaying, paused, shownPaused, resumed, seeked, rejectsBad, mainShown, commands, perms, info: miniBridgeInfo() });
+    out.ok = opened && out.visible === true && titleOk && perms && playbackOk && rejectsBad && mainShown;
+  } finally {
+    off();
+    await win.show().catch(() => undefined);
+    await win.setFocus().catch(() => undefined);
+    if (opened) {
+      await invoke("toggle_mini_player").catch(() => undefined); // hides it
+      await sleep(400);
+      const mini = await WebviewWindow.getByLabel("mini");
+      out.hiddenAfter = (await mini?.isVisible().catch(() => null)) === false;
+      if (!out.hiddenAfter) out.ok = false;
+    }
+  }
+  return out;
+}
+
 export async function runSelfTest() {
   const out: Record<string, unknown> = { startedAt: new Date().toISOString() };
   const core = await getCore();
@@ -378,6 +453,7 @@ export async function runSelfTest() {
     await sleep(7000);
     out.audio = { currentTime: audioEl.currentTime, paused: audioEl.paused, readyState: audioEl.readyState, error: audioEl.error?.code ?? null, src: audioEl.src.slice(0, 48), storeStatus: usePlayer.getState().status, storeError: usePlayer.getState().error };
     out.mediaSession = await mediaSessionCheck().catch((e) => ({ ok: false, error: String(e) }));
+    out.miniPlayer = await miniPlayerCheck().catch((e) => ({ ok: false, error: String(e) }));
     usePlayer.getState().next();
     await sleep(4000);
     out.audioAfterNext = { currentTime: audioEl.currentTime, paused: audioEl.paused, index: usePlayer.getState().index, title: usePlayer.getState().current()?.title };
@@ -471,7 +547,7 @@ export async function runSelfTest() {
     out.dragPermission = await getCurrentWindow().startDragging().then(() => "ok", (e) => String(e));
     // Overall ok needs every block that reports its own `ok` to pass. The listed blocks must
     // be present as objects: one caught and stored as a string threw.
-    const required = ["libraryFilter", "history", "hiddenPlayback", "mediaSession", "syncGuards", "newReleases", "libraryFile", "window"];
+    const required = ["libraryFilter", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "syncGuards", "newReleases", "libraryFile", "window"];
     const failed = Object.entries(out)
       .filter(([k, v]) => required.includes(k) || (!!v && typeof v === "object" && "ok" in v))
       .filter(([, v]) => (v as { ok?: unknown } | null)?.ok !== true)
