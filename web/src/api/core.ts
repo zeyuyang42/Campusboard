@@ -43,6 +43,8 @@ export function getCore(): Promise<Core> {
           void qc?.invalidateQueries({ queryKey: ["account"] });
           // An import may take a release off the New releases list; a job also pauses the checker.
           void qc?.invalidateQueries({ queryKey: ["releases"] });
+          // An imported library's playlists and history fill in as its albums arrive.
+          for (const k of ["playlists", "playlist", "history"]) void qc?.invalidateQueries({ queryKey: [k] });
         },
         onReleasesChange: () => { void qc?.invalidateQueries({ queryKey: ["releases"] }); },
       });

@@ -22,6 +22,8 @@ export const keys = {
   newReleaseCount: ["releases", "count"] as const,
   releaseStatus: ["releases", "status"] as const,
   artistMuted: (id: number) => ["releases", "muted", id] as const,
+  // Under "jobs" so every job update (an album arriving) refreshes it.
+  pendingImports: ["jobs", "pending-imports"] as const,
 };
 
 const core = getCore;
@@ -167,3 +169,6 @@ export function useReleaseMutations() {
 export async function cancelJob(id: number) { return (await core()).cancelJob(id); }
 export async function loadPlayState() { return (await core()).playState(); }
 export async function savePlayState(s: PlayState) { return (await core()).savePlayState(s); }
+
+/** Playlist entries, plays and preferences from an imported library still waiting for their albums. */
+export const usePendingImports = () => useQuery({ queryKey: keys.pendingImports, queryFn: async () => (await core()).pendingImports() });

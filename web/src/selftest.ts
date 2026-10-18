@@ -8,6 +8,9 @@ import { mediaSessionInfo, runMediaSessionAction } from "./player/mediaSession";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { exit } from "@tauri-apps/api/app";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
+import { BaseDirectory } from "@tauri-apps/api/path";
+import { exists, readFile, readTextFile, remove } from "@tauri-apps/plugin-fs";
+import { backupLibraryDatabase, exportLibraryFile } from "./lib/libraryFile";
 import { FAN_ITEMS_ENDPOINT, fanPageUrl, parseFanItemsResponse, parseFanPage, repos, type FanItem } from "@bc/core";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -180,6 +183,41 @@ async function newReleasesCheck(core: Awaited<ReturnType<typeof getCore>>, album
       await db.run("INSERT INTO release_watch (artist_id, muted, baselined, last_checked_at, last_error) VALUES (?, ?, ?, ?, ?)",
         [before.artist_id, before.muted, before.baselined, before.last_checked_at, before.last_error]);
     }
+  }
+}
+
+/**
+ * Library export and database backup through the real fs and SQL plugins, without dialogs:
+ * the dev-only path argument writes into $APPDATA. The export is read back, validated and
+ * previewed against this same library (which must find nothing new), then deleted; the
+ * backup must be an SQLite file (VACUUM INTO through the plugin), then is deleted too.
+ * Changes nothing in the library.
+ */
+async function libraryFileCheck(core: Awaited<ReturnType<typeof getCore>>) {
+  const stamp = Date.now();
+  const name = `selftest-library-${stamp}.json`;
+  const backup = `selftest-backup-${stamp}.db`;
+  const AppData = BaseDirectory.AppData;
+  try {
+    await exportLibraryFile({ history: true }, name);
+    const text = await readTextFile(name, { baseDir: AppData });
+    const parsed = core.parseLibraryFile(text);
+    const cookie = await core.db.get<{ value: string }>("SELECT value FROM settings WHERE key = 'bandcamp_identity'");
+    const cookieAbsent = !text.includes("bandcamp_identity") && (!cookie || !text.includes(JSON.parse(cookie.value) as string));
+    const [albums, playlists, plays] = await Promise.all([core.albums(), core.playlists(), core.playCount()]);
+    const preview = parsed.data ? await core.previewLibraryImport(parsed.data) : null;
+    const counts = parsed.data ? { albums: parsed.data.albums.length, playlists: parsed.data.playlists.length, plays: parsed.data.history?.length ?? null } : null;
+    await remove(name, { baseDir: AppData });
+    const removed = !(await exists(name, { baseDir: AppData }));
+    const path = await backupLibraryDatabase(backup);
+    const head = new TextDecoder().decode((await readFile(backup, { baseDir: AppData })).slice(0, 15));
+    await remove(backup, { baseDir: AppData });
+    const backupRemoved = !(await exists(backup, { baseDir: AppData }));
+    const ok = !!parsed.data && cookieAbsent && removed && counts?.albums === albums.length && counts.playlists === playlists.length && counts.plays === plays
+      && preview?.albums.new === 0 && preview.playlists.new === 0 && head === "SQLite format 3" && backupRemoved;
+    return { ok, error: parsed.error ?? null, bytes: text.length, counts, cookieAbsent, removed, preview: preview && { albums: preview.albums, playlists: preview.playlists.new }, backup: { written: !!path, head, removed: backupRemoved } };
+  } finally {
+    for (const f of [name, backup]) await remove(f, { baseDir: AppData }).catch(() => undefined);
   }
 }
 
@@ -381,6 +419,7 @@ export async function runSelfTest() {
       results: Object.fromEntries(denied.map((u, i) => [u, deniedResults[i]])),
     };
     out.syncGuards = await checkSyncGuards(core).catch((e) => String(e));
+    out.libraryFile = await libraryFileCheck(core).catch((e) => ({ ok: false, error: String(e) }));
     out.collection = SELFTEST_FAN ? await (async () => {
       const page = parseFanPage(await core.queue.fetchText(fanPageUrl(SELFTEST_FAN)));
       // POST to bandcamp.com/api/... through the http scope, two items only.
@@ -422,7 +461,7 @@ export async function runSelfTest() {
     out.dragPermission = await getCurrentWindow().startDragging().then(() => "ok", (e) => String(e));
     // Overall ok needs every block that reports its own `ok` to pass. The listed blocks must
     // be present as objects: one caught and stored as a string threw.
-    const required = ["libraryFilter", "history", "hiddenPlayback", "mediaSession", "syncGuards", "newReleases", "window"];
+    const required = ["libraryFilter", "history", "hiddenPlayback", "mediaSession", "syncGuards", "newReleases", "libraryFile", "window"];
     const failed = Object.entries(out)
       .filter(([k, v]) => required.includes(k) || (!!v && typeof v === "object" && "ok" in v))
       .filter(([, v]) => (v as { ok?: unknown } | null)?.ok !== true)

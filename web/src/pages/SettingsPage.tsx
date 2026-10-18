@@ -5,6 +5,7 @@ import { useTheme } from "../theme/store";
 import { appInfo, pickBackgroundImage, pickTextFile, revealDataDir, saveTextFile } from "../lib/files";
 import { isTauri } from "../lib/env";
 import { AccountSettings } from "../components/AccountSettings";
+import { LibrarySettings } from "../components/LibrarySettings";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { useClearHistory, usePlayCount, useReleaseCheckStatus, useReleaseMutations } from "../api/queries";
 import { formatPlays } from "../lib/format";
@@ -54,6 +55,8 @@ export function SettingsPage() {
       <NewReleaseSettings />
 
       <ListeningHistory />
+
+      <LibrarySettings />
 
       <section>
         <h2>Theme</h2>

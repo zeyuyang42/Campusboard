@@ -24,6 +24,11 @@ import { clearAccount, getAccount, setIdentityCookie, setUsername, PRIVATE_SETTI
 import { recomputeOwned } from "./db/repos/fanItems.js";
 import * as releases from "./db/repos/releases.js";
 import { ReleaseChecker, type ReleaseCheckerOptions } from "./services/releaseWatch.js";
+import * as importPending from "./db/repos/importPending.js";
+import {
+  backupDatabase, exportLibrary, importLibrary, parseLibraryExport, previewLibraryImport,
+  type LibraryExport, type LibraryImportOptions,
+} from "./services/libraryTransfer.js";
 import type { BrowseResult, PlayState, SearchResult } from "./types.js";
 
 export interface CoreDeps {
@@ -140,6 +145,24 @@ export function createCore(deps: CoreDeps) {
     getSetting: async <T>(key: string) => { refusePrivate(key); return settings.getSetting<T>(db, key); },
     setSetting: async (key: string, value: unknown) => { refusePrivate(key); return settings.setSetting(db, key, value); },
     vacuumOrphans: () => vacuumOrphans(db),
+    // library file and backup
+    /** The library as a JSON-ready object (no identity cookie, caches, stream URLs or palettes). */
+    exportLibrary: (opts: { history?: boolean; appVersion?: string } = {}) => exportLibrary(db, opts),
+    /** Validate a library file's text; { error } is a sentence for the UI. */
+    parseLibraryFile: (text: string) => parseLibraryExport(text),
+    previewLibraryImport: (data: LibraryExport) => previewLibraryImport(db, data),
+    /** Merge a validated library file and queue its missing albums through the job runner. */
+    importLibrary: async (data: LibraryExport, opts: LibraryImportOptions = {}) => {
+      const r = await importLibrary(db, runner, data, opts);
+      deps.onJobsChange?.();
+      deps.onReleasesChange?.();
+      return r;
+    },
+    /** Playlist entries, plays and preferences from an imported library still waiting for their albums. */
+    pendingImports: () => importPending.countPending(db),
+    clearPendingImports: () => importPending.clearPending(db),
+    /** A consistent copy of the whole database at `path` (VACUUM INTO; the file must not exist). */
+    backupDatabase: (path: string) => backupDatabase(db, path),
     /** Raw colors for a piece of art, cached per art id. Fetched directly (not through the import queue). */
     getArtPalette: async (artId: number): Promise<ArtPalette | null> => {
       const cached = await palettes.getCachedPalette(db, artId);

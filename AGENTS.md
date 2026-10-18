@@ -29,7 +29,7 @@ packages/core/src/
   scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, fan (collection/wishlist), schemas
   db/Db.ts                 async Db interface {select,get,run}; SQL uses "?" and toDollar() rewrites to $n for the Tauri plugin
   db/repos/                one module per table; booleans stored 0/1, converted at the repo boundary
-  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping)
+  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping), libraryTransfer (library export/import file, VACUUM INTO backup)
   theme/                   schema (zod), presets, color math (OKLCH, contrast), apply (CSS variables)
   palette/                 quantize + pick + extract (canvas) + fitPalette + artUrl
   core.ts                  createCore({db, fetch, onJobsChange}) -> every function the UI calls
@@ -180,6 +180,17 @@ src-tauri/
   artist's first successful check is a baseline (all `seen`). Release URLs go
   through `normalizeBandcampUrl` before they are stored. The selftest's
   `newReleases` block covers it through the real plugins.
+- Library export/import (`services/libraryTransfer.ts`, format
+  `bandcamp-player-library` version 1, zod-validated): everything is keyed by
+  Bandcamp identity (album URL, track id, band id), never local row ids, and the
+  file never carries the identity cookie, sync summary, page cache, stream URLs
+  or palettes. Import queues missing albums as a `library` job and writes
+  playlist entries, plays, mutes and dismissals as `import_pending` rows
+  (0007) that the job runner resolves after every item; `imported_playlists`
+  makes re-imports idempotent. Saving goes through the dialog plugin, which adds
+  exactly the chosen file to the fs scope at runtime, so the capability file
+  stays $APPDATA-only. Backups use `VACUUM INTO` a fresh file in $APPDATA, then
+  copy it to the chosen path (SQLite won't overwrite an existing file).
 
 ## Collection sync facts (verified 2026-10-17 with curl against a public profile)
 

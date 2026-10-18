@@ -12,6 +12,7 @@ import { ACCOUNT_KEY, SYNC_KEY, identityHeaders } from "./account.js";
 import { fetchFanList, normalizeFanUsername, parseFanPage, fanPageUrl, type FanList, type FanListResult } from "../scrape/fan.js";
 import * as fan from "../db/repos/fanItems.js";
 import { settleRelease } from "../db/repos/releases.js";
+import { resolvePending } from "../db/repos/importPending.js";
 import { getSetting, setSettingWhileJobRuns } from "../db/repos/settings.js";
 import type { CookieStatus, Job, SyncSummary } from "../types.js";
 
@@ -48,6 +49,8 @@ export interface ImportSelectionRequest {
   urls: string[];
   /** Shown as the job's source, e.g. the artist page URL. */
   label: string;
+  /** "library" for the albums of an imported library file. */
+  kind?: "selection" | "library";
 }
 
 /**
@@ -79,7 +82,7 @@ export class JobRunner {
   async enqueueSelection(req: ImportSelectionRequest): Promise<Job> {
     const urls = [...new Set(req.urls.map((u) => normalizeBandcampUrl(u)).filter((n) => n.kind !== "artist").map((n) => n.url))];
     if (!urls.length) throw new ScrapeError("invalid_url", "Nothing selected to import");
-    const job = await jobs.createJob(this.db, "selection", req.label, urls);
+    const job = await jobs.createJob(this.db, req.kind ?? "selection", req.label, urls);
     this.onChange();
     void this.kick();
     return (await jobs.getJob(this.db, job.id))!;
@@ -157,6 +160,7 @@ export class JobRunner {
           if (have !== null) {
             await jobs.setItemResult(this.db, item.id, job.id, true, have, null);
             await this.settle(item.url, have);
+            await this.resolveImports();
             this.onChange();
             continue;
           }
@@ -168,6 +172,8 @@ export class JobRunner {
           await jobs.setItemResult(this.db, item.id, job.id, true, albumId, null);
           // An imported release is no longer new (New releases), even if it's removed again later.
           await this.settle(item.url, albumId);
+          // Playlist entries, plays and preferences from an imported library that waited for this album.
+          await this.resolveImports();
         } catch (e) {
           const msg = e instanceof ScrapeError ? `[${e.code}] ${e.message}` : String(e);
           console.error(`[job ${job.id}] ${item.url}: ${msg}`);
@@ -183,6 +189,7 @@ export class JobRunner {
         }
         this.onChange();
       }
+      await this.resolveImports();
       const final = (await jobs.getJob(this.db, job.id, false))!;
       if (final.status === "cancelled") return;
       const allFailed = final.total > 0 && final.done === 0;
@@ -209,6 +216,15 @@ export class JobRunner {
       await settleRelease(this.db, url, albumId);
     } catch (e) {
       console.error(`[jobs] settling new release ${url}: ${String(e)}`);
+    }
+  }
+
+  /** Resolve what an imported library left waiting. Bookkeeping too: logged, never an item failure. */
+  private async resolveImports(): Promise<void> {
+    try {
+      await resolvePending(this.db);
+    } catch (e) {
+      console.error(`[jobs] resolving imported library entries: ${String(e)}`);
     }
   }
 

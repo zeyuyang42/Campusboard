@@ -66,8 +66,9 @@ export async function upsertTralbum(db: Db, p: ParsedTralbum): Promise<number> {
 
 /**
  * Remove single-track pseudo-albums whose track moved into a real album, artists with nothing
- * left, plays of tracks that are gone and new-release rows of artists that are gone (the foreign
- * keys cascade those; this also catches deletes made with foreign keys off, e.g. the sqlite3 CLI).
+ * left, plays of tracks that are gone, new-release rows of artists that are gone and import
+ * bookkeeping of playlists that are gone (the foreign keys cascade those; this also catches
+ * deletes made with foreign keys off, e.g. the sqlite3 CLI).
  */
 export async function vacuumOrphans(db: Db): Promise<void> {
   await db.run("DELETE FROM albums WHERE item_type = 'track' AND id NOT IN (SELECT DISTINCT album_id FROM tracks)");
@@ -75,6 +76,8 @@ export async function vacuumOrphans(db: Db): Promise<void> {
   await db.run("DELETE FROM plays WHERE track_id NOT IN (SELECT id FROM tracks)");
   await db.run("DELETE FROM release_watch WHERE artist_id NOT IN (SELECT id FROM artists)");
   await db.run("DELETE FROM artist_releases WHERE artist_id NOT IN (SELECT id FROM artists)");
+  await db.run("DELETE FROM imported_playlists WHERE playlist_id NOT IN (SELECT id FROM playlists)");
+  await db.run("DELETE FROM import_pending WHERE playlist_id IS NOT NULL AND playlist_id NOT IN (SELECT id FROM playlists)");
 }
 
 async function updateStreamFields(db: Db, p: ParsedTralbum) {

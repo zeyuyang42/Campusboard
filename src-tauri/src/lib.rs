@@ -43,6 +43,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0006_new_releases.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 7,
+            description: "library import bookkeeping",
+            sql: include_str!("../migrations/0007_library_import.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
