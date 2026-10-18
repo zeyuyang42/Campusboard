@@ -29,7 +29,7 @@ packages/core/src/
   scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, fan (collection/wishlist), schemas
   db/Db.ts                 async Db interface {select,get,run}; SQL uses "?" and toDollar() rewrites to $n for the Tauri plugin
   db/repos/                one module per table; booleans stored 0/1, converted at the repo boundary
-  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker)
+  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping)
   theme/                   schema (zod), presets, color math (OKLCH, contrast), apply (CSS variables)
   palette/                 quantize + pick + extract (canvas) + fitPalette + artUrl
   core.ts                  createCore({db, fetch, onJobsChange}) -> every function the UI calls
@@ -38,6 +38,7 @@ web/src/
   api/core.ts              getCore() singleton; Tauri plugins, or browserDb.ts when VITE_BROWSER_MODE=1
   api/queries.ts           TanStack Query hooks and mutations (names are stable; pages depend on them)
   player/store.ts          zustand store owning the single <audio>; load() asks core for a fresh stream URL
+  player/mediaSession.ts   Now Playing widget + media keys: navigator.mediaSession fed from the store, handlers call store actions
   theme/store.ts           theme state, persisted in settings.key='theme'; usePalette.ts maps art colors to CSS vars
   ui/menu.ts + components/MenuHost.tsx   the one context menu / playlist picker for the whole app
   components/, pages/      plain CSS in styles.css driven by tokens on :root
@@ -122,6 +123,32 @@ src-tauri/
   periods weren't measured, so `PlayCounter` doesn't rely on frequent reports: a
   playhead step counts if it fits the wall-clock time since the last report at
   the current `playbackRate` (+1.5 s slack); anything larger is treated as a seek.
+- Now Playing and media keys (researched 2026-10-18) come from WebKit's Media
+  Session, with no native code. `MediaSessionEnabled` defaults to true for
+  WKWebView since WebKit 612 (Safari 15) and is still on; no private preference
+  needed. WebKit's `MediaSessionManagerCocoa` publishes the now-playing element
+  through MediaRemote (the service behind MPNowPlayingInfoCenter) with the app as
+  parent application, and routes the system's remote commands (F7-F9, Control
+  Center, AirPods) to `setActionHandler` handlers. Eligibility
+  (`MediaElementSession::canShowControlsManager`): the element must not be muted,
+  must have a source, metadata and more than 0.95 s of duration, and must have
+  played. A detached `new Audio()` is fine: `inActiveDocument` starts true and only
+  goes false when the element is removed from a document or the page is suspended.
+  Page visibility only matters for video, so a hidden window still works.
+  The menu-bar Now Playing item is hidden while the window is visible and
+  focused (`allowsNowPlayingControlsVisibility = !page->isVisibleAndActive()`);
+  Control Center and the keys work either way.
+  WebKit before mid-2024 (macOS 13/14) loads only `artwork[0]` (newer ones score `sizes`, aiming at
+  512 px), so `nowPlayingMetadata` lists the 700 px art first. The app's own
+  MPNowPlayingInfoCenter is not what WebKit writes, so it can't be read back to
+  verify, and a native bridge would compete with WebKit's session. The selftest
+  plays muted (`audio.ts`) so it never takes over the user's media keys; the
+  system side (F8, the widget, AirPods) is a manual check. Volume 0 is no
+  substitute: such an element is still Now Playing eligible. Muted media didn't
+  advance while the window was hidden (selftest 2026-10-18: 0 s of media in 20 s,
+  one timeupdate; the cause, WebKit suspending muted media in a hidden page, is
+  inferred, not traced in source), so `hiddenPlayback` reports `skipped (muted)`
+  unless `VITE_SELFTEST_AUDIBLE=1`.
 - Library database per build (verified 2026-10-18): release builds open
   `library.db`, debug builds (`npm run dev`, the selftest) open `library-dev.db` in
   the same app data dir. `db_url()` in lib.rs chooses with `cfg!(debug_assertions)`,
@@ -231,6 +258,10 @@ src-tauri/
    `~/Library/Application Support/com.bandcampplayer.app/library-dev.db` (debug
    builds never open `library.db`). It starts empty; `npm run dev:copy-library`
    seeds it from the real library when a test needs real data. Extend `web/src/selftest.ts` when adding features that touch Tauri plugins.
+   The selftest plays muted, so `hiddenPlayback` is skipped. Changes to the player,
+   background playback or listening history need one
+   `VITE_SELFTEST=1 VITE_SELFTEST_AUDIBLE=1 npm run dev` run as well: it is audible
+   and takes over Now Playing and the media keys while it runs, so warn the user first.
 4. Screenshots of the real window need Screen Recording permission for the
    terminal (`screencapture -l <windowid>`); without it, use browser mode.
 5. Release: `npm run build`; open the `.app` from `src-tauri/target/release/bundle/macos/`.

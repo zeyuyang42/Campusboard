@@ -4,6 +4,7 @@
 import { getCore } from "./api/core";
 import { listenedSeconds, usePlayer } from "./player/store";
 import { audioEl } from "./player/audio";
+import { mediaSessionInfo, runMediaSessionAction } from "./player/mediaSession";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { exit } from "@tauri-apps/api/app";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
@@ -226,10 +227,13 @@ async function windowCheck() {
  *
  * status "stalled" (the playhead didn't move: not playing, or buffering) says nothing about
  * the counter, so it doesn't fail the run; "failed" means the playhead moved but listened
- * time didn't keep up.
+ * time didn't keep up. Skipped in a muted run (the default, audio.ts): WebKit doesn't
+ * advance muted media in a hidden window, so it would measure nothing. Use
+ * VITE_SELFTEST_AUDIBLE=1 for this measurement.
  */
 async function hiddenPlaybackCheck() {
   const win = getCurrentWindow();
+  if (audioEl.muted) return { ok: true, status: "skipped (muted)", reason: "set VITE_SELFTEST_AUDIBLE=1 to measure" };
   if (audioEl.paused) return { ok: true, status: "stalled", reason: "not playing" };
   let last = performance.now();
   let maxGapMs = 0;
@@ -263,6 +267,45 @@ async function hiddenPlaybackCheck() {
   }
 }
 
+/**
+ * Now Playing / media keys: the handlers are registered with WebKit and the session carries
+ * the current track. Then the registered handlers run as a remote command would, with the
+ * window hidden (what closing it does), and must drive the store. The audio is muted in
+ * selftest builds (audio.ts), so WebKit never publishes it as Now Playing and the user's
+ * media keys stay with whatever else is playing; the system side is a manual check.
+ */
+async function mediaSessionCheck() {
+  const win = getCurrentWindow();
+  const want = ["play", "pause", "previoustrack", "nexttrack", "seekto", "seekbackward", "seekforward"];
+  const info = mediaSessionInfo();
+  const cur = usePlayer.getState().current();
+  const registered = want.every((a) => info.actions.includes(a as never));
+  const metadata = !!cur && info.title === cur.title && info.album === cur.album_title && info.artwork.length > 0;
+  const base = { muted: audioEl.muted, registered, metadata, actions: info.actions, title: info.title, artwork0: info.artwork[0] ?? null, positionReports: info.positionReports, lastPosition: info.lastPosition };
+  // Not playing (the stream didn't start): the registration and metadata were checked, the
+  // handlers were not.
+  if (audioEl.paused) return { ok: registered && metadata, status: "handlers skipped (not playing)", handlers: "skipped", ...base, playbackState: info.playbackState };
+  const playingState = info.playbackState === "playing";
+  await win.hide();
+  try {
+    runMediaSessionAction("pause"); await sleep(600);
+    const paused = audioEl.paused && usePlayer.getState().status === "paused" && mediaSessionInfo().playbackState === "paused";
+    runMediaSessionAction("play"); await sleep(1500);
+    const resumed = !audioEl.paused && mediaSessionInfo().playbackState === "playing";
+    const target = Math.min(20, Math.max(1, (usePlayer.getState().duration || 30) - 5));
+    runMediaSessionAction("seekto", { seekTime: target }); await sleep(800);
+    const seeked = Math.abs(audioEl.currentTime - target) < 3;
+    const reportedSeek = (mediaSessionInfo().lastPosition?.position ?? -1) >= target - 1;
+    runMediaSessionAction("seekbackward"); await sleep(500);
+    const steppedBack = audioEl.currentTime < target - 5;
+    const ok = registered && metadata && playingState && paused && resumed && seeked && reportedSeek && steppedBack && info.positionReports > 0;
+    return { ok, status: "checked", ...base, playingState, paused, resumed, seeked, reportedSeek, steppedBack, hidden: document.visibilityState };
+  } finally {
+    await win.show();
+    await win.setFocus();
+  }
+}
+
 export async function runSelfTest() {
   const out: Record<string, unknown> = { startedAt: new Date().toISOString() };
   const core = await getCore();
@@ -286,6 +329,7 @@ export async function runSelfTest() {
     usePlayer.getState().playTracks(playable, 0);
     await sleep(7000);
     out.audio = { currentTime: audioEl.currentTime, paused: audioEl.paused, readyState: audioEl.readyState, error: audioEl.error?.code ?? null, src: audioEl.src.slice(0, 48), storeStatus: usePlayer.getState().status, storeError: usePlayer.getState().error };
+    out.mediaSession = await mediaSessionCheck().catch((e) => ({ ok: false, error: String(e) }));
     usePlayer.getState().next();
     await sleep(4000);
     out.audioAfterNext = { currentTime: audioEl.currentTime, paused: audioEl.paused, index: usePlayer.getState().index, title: usePlayer.getState().current()?.title };
@@ -371,7 +415,6 @@ export async function runSelfTest() {
     })().catch((e) => String(e)) : "skipped (set VITE_SELFTEST_FAN to a public fan username)";
     // The challenge cooldown is read from settings through the SQL plugin; null unless Bandcamp challenged us.
     out.challengeUntil = await core.challengeUntil().then((u) => (u ? new Date(u).toISOString() : null), (e) => String(e));
-    out.mediaSession = "mediaSession" in navigator;
     // Window permissions the menu bar and close-to-hide rely on.
     out.window = await windowCheck();
     // startDragging needs a live mouse-down to do anything, but a missing
@@ -379,7 +422,7 @@ export async function runSelfTest() {
     out.dragPermission = await getCurrentWindow().startDragging().then(() => "ok", (e) => String(e));
     // Overall ok needs every block that reports its own `ok` to pass. The listed blocks must
     // be present as objects: one caught and stored as a string threw.
-    const required = ["libraryFilter", "history", "hiddenPlayback", "syncGuards", "newReleases", "window"];
+    const required = ["libraryFilter", "history", "hiddenPlayback", "mediaSession", "syncGuards", "newReleases", "window"];
     const failed = Object.entries(out)
       .filter(([k, v]) => required.includes(k) || (!!v && typeof v === "object" && "ok" in v))
       .filter(([, v]) => (v as { ok?: unknown } | null)?.ok !== true)
