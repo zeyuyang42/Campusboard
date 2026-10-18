@@ -38,6 +38,11 @@ describe("sessionPlaybackState", () => {
     expect(sessionPlaybackState("loading", true, "paused")).toBe("paused");
     expect(sessionPlaybackState("loading", true, "none")).toBe("playing");
   });
+
+  it("is paused while buffering mid-track, so the widget clock doesn't creep", () => {
+    expect(sessionPlaybackState("loading", true, "playing", true)).toBe("paused");
+    expect(sessionPlaybackState("playing", true, "paused", true)).toBe("playing");
+  });
 });
 
 describe("finiteDuration and positionState", () => {

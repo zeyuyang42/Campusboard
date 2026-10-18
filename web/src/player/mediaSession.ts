@@ -86,12 +86,15 @@ export function initMediaSession() {
       try { ms.setPositionState(); } catch { /* ignore */ }
       ms.metadata = cur ? new MediaMetadata(nowPlayingMetadata(cur)) : null;
     }
-    const next = sessionPlaybackState(s.status, !!cur, state);
+    // Buffering mid-track (a "waiting" stall): the playhead isn't moving.
+    const midTrack = s.status === "loading" && s.position > 0 && Number.isFinite(s.duration) && s.duration > 0;
+    const next = sessionPlaybackState(s.status, !!cur, state, midTrack);
     if (next !== state) ms.playbackState = state = next;
     if (!cur) return;
     // This player has no rate control: the rate is always 1.
     const pos = positionState(finiteDuration(s.duration, cur.duration), s.position, 1);
-    if (pos && throttle.next(pos, state === "playing", performance.now())) {
+    // The throttle follows the real status: not playing while loading or buffering.
+    if (pos && throttle.next(pos, s.status === "playing", performance.now())) {
       try {
         ms.setPositionState(pos);
         lastPosition = pos;

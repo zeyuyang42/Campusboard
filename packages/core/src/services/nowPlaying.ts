@@ -14,7 +14,7 @@ export type PlayerStatus = "idle" | "loading" | "playing" | "paused";
 export interface PositionState { duration: number; position: number; playbackRate: number }
 
 /**
- * Art CDN sizes offered to WebKit, preferred first. WebKit before 2024 (macOS 13/14) loads
+ * Art CDN sizes offered to WebKit, preferred first. WebKit before mid-2024 (macOS 13/14) loads
  * artwork[0] only ("FIXME: Implement a heuristic"); newer WebKit scores the `sizes` and
  * prefers the one nearest 512px, which is 700 too. 1200 would be a wasted large download.
  */
@@ -35,14 +35,16 @@ export function nowPlayingMetadata(t: Pick<QueueTrack, "title" | "track_artist" 
 }
 
 /**
- * The session's playbackState for a player status. "loading" (a track change or a stall)
- * keeps the previous state, so Next while playing never flashes the widget to paused. From
+ * The session's playbackState for a player status. While "playing" the system advances the
+ * widget's clock on its own, so a stall (buffering mid-track, `midTrack`) is "paused" to stop
+ * it creeping ahead. Loading a new track keeps the previous state, so Next while playing never
+ * flashes the widget to paused (its position state is cleared then, so nothing creeps). From
  * nothing it is "playing": only playTracks loads from idle, and it always autoplays.
  */
-export function sessionPlaybackState(status: PlayerStatus, hasTrack: boolean, prev: SessionPlaybackState): SessionPlaybackState {
+export function sessionPlaybackState(status: PlayerStatus, hasTrack: boolean, prev: SessionPlaybackState, midTrack = false): SessionPlaybackState {
   if (!hasTrack || status === "idle") return "none";
   if (status === "playing") return "playing";
-  if (status === "paused") return "paused";
+  if (status === "paused" || midTrack) return "paused";
   return prev === "none" ? "playing" : prev;
 }
 

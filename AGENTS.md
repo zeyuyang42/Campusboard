@@ -135,15 +135,20 @@ src-tauri/
   played. A detached `new Audio()` is fine: `inActiveDocument` starts true and only
   goes false when the element is removed from a document or the page is suspended.
   Page visibility only matters for video, so a hidden window still works.
-  macOS 13/14 WebKit loads only `artwork[0]` (newer ones score `sizes`, aiming at
+  The menu-bar Now Playing item is hidden while the window is visible and
+  focused (`allowsNowPlayingControlsVisibility = !page->isVisibleAndActive()`);
+  Control Center and the keys work either way.
+  WebKit before mid-2024 (macOS 13/14) loads only `artwork[0]` (newer ones score `sizes`, aiming at
   512 px), so `nowPlayingMetadata` lists the 700 px art first. The app's own
   MPNowPlayingInfoCenter is not what WebKit writes, so it can't be read back to
   verify, and a native bridge would compete with WebKit's session. The selftest
   plays muted (`audio.ts`) so it never takes over the user's media keys; the
-  system side (F8, the widget, AirPods) is a manual check. Muted media doesn't
-  advance while the window is hidden (selftest 2026-10-18: 0 s of media in 20 s,
-  one timeupdate), so `hiddenPlayback` reports `stalled` in a muted run; set
-  `VITE_SELFTEST_AUDIBLE=1` to measure it (audible, and Now Playing for the run).
+  system side (F8, the widget, AirPods) is a manual check. Volume 0 is no
+  substitute: such an element is still Now Playing eligible. Muted media didn't
+  advance while the window was hidden (selftest 2026-10-18: 0 s of media in 20 s,
+  one timeupdate; the cause, WebKit suspending muted media in a hidden page, is
+  inferred, not traced in source), so `hiddenPlayback` reports `skipped (muted)`
+  unless `VITE_SELFTEST_AUDIBLE=1`.
 - Library database per build (verified 2026-10-18): release builds open
   `library.db`, debug builds (`npm run dev`, the selftest) open `library-dev.db` in
   the same app data dir. `db_url()` in lib.rs chooses with `cfg!(debug_assertions)`,
@@ -253,6 +258,10 @@ src-tauri/
    `~/Library/Application Support/com.bandcampplayer.app/library-dev.db` (debug
    builds never open `library.db`). It starts empty; `npm run dev:copy-library`
    seeds it from the real library when a test needs real data. Extend `web/src/selftest.ts` when adding features that touch Tauri plugins.
+   The selftest plays muted, so `hiddenPlayback` is skipped. Changes to the player,
+   background playback or listening history need one
+   `VITE_SELFTEST=1 VITE_SELFTEST_AUDIBLE=1 npm run dev` run as well: it is audible
+   and takes over Now Playing and the media keys while it runs, so warn the user first.
 4. Screenshots of the real window need Screen Recording permission for the
    terminal (`screencapture -l <windowid>`); without it, use browser mode.
 5. Release: `npm run build`; open the `.app` from `src-tauri/target/release/bundle/macos/`.

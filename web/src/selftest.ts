@@ -227,10 +227,13 @@ async function windowCheck() {
  *
  * status "stalled" (the playhead didn't move: not playing, or buffering) says nothing about
  * the counter, so it doesn't fail the run; "failed" means the playhead moved but listened
- * time didn't keep up.
+ * time didn't keep up. Skipped in a muted run (the default, audio.ts): WebKit doesn't
+ * advance muted media in a hidden window, so it would measure nothing. Use
+ * VITE_SELFTEST_AUDIBLE=1 for this measurement.
  */
 async function hiddenPlaybackCheck() {
   const win = getCurrentWindow();
+  if (audioEl.muted) return { ok: true, status: "skipped (muted)", reason: "set VITE_SELFTEST_AUDIBLE=1 to measure" };
   if (audioEl.paused) return { ok: true, status: "stalled", reason: "not playing" };
   let last = performance.now();
   let maxGapMs = 0;
@@ -279,7 +282,9 @@ async function mediaSessionCheck() {
   const registered = want.every((a) => info.actions.includes(a as never));
   const metadata = !!cur && info.title === cur.title && info.album === cur.album_title && info.artwork.length > 0;
   const base = { muted: audioEl.muted, registered, metadata, actions: info.actions, title: info.title, artwork0: info.artwork[0] ?? null, positionReports: info.positionReports, lastPosition: info.lastPosition };
-  if (audioEl.paused) return { ok: registered && metadata, status: "stalled", ...base, playbackState: info.playbackState };
+  // Not playing (the stream didn't start): the registration and metadata were checked, the
+  // handlers were not.
+  if (audioEl.paused) return { ok: registered && metadata, status: "handlers skipped (not playing)", handlers: "skipped", ...base, playbackState: info.playbackState };
   const playingState = info.playbackState === "playing";
   await win.hide();
   try {
