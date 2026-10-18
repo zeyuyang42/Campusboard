@@ -82,7 +82,7 @@ export interface PlaylistWithTracks extends Playlist {
   tracks: PlaylistTrack[];
 }
 
-export type JobKind = "album" | "track" | "discography" | "selection" | "collection";
+export type JobKind = "album" | "track" | "discography" | "selection" | "collection" | "library";
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 
 export interface JobItem {

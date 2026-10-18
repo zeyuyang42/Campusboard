@@ -74,6 +74,11 @@ export const useTheme = create<ThemeState>((set, get) => ({
 /** Apply the default immediately (before first paint), then the saved theme once the database is open. */
 export async function initTheme() {
   void paint(DEFAULT_THEME);
+  await loadSavedTheme();
+}
+
+/** Read the saved theme again (after a library import replaced it) and paint it. */
+export async function loadSavedTheme() {
   try {
     const core = await getCore();
     const saved = await core.getSetting<{ theme: unknown; basePreset?: string }>("theme");

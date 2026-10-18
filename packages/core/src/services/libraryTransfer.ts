@@ -1,0 +1,488 @@
+// Library export and import: one versioned JSON file that moves a library to another Mac.
+//
+// The file names everything by Bandcamp identity (canonical album URLs, Bandcamp track and
+// band ids), never by local row ids, and carries no secrets or caches: no identity cookie,
+// sync status, page cache, stream URLs or art palettes. Importing queues the albums the
+// library lacks through the normal job runner and records what depends on them (playlist
+// entries, plays, muted artists, dismissed releases) in import_pending, which the runner
+// resolves after every album it imports. See db/repos/importPending.ts.
+import { z } from "zod";
+import type { Db } from "../db/Db.js";
+import { now, valuesList } from "../db/Db.js";
+import { getSetting, setSetting } from "../db/repos/settings.js";
+import { recomputeOwned } from "../db/repos/fanItems.js";
+import { addPending, resolvePending, type PendingRow } from "../db/repos/importPending.js";
+import { normalizePlaylistName } from "../db/repos/playlists.js";
+import { ALBUM_SORTS } from "../db/repos/albums.js";
+import { isBandcampHost, normalizeBandcampUrl } from "../scrape/url.js";
+import { normalizeFanUsername } from "../scrape/fan.js";
+import { releasePath } from "../db/repos/releases.js";
+import { ACCOUNT_KEY, setUsername } from "./account.js";
+import { parseTheme } from "../theme/schema.js";
+import { PLAYLIST_NAME_MAX, RELEASE_CHECK_SETTING_KEY } from "../config.js";
+import type { JobRunner } from "./jobRunner.js";
+import type { Job } from "../types.js";
+
+export const LIBRARY_FORMAT = "bandcamp-player-library";
+/** Bump only for changes an older app can't read; additive fields keep the version. */
+export const LIBRARY_EXPORT_VERSION = 1;
+/** settings key: this library's random id, so playlists imported from it can be recognised. */
+export const LIBRARY_ID_KEY = "library_id";
+export const THEME_SETTING_KEY = "theme";
+export const LIBRARY_VIEW_SETTING_KEY = "library_view";
+
+const MAX_ITEMS = 200_000;
+/** Largest file accepted, in characters of text (checked before JSON.parse). */
+export const MAX_LIBRARY_FILE_CHARS = 50 * 1024 * 1024;
+/** Totals across the whole file, so a file within every per-array cap still can't be huge. */
+export const MAX_PLAYLIST_ENTRIES = 200_000;
+export const MAX_PLAYS = 500_000;
+const BATCH = 500;
+const str = (max: number) => z.string().max(max);
+const httpsUrl = str(2048).refine((u) => /^https:\/\/[^/\s]+(\/|$)/.test(u), "not an https URL");
+const id = z.number().int().safe();
+const sqlTime = z.string().regex(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, "not a date and time");
+
+const TrackRefSchema = z.object({
+  album_url: httpsUrl,
+  track_id: id.nullable(),
+  track_num: z.number().int().min(0).max(100_000).nullable(),
+  title: str(1000),
+});
+
+const AlbumSchema = z.object({
+  url: httpsUrl,
+  item_type: z.enum(["album", "track"]),
+  bandcamp_id: id,
+  title: str(1000),
+  artist: str(1000),
+  artist_url: httpsUrl.nullable(),
+  band_id: id.nullable(),
+  owned: z.boolean(),
+  wishlisted: z.boolean(),
+  /** The name.bandcamp.com address of a purchased or wishlisted release (for the next sync). */
+  fetch_url: httpsUrl.nullable(),
+});
+
+const PlaylistSchema = z.object({
+  /** "<library id>:<playlist id>" in the exporting library. */
+  key: str(200),
+  name: str(1000),
+  created_at: str(40),
+  tracks: z.array(TrackRefSchema).max(MAX_ITEMS),
+});
+
+const PlaySchema = TrackRefSchema.extend({ played_at: sqlTime, seconds: z.number().min(0).max(86_400) });
+
+const LibraryViewSchema = z.object({ sort: z.enum(ALBUM_SORTS), filter: z.enum(["all", "purchased", "wishlist"]) });
+
+export const LibraryExportSchema = z.object({
+  format: z.literal(LIBRARY_FORMAT),
+  version: z.literal(LIBRARY_EXPORT_VERSION),
+  exported_at: str(40),
+  library_id: str(100),
+  app_version: str(40).optional(),
+  albums: z.array(AlbumSchema).max(MAX_ITEMS),
+  playlists: z.array(PlaylistSchema).max(10_000),
+  /** null when the export left listening history out. */
+  history: z.array(PlaySchema).max(1_000_000).nullable(),
+  new_releases: z.object({
+    checks_enabled: z.boolean(),
+    muted: z.array(z.object({ band_id: id, artist_url: httpsUrl, name: str(1000) })).max(MAX_ITEMS),
+    dismissed: z.array(z.object({
+      band_id: id, url: httpsUrl, item_type: z.enum(["album", "track"]), title: str(1000), art_id: id.nullable(), artist_override: str(1000).nullable(),
+    })).max(MAX_ITEMS),
+  }),
+  settings: z.object({
+    /** As stored under settings.key='theme'; validated with ThemeSchema on import. */
+    theme: z.object({ theme: z.unknown(), basePreset: str(100).optional() }).nullable(),
+    library_view: LibraryViewSchema.nullable(),
+  }),
+  account: z.object({
+    username: str(100).nullable().refine((u) => {
+      if (u === null) return true;
+      try { return normalizeFanUsername(u) === u; } catch { return false; }
+    }, "not a Bandcamp username"),
+  }),
+});
+
+export type LibraryExport = z.infer<typeof LibraryExportSchema>;
+export type ParsedLibrary = { data: LibraryExport; error?: undefined } | { data?: undefined; error: string };
+
+/** Validate a library file. Errors are sentences for the UI, never a dump of the input. */
+export function parseLibraryExport(text: string): ParsedLibrary {
+  if (text.length > MAX_LIBRARY_FILE_CHARS) return { error: "This library file is too large to import (over 50 MB)." };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return { error: "This file isn't a library export: it isn't valid JSON." };
+  }
+  const head = (raw && typeof raw === "object" ? raw : {}) as { format?: unknown; version?: unknown };
+  if (head.format !== LIBRARY_FORMAT) return { error: "This file isn't a Bandcamp Player library export." };
+  if (typeof head.version !== "number" || !Number.isInteger(head.version) || head.version < 1) {
+    return { error: "This library file is damaged: its version is missing or invalid." };
+  }
+  if (head.version > LIBRARY_EXPORT_VERSION) {
+    return { error: "This library file was made by a newer version of Bandcamp Player. Update the app, then import it again." };
+  }
+  const r = LibraryExportSchema.safeParse(raw);
+  if (!r.success) {
+    const issue = r.error.issues[0];
+    return { error: `This library file is damaged (${issue?.path.join(".") || "file"}: ${issue?.message ?? "invalid"}).` };
+  }
+  const entries = r.data.playlists.reduce((n, p) => n + p.tracks.length, 0);
+  if (entries > MAX_PLAYLIST_ENTRIES) return { error: `This library file is too large to import: its playlists hold more than ${MAX_PLAYLIST_ENTRIES.toLocaleString("en-US")} tracks.` };
+  if ((r.data.history?.length ?? 0) > MAX_PLAYS) return { error: `This library file is too large to import: it has more than ${MAX_PLAYS.toLocaleString("en-US")} plays.` };
+  if (r.data.settings.theme) {
+    const t = parseTheme(r.data.settings.theme.theme);
+    if (!t.theme) return { error: `This library file is damaged (settings.theme: ${t.error}).` };
+  }
+  return { data: r.data };
+}
+
+async function libraryId(db: Db, create: boolean): Promise<string | null> {
+  const have = await getSetting<string>(db, LIBRARY_ID_KEY);
+  if (have || !create) return have;
+  const fresh = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  await setSetting(db, LIBRARY_ID_KEY, fresh);
+  return (await getSetting<string>(db, LIBRARY_ID_KEY)) ?? fresh;
+}
+
+const TRACK_REF = "al.url AS album_url, t.track_id, t.track_num, t.title";
+
+/** Everything worth moving to another Mac, as a plain object ready for JSON.stringify. */
+export async function exportLibrary(db: Db, opts: { history?: boolean; appVersion?: string } = {}): Promise<LibraryExport> {
+  const lib = (await libraryId(db, true))!;
+  const albums = (await db.select<Omit<LibraryExport["albums"][number], "owned" | "wishlisted"> & { owned: number; wishlisted: number }>(
+    `SELECT al.url, al.item_type, al.bandcamp_id, al.title, ar.name AS artist, ar.url AS artist_url, ar.band_id, al.owned,
+       EXISTS (SELECT 1 FROM fan_items f WHERE f.list = 'wishlist' AND f.item_type = al.item_type AND f.bandcamp_id = al.bandcamp_id) AS wishlisted,
+       (SELECT f.fetch_url FROM fan_items f WHERE f.item_type = al.item_type AND f.bandcamp_id = al.bandcamp_id ORDER BY f.list LIMIT 1) AS fetch_url
+     FROM albums al JOIN artists ar ON ar.id = al.artist_id ORDER BY al.created_at, al.id`,
+  )).map((a) => ({ ...a, owned: !!a.owned, wishlisted: !!a.wishlisted }));
+
+  const playlists: LibraryExport["playlists"] = [];
+  for (const p of await db.select<{ id: number; name: string; created_at: string }>("SELECT id, name, created_at FROM playlists ORDER BY created_at, id")) {
+    const tracks = await db.select<LibraryExport["playlists"][number]["tracks"][number]>(
+      `SELECT ${TRACK_REF} FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id JOIN albums al ON al.id = t.album_id
+       WHERE pt.playlist_id = ? ORDER BY pt.position, pt.id`,
+      [p.id],
+    );
+    playlists.push({ key: `${lib}:${p.id}`, name: p.name, created_at: p.created_at, tracks });
+  }
+
+  const history = opts.history === false ? null : await db.select<NonNullable<LibraryExport["history"]>[number]>(
+    `SELECT ${TRACK_REF}, p.played_at, p.seconds_listened AS seconds FROM plays p JOIN tracks t ON t.id = p.track_id JOIN albums al ON al.id = t.album_id
+     ORDER BY p.played_at, p.id`,
+  );
+
+  const muted = await db.select<LibraryExport["new_releases"]["muted"][number]>(
+    "SELECT ar.band_id, ar.url AS artist_url, ar.name FROM release_watch w JOIN artists ar ON ar.id = w.artist_id WHERE w.muted = 1 ORDER BY ar.id",
+  );
+  const dismissed = await db.select<LibraryExport["new_releases"]["dismissed"][number]>(
+    `SELECT ar.band_id, r.url, r.item_type, r.title, r.art_id, r.artist_override FROM artist_releases r JOIN artists ar ON ar.id = r.artist_id
+     WHERE r.status = 'dismissed' ORDER BY r.id`,
+  );
+
+  const theme = await getSetting<{ theme?: unknown; basePreset?: string }>(db, THEME_SETTING_KEY);
+  const view = LibraryViewSchema.safeParse(await getSetting(db, LIBRARY_VIEW_SETTING_KEY));
+  const checks = await getSetting<{ enabled?: boolean }>(db, RELEASE_CHECK_SETTING_KEY);
+  // Only the username: the identity cookie and the sync summary stay on this Mac.
+  const account = await getSetting<{ username?: string }>(db, ACCOUNT_KEY);
+  const validTheme = theme && parseTheme(theme.theme).theme;
+
+  return {
+    format: LIBRARY_FORMAT,
+    version: LIBRARY_EXPORT_VERSION,
+    exported_at: new Date().toISOString(),
+    library_id: lib,
+    ...(opts.appVersion ? { app_version: opts.appVersion } : {}),
+    albums,
+    playlists,
+    history,
+    new_releases: { checks_enabled: checks?.enabled !== false, muted, dismissed },
+    settings: {
+      theme: validTheme ? { theme: validTheme, ...(theme?.basePreset ? { basePreset: theme.basePreset } : {}) } : null,
+      library_view: view.success ? view.data : null,
+    },
+    account: { username: account?.username ?? null },
+  };
+}
+
+interface LibraryState {
+  urls: Set<string>;
+  ids: Set<string>;
+  trackIds: Set<number>;
+  queued: Set<string>;
+  names: Map<string, number[]>;
+  mapped: Set<string>;
+  /** Playlists an interrupted import claimed (name chosen) but may not have finished creating. */
+  claims: Map<string, string>;
+  libraryId: string | null;
+  playlistIds: Map<number, string>;
+  username: string | null;
+}
+
+async function libraryState(db: Db): Promise<LibraryState> {
+  const albums = await db.select<{ url: string; item_type: string; bandcamp_id: number }>("SELECT url, item_type, bandcamp_id FROM albums");
+  const tracks = await db.select<{ track_id: number }>("SELECT track_id FROM tracks");
+  // URLs an unfinished job will fetch anyway (an earlier import of the same file, say).
+  const queued = await db.select<{ url: string }>(
+    "SELECT ji.url FROM job_items ji JOIN jobs j ON j.id = ji.job_id WHERE j.status IN ('queued','running') AND ji.status IN ('queued','running')",
+  );
+  const playlists = await db.select<{ id: number; name: string; created_at: string }>("SELECT id, name, created_at FROM playlists");
+  const names = new Map<string, number[]>();
+  for (const p of playlists) names.set(p.name.toLowerCase(), [...(names.get(p.name.toLowerCase()) ?? []), p.id]);
+  const mapped = await db.select<{ source_key: string }>("SELECT source_key FROM imported_playlists WHERE playlist_id IN (SELECT id FROM playlists)");
+  const claims = await db.select<{ source_key: string; name: string }>("SELECT source_key, name FROM imported_playlists WHERE playlist_id IS NULL");
+  return {
+    urls: new Set(albums.map((a) => a.url)),
+    ids: new Set(albums.map((a) => `${a.item_type}:${a.bandcamp_id}`)),
+    trackIds: new Set(tracks.map((t) => t.track_id)),
+    queued: new Set(queued.map((q) => q.url)),
+    names,
+    mapped: new Set(mapped.map((m) => m.source_key)),
+    claims: new Map(claims.map((c) => [c.source_key, c.name])),
+    libraryId: await libraryId(db, false),
+    playlistIds: new Map(playlists.map((p) => [p.id, p.created_at])),
+    username: (await getSetting<{ username?: string }>(db, ACCOUNT_KEY))?.username ?? null,
+  };
+}
+
+function hasAlbum(s: LibraryState, a: LibraryExport["albums"][number]): boolean {
+  return s.urls.has(a.url) || s.ids.has(`${a.item_type}:${a.bandcamp_id}`) || (a.item_type === "track" && s.trackIds.has(a.bandcamp_id));
+}
+
+function safeReleaseUrl(u: string): string | null {
+  try {
+    const n = normalizeBandcampUrl(u);
+    return n.kind === "artist" ? null : n.url;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The fan_items addresses for a marked album, or null to drop the mark. Both go through
+ * normalizeBandcampUrl; the fetch URL (the one the identity cookie and album refreshes use)
+ * must be on a bandcamp.com host and name the same release path as the album, so a file
+ * can't point a purchased album's refresh at some other page.
+ */
+function fanAddresses(a: LibraryExport["albums"][number]): { url: string; fetch_url: string } | null {
+  const url = safeReleaseUrl(a.url);
+  if (!url) return null;
+  const fetch = a.fetch_url === null ? url : safeReleaseUrl(a.fetch_url);
+  if (!fetch || !isBandcampHost(new URL(fetch).hostname) || releasePath(fetch) !== releasePath(url)) return null;
+  return { url, fetch_url: fetch };
+}
+
+/** "Name", else "Name (2)", "Name (3)" ...: never a name already taken (case-insensitively). */
+function freeName(base: string, taken: Set<string>): string {
+  if (!taken.has(base.toLowerCase())) return base;
+  for (let n = 2; ; n++) {
+    const suffix = ` (${n})`;
+    const name = `${Array.from(base).slice(0, PLAYLIST_NAME_MAX - suffix.length).join("").trimEnd()}${suffix}`;
+    if (!taken.has(name.toLowerCase())) return name;
+  }
+}
+
+async function trackSequence(db: Db, playlistId: number): Promise<string> {
+  const rows = await db.select<{ k: string }>(
+    `SELECT COALESCE(CAST(t.track_id AS TEXT), al.url || '#' || t.title) AS k FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id
+     JOIN albums al ON al.id = t.album_id WHERE pt.playlist_id = ? ORDER BY pt.position, pt.id`,
+    [playlistId],
+  );
+  return rows.map((r) => r.k).join(",");
+}
+
+type PlaylistPlan = { key: string; name: string; status: "present" } | { key: string; name: string; status: "new"; createAs: string };
+
+/**
+ * Which playlists already exist here: created by an earlier import of this library, the
+ * very same playlist (importing into the library that exported it), or one with the same
+ * name and the same tracks in the same order. The rest are created, renamed with a
+ * " (2)" style suffix when the name is taken: an existing playlist is never overwritten.
+ */
+async function planPlaylists(db: Db, data: LibraryExport, s: LibraryState): Promise<PlaylistPlan[]> {
+  const taken = new Set(s.names.keys());
+  const plans: PlaylistPlan[] = [];
+  for (const p of data.playlists) {
+    const name = normalizePlaylistName(p.name) ?? "Imported playlist";
+    const ownId = data.library_id === s.libraryId ? Number(p.key.slice(p.key.lastIndexOf(":") + 1)) : NaN;
+    let present = s.mapped.has(p.key) || (Number.isInteger(ownId) && s.playlistIds.get(ownId) === p.created_at);
+    if (!present) {
+      const want = p.tracks.map((t) => (t.track_id != null ? String(t.track_id) : `${t.album_url}#${t.title}`)).join(",");
+      for (const candidate of s.names.get(name.toLowerCase()) ?? []) {
+        if ((await trackSequence(db, candidate)) === want) { present = true; break; }
+      }
+    }
+    if (present) { plans.push({ key: p.key, name, status: "present" }); continue; }
+    const createAs = s.claims.get(p.key) ?? freeName(name, taken);
+    taken.add(createAs.toLowerCase());
+    plans.push({ key: p.key, name, status: "new", createAs });
+  }
+  return plans;
+}
+
+export interface LibraryImportPreview {
+  albums: { total: number; new: number; present: number; invalid: number };
+  playlists: { total: number; new: number; present: number; renamed: { from: string; to: string }[] };
+  /** Plays in the file (null when the export left history out). */
+  plays: number | null;
+  settings: { theme: boolean; libraryView: boolean };
+  newReleases: { muted: number; dismissed: number };
+  /**
+   * The file's username, whether importing uses it (this library has none, or the same one),
+   * and how many albums carry a Purchased or Wishlist mark.
+   */
+  account: { username: string | null; applies: boolean; marks: number };
+}
+
+function accountApplies(s: LibraryState, data: LibraryExport): boolean {
+  const u = data.account.username;
+  return !!u && (!s.username || s.username.toLowerCase() === u.toLowerCase());
+}
+
+/** What importing `data` would do, without changing anything. */
+export async function previewLibraryImport(db: Db, data: LibraryExport): Promise<LibraryImportPreview> {
+  const s = await libraryState(db);
+  let present = 0, invalid = 0;
+  for (const a of data.albums) {
+    if (hasAlbum(s, a)) present++;
+    else if (!safeReleaseUrl(a.url)) invalid++;
+  }
+  const plans = await planPlaylists(db, data, s);
+  const created = plans.filter((p): p is Extract<PlaylistPlan, { status: "new" }> => p.status === "new");
+  return {
+    albums: { total: data.albums.length, new: data.albums.length - present - invalid, present, invalid },
+    playlists: {
+      total: plans.length, new: created.length, present: plans.length - created.length,
+      renamed: created.filter((p) => p.createAs !== p.name).map((p) => ({ from: p.name, to: p.createAs })),
+    },
+    plays: data.history ? data.history.length : null,
+    settings: { theme: !!data.settings.theme, libraryView: !!data.settings.library_view },
+    newReleases: { muted: data.new_releases.muted.length, dismissed: data.new_releases.dismissed.length },
+    account: { username: data.account.username, applies: accountApplies(s, data), marks: data.albums.filter((a) => a.owned || a.wishlisted).length },
+  };
+}
+
+export interface LibraryImportOptions {
+  /** Merge the file's listening history (default true). */
+  history?: boolean;
+  /** Use the file's theme, Library view and new-release checking choice (default true). */
+  settings?: boolean;
+  /** Shown as the import job's source, e.g. the file name. */
+  label?: string;
+}
+
+export interface LibraryImportResult {
+  /** The job importing the missing albums, or null when the library had them all. */
+  job: Job | null;
+  queued: number;
+  playlistsCreated: number;
+  /** Written right away because their albums were already here. */
+  resolved: { tracks: number; plays: number };
+}
+
+/**
+ * Import a validated library file. Steps run in an order where an interruption leaves a
+ * readable library and a second run finishes the job without duplicating anything: the
+ * account and flags first, settings, playlists (claimed, created, linked, then their pending
+ * entries), pending plays and preferences, the resolve for what is already
+ * here, and the job for the missing albums last.
+ */
+export async function importLibrary(db: Db, runner: JobRunner, data: LibraryExport, opts: LibraryImportOptions = {}): Promise<LibraryImportResult> {
+  const s = await libraryState(db);
+
+  // The username only fills an empty account; another account's Purchased and Wishlist
+  // marks would be wrong here, so flags come along only for this or a new account.
+  if (accountApplies(s, data)) {
+    if (!s.username) await setUsername(db, data.account.username!);
+    const flagged = data.albums.flatMap((a) => {
+      const at = a.owned || a.wishlisted ? fanAddresses(a) : null;
+      if (!at) return [];
+      return [...(a.owned ? [["collection", a, at] as const] : []), ...(a.wishlisted ? [["wishlist", a, at] as const] : [])];
+    });
+    // sync_job 0: the next complete sync replaces these with what the account really holds.
+    for (let i = 0; i < flagged.length; i += BATCH) {
+      const chunk = flagged.slice(i, i + BATCH);
+      await db.run(
+        `INSERT OR IGNORE INTO fan_items (list, item_type, bandcamp_id, url, fetch_url, title, artist, sync_job) VALUES ${valuesList(chunk.length, 8)}`,
+        chunk.flatMap(([list, a, at]) => [list, a.item_type, a.bandcamp_id, at.url, at.fetch_url, a.title, a.artist, 0]),
+      );
+    }
+    if (flagged.length) await recomputeOwned(db);
+  }
+
+  if (opts.settings !== false) {
+    const t = data.settings.theme && parseTheme(data.settings.theme.theme).theme;
+    if (t) await setSetting(db, THEME_SETTING_KEY, { theme: t, basePreset: data.settings.theme?.basePreset ?? t.name });
+    if (data.settings.library_view) await setSetting(db, LIBRARY_VIEW_SETTING_KEY, data.settings.library_view);
+    await setSetting(db, RELEASE_CHECK_SETTING_KEY, { enabled: data.new_releases.checks_enabled });
+  }
+
+  let playlistsCreated = 0;
+  const plans = await planPlaylists(db, data, s);
+  for (const [i, plan] of plans.entries()) {
+    if (plan.status !== "new") continue;
+    const p = data.playlists[i];
+    const pid = await createImportedPlaylist(db, p.key, plan.createAs);
+    await addPending(db, p.tracks.map((t, position): PendingRow => ({
+      kind: "playlist_track", playlist_id: pid, position, album_url: t.album_url, track_bcid: t.track_id, track_num: t.track_num, track_title: t.title,
+    })));
+    playlistsCreated++;
+  }
+
+  if (opts.history !== false && data.history) {
+    await addPending(db, data.history.map((h): PendingRow => ({
+      kind: "play", album_url: h.album_url, track_bcid: h.track_id, track_num: h.track_num, track_title: h.title, played_at: h.played_at, seconds: h.seconds,
+    })));
+  }
+  await addPending(db, [
+    ...data.new_releases.muted.map((m): PendingRow => ({ kind: "mute", band_id: m.band_id })),
+    // Stored in artist_releases later, so only addresses normalizeBandcampUrl accepts.
+    ...data.new_releases.dismissed.flatMap((d): PendingRow[] => {
+      const url = safeReleaseUrl(d.url);
+      return url ? [{ kind: "dismissed", band_id: d.band_id, release_url: url, item_type: d.item_type, title: d.title, art_id: d.art_id, artist_override: d.artist_override }] : [];
+    }),
+  ]);
+
+  const resolved = await resolvePending(db);
+
+  const missing = [...new Set(data.albums.filter((a) => !hasAlbum(s, a)).map((a) => safeReleaseUrl(a.url)).filter((u): u is string => !!u && !s.queued.has(u)))];
+  const job = missing.length ? await runner.enqueueSelection({ urls: missing, label: opts.label ?? "Library file", kind: "library" }) : null;
+  return { job, queued: missing.length, playlistsCreated, resolved };
+}
+
+/**
+ * Create the playlist for source playlist `key`, safe to repeat after an interruption at any
+ * point: the claim row (with the chosen name) goes in first, the playlist second, the link
+ * last. A rerun that finds a claim without a link adopts the unlinked playlist of that name
+ * created since the claim, instead of making a second one.
+ */
+async function createImportedPlaylist(db: Db, key: string, name: string): Promise<number> {
+  await db.run("INSERT INTO imported_playlists (source_key, name, claimed_at) VALUES (?, ?, ?) ON CONFLICT(source_key) DO NOTHING", [key, name, now()]);
+  const claim = (await db.get<{ name: string; claimed_at: string; playlist_id: number | null }>(
+    "SELECT name, claimed_at, playlist_id FROM imported_playlists WHERE source_key = ?", [key]))!;
+  let pid = claim.playlist_id;
+  if (pid === null) {
+    const orphan = await db.get<{ id: number }>(
+      `SELECT id FROM playlists p WHERE p.name = ? AND p.created_at >= ?
+         AND NOT EXISTS (SELECT 1 FROM imported_playlists m WHERE m.playlist_id = p.id) ORDER BY id LIMIT 1`,
+      [claim.name, claim.claimed_at],
+    );
+    pid = orphan?.id ?? (await db.get<{ id: number }>("INSERT INTO playlists (name, created_at, updated_at) VALUES (?, ?, ?) RETURNING id", [claim.name, now(), now()]))!.id;
+    await db.run("UPDATE imported_playlists SET playlist_id = ? WHERE source_key = ?", [pid, key]);
+  }
+  return pid;
+}
+
+/**
+ * Copy the whole database to `path` with VACUUM INTO, which works while the app is using it
+ * and produces a compact, consistent snapshot. The file must not exist yet (SQLite refuses
+ * to overwrite one); the app writes to a fresh file in its data folder and copies it over.
+ */
+export async function backupDatabase(db: Db, path: string): Promise<void> {
+  if (!path || /[\0]/.test(path)) throw new Error("Invalid backup path");
+  await db.run("VACUUM INTO ?", [path]);
+}

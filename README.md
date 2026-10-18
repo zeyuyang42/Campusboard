@@ -55,6 +55,12 @@ Requires macOS 13.3 or later. Your library lives in
 - **Themes**: Settings → pick a preset, adjust colors, fonts, corner radius,
   density, the album-art wash and an optional background image. Export writes a
   `.theme.json` you can send to a friend; Import loads one.
+- **Moving to another Mac**: Settings → Library. Export library writes a JSON
+  file with your albums (by Bandcamp address), playlists, listening history,
+  theme and settings, never your identity cookie. Import library on the other
+  Mac shows what's new, then fetches the missing albums from Bandcamp at the
+  usual pace and fills the playlists in as they arrive. Back up library
+  database saves a complete copy of the library file at any time.
 
 Closing the window keeps the music playing; click the Dock icon to bring it
 back, and press `⌘Q` to quit. The current track shows in Control Center's Now

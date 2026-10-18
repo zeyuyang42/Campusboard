@@ -14,6 +14,10 @@ export { ReleaseChecker, type ReleaseCheckerOptions, type SkipReason } from "./s
 export { normalizeIdentityCookie } from "./services/account.js";
 export * as repos from "./db/repos/index.js";
 export { normalizePlaylistName, PlaylistNameError, PLAYLIST_NAME_MAX } from "./db/repos/playlists.js";
+export {
+  parseLibraryExport, LIBRARY_FORMAT, LIBRARY_EXPORT_VERSION,
+  type LibraryExport, type LibraryImportPreview, type LibraryImportOptions, type LibraryImportResult,
+} from "./services/libraryTransfer.js";
 export { createCore, type Core, type CoreDeps } from "./core.js";
 export * from "./theme/index.js";
 export * from "./palette/index.js";
