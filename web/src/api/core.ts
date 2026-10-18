@@ -4,6 +4,7 @@ import { createCore, type Core } from "@bc/core";
 import { openDb } from "./tauriDb";
 
 const BROWSER_MODE = import.meta.env.VITE_BROWSER_MODE === "1";
+const SELFTEST = import.meta.env.VITE_SELFTEST === "1";
 
 let corePromise: Promise<Core> | null = null;
 let qc: QueryClient | null = null;
@@ -32,7 +33,7 @@ export function getCore(): Promise<Core> {
         db = await openDb();
         fetchImpl = (input, init) => tauriFetch(input, { ...init, maxRedirections: 5 });
       }
-      return createCore({
+      const core = createCore({
         db,
         fetch: fetchImpl,
         onJobsChange: () => {
@@ -40,8 +41,15 @@ export function getCore(): Promise<Core> {
           void qc?.invalidateQueries({ queryKey: ["job"] });
           // A collection sync updates the account summary and the Purchased/Wishlist flags.
           void qc?.invalidateQueries({ queryKey: ["account"] });
+          // An import may take a release off the New releases list; a job also pauses the checker.
+          void qc?.invalidateQueries({ queryKey: ["releases"] });
         },
+        onReleasesChange: () => { void qc?.invalidateQueries({ queryKey: ["releases"] }); },
       });
+      // Background new-release checks: the first one a few minutes after launch. The selftest
+      // runs its own single check instead, so its requests stay predictable.
+      if (!SELFTEST) core.startReleaseChecks();
+      return core;
     })();
   }
   return corePromise;

@@ -6,6 +6,7 @@ export { PlayCounter, playThreshold, PLAY_MIN_TRACK_SEC, PLAY_MAX_THRESHOLD_SEC,
 export { getFreshStreamUrl, refreshAlbum } from "./services/streamService.js";
 export { JobRunner, type ImportRequest, type ImportSelectionRequest } from "./services/jobRunner.js";
 export { cachedFetchText, prunePageCache } from "./services/pageCache.js";
+export { ReleaseChecker, type ReleaseCheckerOptions, type SkipReason } from "./services/releaseWatch.js";
 export { normalizeIdentityCookie } from "./services/account.js";
 export * as repos from "./db/repos/index.js";
 export { normalizePlaylistName, PlaylistNameError, PLAYLIST_NAME_MAX } from "./db/repos/playlists.js";

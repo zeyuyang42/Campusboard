@@ -136,6 +136,53 @@ async function historyCheck(core: Awaited<ReturnType<typeof getCore>>, album: Aw
 }
 
 /**
+ * New releases through the real SQL plugin and http plugin: one check of the selftest's own
+ * artist (its /music page, at most one request; usually a page-cache hit right after the
+ * browse check) as that artist's first check, which must store everything as seen and find
+ * nothing new. If the real library already watches the artist, its watch row is set aside
+ * for the check and put back afterwards; the release rows the check inserted are deleted by id.
+ */
+async function newReleasesCheck(core: Awaited<ReturnType<typeof getCore>>, album: Awaited<ReturnType<Awaited<ReturnType<typeof getCore>>["album"]>>) {
+  if (!album) return { ok: false, error: "no album" };
+  const db = core.db;
+  const artistId = album.artist_id;
+  const artist = await core.artist(artistId);
+  if (!artist) return { ok: false, error: "no artist" };
+  const musicUrl = `${new URL(artist.url).origin}/music`;
+  const before = await db.get<repos.WatchRow>("SELECT * FROM release_watch WHERE artist_id = ?", [artistId]);
+  const cachedAt = async () => (await db.get<{ fetched_at: number }>("SELECT fetched_at FROM page_cache WHERE url = ?", [musicUrl]))?.fetched_at ?? null;
+  const cacheBefore = await cachedAt();
+  const countBefore = await core.newReleaseCount();
+  let created: number[] = [];
+  try {
+    if (before) await db.run("DELETE FROM release_watch WHERE artist_id = ?", [artistId]);
+    const r = await core.checkArtistReleases(artistId);
+    created = r.inserted_ids;
+    const rows = created.length
+      ? await db.select<{ status: string }>(`SELECT status FROM artist_releases WHERE id IN (${created.map(() => "?").join(",")})`, created)
+      : [];
+    const watch = await db.get<repos.WatchRow>("SELECT * FROM release_watch WHERE artist_id = ?", [artistId]);
+    const requests = (await cachedAt()) === cacheBefore ? 0 : 1;
+    const result = {
+      status: r.status, error: r.error ?? null, releases: r.releases, inserted: created.length, found: r.found,
+      allSeen: rows.every((x) => x.status === "seen"), baselined: watch?.baselined === 1, requests,
+      countUnchanged: (await core.newReleaseCount()) === countBefore, hadWatchRow: !!before,
+    };
+    return { ok: result.status === "baseline" && result.releases > 0 && result.found === 0 && result.allSeen && result.baselined && requests <= 1 && result.countUnchanged, ...result };
+  } finally {
+    for (let i = 0; i < created.length; i += 100) {
+      const chunk = created.slice(i, i + 100);
+      await db.run(`DELETE FROM artist_releases WHERE id IN (${chunk.map(() => "?").join(",")})`, chunk);
+    }
+    await db.run("DELETE FROM release_watch WHERE artist_id = ?", [artistId]);
+    if (before) {
+      await db.run("INSERT INTO release_watch (artist_id, muted, baselined, last_checked_at, last_error) VALUES (?, ?, ?, ?, ?)",
+        [before.artist_id, before.muted, before.baselined, before.last_checked_at, before.last_error]);
+    }
+  }
+}
+
+/**
  * Background listening: hide the window (what closing it does) for 20 s while a track plays,
  * and measure how often timeupdate still arrives and whether listening history keeps
  * accumulating. Observes the audio element without changing it.
@@ -219,6 +266,7 @@ export async function runSelfTest() {
     out.search = { count: results.length, inLibrary: results.filter((r) => r.in_library).length };
     const browse = await core.browse("https://illuminatihotties.bandcamp.com");
     out.browse = { releases: browse.items.length, band: browse.band?.name, inLibrary: browse.items.filter((i) => i.album_id).length, firstTitle: browse.items[0]?.title };
+    out.newReleases = await newReleasesCheck(core, album).catch((e) => ({ ok: false, error: String(e) }));
     // Custom artist domain: the http scope must allow the custom host (it 303s to name.bandcamp.com),
     // and the library must key the album by the custom-domain URL from data-tralbum.
     // Only albums that are new by id get deleted afterwards, so the real library is left as it was.
@@ -304,7 +352,7 @@ export async function runSelfTest() {
     out.dragPermission = await win.startDragging().then(() => "ok", (e) => String(e));
     // Overall ok needs every block that reports its own `ok` to pass. The listed blocks must
     // be present as objects: one caught and stored as a string threw.
-    const required = ["libraryFilter", "history", "hiddenPlayback", "syncGuards"];
+    const required = ["libraryFilter", "history", "hiddenPlayback", "syncGuards", "newReleases"];
     const failed = Object.entries(out)
       .filter(([k, v]) => required.includes(k) || (!!v && typeof v === "object" && "ok" in v))
       .filter(([, v]) => (v as { ok?: unknown } | null)?.ok !== true)

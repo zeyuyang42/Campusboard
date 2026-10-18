@@ -43,6 +43,10 @@ Requires macOS 13.3 or later. Your library lives in
   Optionally paste the `identity` cookie from a browser where you're logged in to
   bandcamp.com to include a private collection and stream your purchases as MP3 V0.
   The cookie stays in your local library database and is only sent to bandcamp.com.
+- **New releases**: while the app is open it looks at one library artist's
+  Bandcamp page every few minutes (each artist at most once a day) and lists
+  releases that appeared since its first look, to import or dismiss. Turn it off
+  or press **Check now** in Settings; mute an artist from their page.
 - **Playlists**: right-click any track or album, or select several tracks
   (click, Shift-click, Cmd-click) and use the bar that appears. Drag rows to
   reorder.

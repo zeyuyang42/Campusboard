@@ -24,3 +24,11 @@ export const CHALLENGE_RESET_MS = 10 * 60 * 1000;
 export const CHALLENGE_POLL_MS = 1000;
 /** settings key holding the persisted cooldown, so it survives an app restart. */
 export const CHALLENGE_SETTING_KEY = "challenge_until";
+/** New releases: each library artist's /music page is checked at most this often. */
+export const RELEASE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** The background checker's first look comes this long after launch, never at startup. */
+export const RELEASE_CHECK_START_DELAY_MS = 3 * 60 * 1000;
+/** Then one artist (one request at most) per tick, so N artists cost N requests a day, spread out. */
+export const RELEASE_CHECK_TICK_MS = 3 * 60 * 1000;
+/** settings key for the new-releases checker: { enabled: boolean } (missing means on). */
+export const RELEASE_CHECK_SETTING_KEY = "release_check";

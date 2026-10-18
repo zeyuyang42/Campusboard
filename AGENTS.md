@@ -28,7 +28,7 @@ packages/core/src/
   scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, fan (collection/wishlist), schemas
   db/Db.ts                 async Db interface {select,get,run}; SQL uses "?" and toDollar() rewrites to $n for the Tauri plugin
   db/repos/                one module per table; booleans stored 0/1, converted at the repo boundary
-  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie)
+  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker)
   theme/                   schema (zod), presets, color math (OKLCH, contrast), apply (CSS variables)
   palette/                 quantize + pick + extract (canvas) + fitPalette + artUrl
   core.ts                  createCore({db, fetch, onJobsChange}) -> every function the UI calls
@@ -127,6 +127,14 @@ src-tauri/
   `seconds_listened` is the listened time at that moment (the threshold plus at
   most one report's step), not the whole listen. `ix_plays_played_at` is unused
   so far; it stays because 0005 is applied to existing libraries.
+- New releases (`services/releaseWatch.ts`, tables `release_watch` and
+  `artist_releases`): one tick every 3 min starting 3 min after launch, at most
+  one artist and one request per tick (page cache, no retries), each artist at
+  most once per 24 h; skipped while a job is queued/running, during a challenge
+  cooldown or with `settings.key='release_check'` = `{enabled:false}`. An
+  artist's first successful check is a baseline (all `seen`). Release URLs go
+  through `normalizeBandcampUrl` before they are stored. The selftest's
+  `newReleases` block covers it through the real plugins.
 
 ## Collection sync facts (verified 2026-10-17 with curl against a public profile)
 

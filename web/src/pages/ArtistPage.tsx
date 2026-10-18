@@ -1,5 +1,5 @@
 import { Link, useParams } from "react-router-dom";
-import { useArtist } from "../api/queries";
+import { useArtist, useArtistReleasesMuted, useReleaseMutations } from "../api/queries";
 import { AlbumCard } from "../components/AlbumCard";
 import { ExternalIcon } from "../components/Icons";
 import { friendlyError } from "../lib/errors";
@@ -8,6 +8,8 @@ import { ExternalLink } from "../components/ExternalLink";
 export function ArtistPage() {
   const id = Number(useParams().id);
   const { data: artist, isLoading, error } = useArtist(id);
+  const { data: muted } = useArtistReleasesMuted(id);
+  const { setMuted } = useReleaseMutations();
   if (error) return <div className="notice error">Couldn't load this artist. {friendlyError(error)}</div>;
   if (isLoading || !artist) return <div className="empty">Loading…</div>;
   return (
@@ -20,6 +22,10 @@ export function ArtistPage() {
         <ExternalLink className="btn sm" href={artist.url}>Bandcamp <ExternalIcon /></ExternalLink>
       </h1>
       <div className="grid">{artist.albums.map((a) => <AlbumCard key={a.id} album={a} showArtist={false} />)}</div>
+      <label className="check-row muted artist-mute">
+        <input type="checkbox" checked={setMuted.isPending ? setMuted.variables.muted : !!muted} disabled={muted === undefined || setMuted.isPending} onChange={(e) => setMuted.mutate({ id, muted: e.target.checked })} />
+        Don't check for new releases
+      </label>
     </>
   );
 }
