@@ -190,7 +190,8 @@ async function streamUrlFor(track: QueueTrack, force = false): Promise<{ url: st
 /** Plays when it is ready if `wantsPlay` is still set then; skips on to the next track on failure only if so. */
 function load(track: QueueTrack, force = false) {
   // Another track: an end-of-track fade belonged to the one before (a minutes fade carries on).
-  if (usePlayer.getState().sleep?.kind !== "minutes") sleepFade = 1;
+  // A retry of the same track (force) keeps it, so it resumes at the faded level.
+  if (!force && usePlayer.getState().sleep?.kind !== "minutes") sleepFade = 1;
   // A new source for the active element: a preload or a fade in progress is moot.
   cancelTransition();
   const seq = ++loadSeq;
@@ -273,6 +274,9 @@ function forgetLocalCopy(trackId: number) {
  * A load, Play or Pause from the listener in the meantime cancels the skip.
  */
 function skipAfterError(play: boolean) {
+  // The sleep timer would have stopped at this track's end (or is fading out): a track that
+  // fails there is its end, so stop rather than play on into the next one.
+  if (play && usePlayer.getState().sleep && (sleepFade < 1 || sleepStopsHere())) { stopForSleep(false); return; }
   failStreak++;
   if (shouldStopAfterError()) return;
   const seq = loadSeq;
@@ -401,7 +405,7 @@ function plan() {
   const duration = active().duration;
   if (!cur || !up || !finitePositive(duration)) return null;
   // The sleep timer stops at this track's end, or is fading out: nothing starts after it.
-  if (s.sleep && (sleepFade < 1 || sleepStopsAtEnd(s.sleep, cur, up.track))) return null;
+  if (s.sleep && (sleepFade < 1 || sleepStopsAtEnd(s.sleep, cur, up.track, up.index <= s.index))) return null;
   const settings = settingsOf(s);
   const kind = transitionKind(cur, up.track, settings, duration);
   const fadeSec = kind === "crossfade" ? fadeSeconds(settings, duration, up.track.duration) : 0;
@@ -550,7 +554,8 @@ const SLEEP_TICK_MS = 250;
 /** The current track's end is where the timer stops (end of track, or the album's last). */
 function sleepStopsHere() {
   const s = usePlayer.getState();
-  return sleepStopsAtEnd(s.sleep, s.current(), upcoming()?.track ?? null);
+  const up = upcoming();
+  return sleepStopsAtEnd(s.sleep, s.current(), up?.track ?? null, !!up && up.index <= s.index);
 }
 
 function applySleepFade(scale: number) {

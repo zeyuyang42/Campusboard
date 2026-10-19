@@ -14,6 +14,7 @@ describe("sleep timer rules (#70)", () => {
     expect(sleepStopsAtEnd({ kind: "album" }, a, a)).toBe(false);
     expect(sleepStopsAtEnd({ kind: "album" }, a, b)).toBe(true);
     expect(sleepStopsAtEnd({ kind: "album" }, a, null)).toBe(true);
+    expect(sleepStopsAtEnd({ kind: "album" }, a, a, true)).toBe(true); // repeat-all wrapped round
     expect(sleepStopsAtEnd(sleepTimerFor(15, 0), a, null)).toBe(false);
     expect(sleepStopsAtEnd(null, a, null)).toBe(false);
   });

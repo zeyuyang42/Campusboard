@@ -21,12 +21,14 @@ export const sleepChoiceOf = (t: SleepTimer | null): SleepChoice => (t ? (t.kind
 interface Entry { album_id: number }
 /**
  * Whether playback stops when the current track ends: always for "end of track", and for
- * "end of album" when no track follows or the next one is from another album (a radio
- * episode is its own album). Never for the minutes timer, which stops at its time.
+ * "end of album" when no track follows, the next one is from another album (a radio episode
+ * is its own album), or the queue wraps round (repeat-all: `wraps`, the next track is at or
+ * before this one), which is the end of the album even when the queue holds only that album.
+ * Never for the minutes timer, which stops at its time.
  */
-export function sleepStopsAtEnd(t: SleepTimer | null, current: Entry | null, upcoming: Entry | null): boolean {
+export function sleepStopsAtEnd(t: SleepTimer | null, current: Entry | null, upcoming: Entry | null, wraps = false): boolean {
   if (!t || !current || t.kind === "minutes") return false;
-  return t.kind === "track" || !upcoming || upcoming.album_id !== current.album_id;
+  return t.kind === "track" || !upcoming || wraps || upcoming.album_id !== current.album_id;
 }
 
 /**

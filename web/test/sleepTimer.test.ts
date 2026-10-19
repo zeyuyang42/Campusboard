@@ -165,6 +165,62 @@ describe("end of album", () => {
   });
 });
 
+describe("review fixes (#80)", () => {
+  it("end of album stops when repeat-all wraps back into the same album", async () => {
+    const list = tracks(2, { album_id: 5 });
+    h.state().setPlayback({ gapless: false });
+    const el = await h.startPlaying(list);
+    h.state().cycleRepeat();
+    expect(h.state().repeat).toBe("all");
+    h.state().setSleep("album");
+    el.end();
+    expect(h.state()).toMatchObject({ index: 1, wantsPlay: true }); // not the album's end yet
+    const el2 = await playing();
+    at(el2, 95);
+    expect(el2.volume).toBeCloseTo(positionToGain(0.5), 10);
+    el2.end();
+    expectStopped(el2);
+    expect(h.state().index).toBe(0); // wrapped to the start, paused
+  });
+
+  it("end of album with repeat-all on a one-track queue stops too, and no gapless start loops it", async () => {
+    const el = await h.startPlaying(tracks(1));
+    h.state().cycleRepeat();
+    h.state().setSleep("album");
+    at(el, 75);
+    await flush();
+    expect(h.transitionInfo().phase).toBe("idle");
+    el.end();
+    expectStopped(el);
+  });
+
+  it("a track that fails during its end-of-track fade stops the timer instead of playing the next one", async () => {
+    const list = tracks(3);
+    const el = await h.startPlaying(list);
+    h.state().setSleep("track");
+    at(el, 95);
+    el.emit("error"); // retried once with a fresh URL, at the faded level
+    await flush();
+    expect(h.active().volume).toBeLessThan(1);
+    el.emit("error"); // failed again: that is the end of this track
+    await flush();
+    vi.advanceTimersByTime(2000);
+    await flush();
+    expect(h.state()).toMatchObject({ index: 0, wantsPlay: false, sleep: null });
+    expect(h.core.getFreshStreamUrl).not.toHaveBeenCalledWith(list[1].id, expect.anything());
+    expect(h.active().volume).toBe(1);
+  });
+
+  it("the bar's menu offers End of album only in album order (not with shuffle)", async () => {
+    const { sleepMenu } = await import("../src/components/PlayerBar");
+    const album = () => sleepMenu(false).find((i) => "label" in i && i.label === "End of album") as { disabled?: boolean };
+    expect(album().disabled).toBeFalsy();
+    h.state().toggleShuffle();
+    expect(album().disabled).toBe(true);
+    expect(sleepMenu(true).some((i) => "label" in i && i.label === "End of episode")).toBe(true);
+  });
+});
+
 describe("gapless and crossfade (#57)", () => {
   async function preloadNext(el: FakeAudio, sec: number) {
     at(el, sec);
