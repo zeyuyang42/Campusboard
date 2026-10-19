@@ -19,9 +19,9 @@ import { MINI_EVENTS, positionToGain, toggleAction, type Track } from "@bc/core"
 import { FAN_ITEMS_ENDPOINT, fanPageUrl, parseFanItemsResponse, parseFanPage, repos, type FanItem } from "@bc/core";
 
 /**
- * A page timer raced with one timed in Rust: WebKit may stop a page's timers altogether when
- * its window is hidden or covered (the screen locked) and its media is muted (#67), and then
- * a plain setTimeout never fires. The IPC reply still arrives.
+ * A page timer raced with one timed in Rust, for a page whose timers WebKit throttles (hidden
+ * or covered, muted media). When WebKit stops the page outright (#67) neither resolves, which
+ * is what `keep-awake` at the start of the run is for.
  */
 const sleep = (ms: number) => Promise.race([
   new Promise<void>((r) => setTimeout(r, ms)),
@@ -503,14 +503,17 @@ async function transitionCheck(tracks: Track[], s: Step) {
         prevRemainingMs: r(rec.prevRemaining * 1000), startLatencyMs: r(clockStart - rec.at),
         index: [before, usePlayer.getState().index], metadata: !!cur && titleNow === cur.title, title: titleNow,
         listened: Math.round(listenedSeconds() * 10) / 10,
+        sinceHandoverSec: Math.round((performance.now() - rec.at) / 100) / 10,
         released: from !== activeAudio() && !from.getAttribute("src"), phase: transitionInfo().phase,
         playing: !to.paused && usePlayer.getState().status === "playing" && usePlayer.getState().wantsPlay,
         gain: to.volume, ...(fade ? { fade } : {}),
       });
     }
+    // The play counter restarted at the handover: it holds no more than the time since then.
+    // (A fixed `< 4` failed the crossfade, which waits ~4.5 s, by timing alone: 3.9 vs 4.2.)
     const ok = handovers.length === 3 && handovers.every((h, i) =>
       h.happened && h.kind === ["gapless", "gapless", "crossfade"][i] && (h.index as number[])[1] === (h.index as number[])[0] + 1
-      && h.metadata && h.released && h.playing && h.phase === "idle" && (h.listened as number) < 4)
+      && h.metadata && h.released && h.playing && h.phase === "idle" && (h.listened as number) <= (h.sinceHandoverSec as number) + 0.3)
       && !!(handovers[2].fade as { ramps?: boolean } | undefined)?.ramps && !!(handovers[2].fade as { bothPlaying?: boolean } | undefined)?.bothPlaying;
     return { ok, muted: activeAudio().muted, handovers };
   } finally {

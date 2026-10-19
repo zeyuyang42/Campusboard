@@ -270,7 +270,8 @@ fn keep_awake(_win: &tauri::WebviewWindow) -> serde_json::Value {
 
 
 /// Selftest helper (debug builds only): resolve after `ms` (at most 5 min), timed on the Rust
-/// side, for waits that must end even if WebKit has stopped the page's timers (#67).
+/// side, raced with a page timer in the selftest's waits: WebKit throttles a hidden or covered
+/// page's timers (#67).
 #[tauri::command]
 async fn selftest_sleep(ms: u64) -> Result<(), String> {
     if !cfg!(debug_assertions) {
