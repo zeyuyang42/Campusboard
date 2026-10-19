@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { PlayCounter, positionToGain, stepVolume, toggleAction, toggleMute, type CountedPlay, type QueueTrack, type RepeatMode, type Track } from "@bc/core";
+import { audioEventPatch, PlayCounter, swappingAfter, positionToGain, stepVolume, toggleAction, toggleMute, type AudioEventType, type CountedPlay, type QueueTrack, type RepeatMode, type Track } from "@bc/core";
 import { audioEl } from "./audio";
 import { getCore, invalidateQueries } from "../api/core";
 import { friendlyError } from "../lib/errors";
@@ -70,6 +70,11 @@ let loadSeq = 0;
 let beforeMute: number | null = null;
 /** A load() is resolving its stream URL: the element still holds the previous track. */
 let loading = false;
+/**
+ * load() swapped the source of a playing element: the "pause" that can follow is the store's
+ * own, not the listener's or the system's. Cleared by that pause or once the new track plays.
+ */
+let swapping = false;
 
 // Listening history: one PlayCounter follows the current playback (rule in core's playRule.ts).
 const plays = new PlayCounter();
@@ -99,6 +104,7 @@ function load(track: QueueTrack, force = false) {
       const { url } = await core.getFreshStreamUrl(track.id, force);
       if (seq !== loadSeq) return; // a newer load superseded this one
       loading = false;
+      swapping = swappingAfter(swapping, { type: "load", paused: audioEl.paused });
       audioEl.src = url;
       audioEl.load();
       // A retry after a media error continues the same playback; anything else is a fresh one.
@@ -106,6 +112,7 @@ function load(track: QueueTrack, force = false) {
       // A pause pressed while the URL was resolving wins; a play pressed then starts it here.
       if (usePlayer.getState().wantsPlay) {
         await audioEl.play().catch((e: unknown) => {
+          if (seq === loadSeq) swapping = swappingAfter(swapping, { type: "playRejected" });
           // Autoplay refused: nothing will play until the listener asks, so stop intending to.
           if (seq === loadSeq && (e as { name?: unknown } | null)?.name === "NotAllowedError") usePlayer.setState({ wantsPlay: false, status: "paused" });
         });
@@ -333,15 +340,20 @@ audioEl.addEventListener("durationchange", () => {
 // Any jump of the playhead (seek bar, keys, media keys, restore) is not listening; a jump back
 // to the start after the play counted is a manual restart (a fresh playback).
 audioEl.addEventListener("seeking", () => plays.seeked(audioEl.currentTime));
-audioEl.addEventListener("play", () => usePlayer.setState({ status: "playing", wantsPlay: true, error: null }));
-audioEl.addEventListener("playing", () => usePlayer.setState({ status: "playing", wantsPlay: true, error: null }));
-audioEl.addEventListener("pause", () => {
-  if (!audioEl.ended) usePlayer.setState({ status: "paused" });
-});
-// Buffering: the playhead stops, the intent to play doesn't (see toggleAction).
-audioEl.addEventListener("waiting", () => usePlayer.setState({ status: "loading" }));
+// play/playing/pause/waiting: the rules are in core's audioEvents.ts (#55). The element's
+// state is read when the event is handled, so a stale queued event can't undo a pause.
+const onAudioEvent = (type: AudioEventType) => () => {
+  const patch = audioEventPatch(type, { paused: audioEl.paused, ended: audioEl.ended, internal: loading || swapping });
+  if (type === "pause") swapping = swappingAfter(swapping, { type: "pause" });
+  if (type === "playing") swapping = swappingAfter(swapping, { type: "playing", paused: audioEl.paused });
+  if (patch) usePlayer.setState(patch);
+};
+for (const type of ["play", "playing", "pause", "waiting"] as const) audioEl.addEventListener(type, onAudioEvent(type));
+/** audio.paused, for the selftest's record of a toggle (only this module touches the element). */
+export const elementPaused = () => audioEl.paused;
 audioEl.addEventListener("ended", () => usePlayer.getState().next(true));
 audioEl.addEventListener("error", () => {
+  swapping = swappingAfter(swapping, { type: "error" });
   const cur = usePlayer.getState().current();
   if (!cur) return;
   if (retriedFor !== cur.id) {

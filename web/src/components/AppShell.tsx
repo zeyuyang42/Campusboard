@@ -29,14 +29,17 @@ export function AppShell() {
   // Full screen hides the traffic lights, so give the title band back to content.
   useEffect(() => {
     if (!isTauri) return;
+    // The listener arrives after an await: a cleanup that ran first (StrictMode) drops it then.
     let unlisten: (() => void) | undefined;
+    let cancelled = false;
     void import("@tauri-apps/api/window").then(async ({ getCurrentWindow }) => {
       const win = getCurrentWindow();
       const sync = async () => document.documentElement.classList.toggle("is-fullscreen", await win.isFullscreen().catch(() => false));
       await sync();
-      unlisten = await win.onResized(() => { void sync(); });
+      const u = await win.onResized(() => { void sync(); });
+      if (cancelled) u(); else unlisten = u;
     });
-    return () => unlisten?.();
+    return () => { cancelled = true; unlisten?.(); };
   }, []);
   return (
     <>

@@ -9,6 +9,7 @@ export {
 } from "./services/nowPlaying.js";
 export { toggleAction, type ToggleAction } from "./services/playerToggle.js";
 export { positionToGain, gainToPosition, stepVolume, toggleMute, UNMUTE_GAIN, VOLUME_STEP } from "./services/volume.js";
+export { audioEventPatch, swappingAfter, type SwapEvent, type AudioEventType, type AudioElementState, type AudioEventPatch } from "./services/audioEvents.js";
 export {
   MINI_EVENTS, parseMiniCommand, parseMiniState, buildMiniState, miniStateKey, MiniStateThrottle, extrapolatePosition, miniLiveAfter,
   type MiniState, type MiniCommand, type MiniTrack, type MiniPalette, type MiniStatus, type MiniSource,

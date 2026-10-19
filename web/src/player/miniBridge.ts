@@ -3,16 +3,26 @@
 // while playing) and maps its commands to player store actions, so the store stays the only
 // owner of the audio element and Now Playing keeps following it. Works with this window
 // hidden: closing it only hides it and its page keeps running.
-import { buildMiniState, MINI_EVENTS, miniLiveAfter, MiniStateThrottle, parseMiniCommand, type MiniCommand } from "@bc/core";
-import { usePlayer } from "./store";
+import { buildMiniState, MINI_EVENTS, miniLiveAfter, MiniStateThrottle, parseMiniCommand, toggleAction, type MiniCommand, type ToggleAction } from "@bc/core";
+import { elementPaused, usePlayer } from "./store";
 import { useTheme } from "../theme/store";
 import { appliedPalette, onPaletteChange } from "../theme/usePalette";
 import { createBus, type MiniBus } from "../mini/bus";
 import { isTauri } from "../lib/env";
 
-const info = { live: false, hellos: 0, byes: 0, sent: 0, commands: 0, rejected: 0, lastCommand: null as string | null };
+interface ToggleRecord { status: string; wantsPlay: boolean; paused: boolean }
+const info = {
+  live: false, hellos: 0, byes: 0, sent: 0, commands: 0, rejected: 0, lastCommand: null as string | null,
+  /** The last toggle: the state it saw, what it decided and the state right after (selftest). */
+  lastToggle: null as { before: ToggleRecord; decision: ToggleAction; after: ToggleRecord } | null,
+};
 /** Counters for the selftest. */
 export const miniBridgeInfo = () => ({ ...info });
+
+const record = (): ToggleRecord => {
+  const s = usePlayer.getState();
+  return { status: s.status, wantsPlay: s.wantsPlay, paused: elementPaused() };
+};
 
 async function showMain() {
   if (!isTauri) { window.focus(); return; }
@@ -28,7 +38,13 @@ function run(cmd: MiniCommand, sendNow: () => void) {
   switch (cmd.type) {
     case "hello": info.hellos++; sendNow(); return;
     case "bye": info.byes++; return;
-    case "toggle": p.toggle(); return;
+    case "toggle": {
+      const before = record();
+      const decision = toggleAction(p.status, p.wantsPlay);
+      p.toggle();
+      info.lastToggle = { before, decision, after: record() };
+      return;
+    }
     case "play": p.play(); return;
     case "pause": p.pause(); return;
     case "next": p.next(); return;

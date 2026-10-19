@@ -47,9 +47,10 @@ export async function setTall(tall: boolean): Promise<void> {
  * (⌘W itself is handled in Rust, menu.rs `close_window`: AppKit won't performClose: a
  * borderless window.) `onHide` runs first so the main window can stop sending state.
  */
-export async function initMiniWindow(onHide: () => void): Promise<void> {
+export async function initMiniWindow(onHide: () => void): Promise<(() => void) | undefined> {
   const w = await win();
-  if (!w) return;
+  if (!w) return undefined;
   await w.setAlwaysOnTop(savedOnTop()).catch(() => undefined);
-  await w.onCloseRequested((e) => { e.preventDefault(); onHide(); void w.hide(); });
+  // Returns the unlisten so the caller's effect cleanup can drop it (StrictMode runs it twice).
+  return w.onCloseRequested((e) => { e.preventDefault(); onHide(); void w.hide(); });
 }

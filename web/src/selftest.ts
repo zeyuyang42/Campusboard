@@ -429,16 +429,21 @@ async function miniPlayerCheck() {
       for (let t = 0; t < 3000 && !playingNow(); t += 100) await sleep(100);
     }
     const canCheck = wasPlaying && playingNow();
-    const before = usePlayer.getState();
-    out.statusBeforeToggle = before.status;
-    // What the first press must do, from the store's state at that moment (see toggleAction).
-    const expectedFirst = toggleAction(before.status, before.wantsPlay);
-    out.expectedFirst = expectedFirst;
     const c0 = miniBridgeInfo().commands;
     await ask({ do: "click", cmd: "toggle" }); await sleep(900);
-    const firstOk = expectedFirst === "pause"
+    // The bridge records the state the press saw, what it decided (toggleAction) and the state
+    // right after, so a failure says which it was: a wrong decision, a press that didn't act,
+    // or something undoing it in the 900 ms since (a stale play event, #55).
+    const firstToggle = miniBridgeInfo().lastToggle;
+    out.firstToggle = firstToggle;
+    const expectedFirst = firstToggle?.decision ?? null;
+    const decidedRight = !!firstToggle && firstToggle.decision === toggleAction(firstToggle.before.status as never, firstToggle.before.wantsPlay);
+    const actedRight = !!firstToggle && (firstToggle.decision === "pause" ? firstToggle.after.paused && !firstToggle.after.wantsPlay : firstToggle.after.wantsPlay);
+    const heldRight = expectedFirst === "pause"
       ? audioEl.paused && usePlayer.getState().status === "paused" && !usePlayer.getState().wantsPlay
       : usePlayer.getState().wantsPlay;
+    Object.assign(out, { decidedRight, actedRight, heldRight });
+    const firstOk = decidedRight && actedRight && heldRight;
     const paused = audioEl.paused && usePlayer.getState().status === "paused";
     const shownPaused = (await ask({ do: "state" }))?.status === "paused";
     await ask({ do: "click", cmd: "toggle" }); await sleep(1800);
@@ -452,11 +457,15 @@ async function miniPlayerCheck() {
     const rejectsBad = miniBridgeInfo().rejected === rejected0 + 1;
     await ask({ do: "click", cmd: "showMain" }); await sleep(800);
     const mainShown = await win.isVisible();
+    // Exactly the four sent (toggle, toggle, seek, showMain): a doubled listener in either
+    // window doubles every press, and two toggles cancel out.
     const commands = miniBridgeInfo().commands - c0;
+    const commandsExact = commands === 4;
     const perms = report?.setOnTop === "ok" && report?.drag === "ok" && report?.sqlDenied === true && report?.commandDenied === true;
     // Without playback (the stream didn't start, or muted media stayed paused while hidden)
     // only the command path and the first press's decision are checked.
-    const playbackOk = firstOk && (canCheck ? paused && shownPaused && resumed && seeked : commands >= 4);
+    // The pause/resume pair is only checked when the first press paused a playing track.
+    const playbackOk = firstOk && commandsExact && (canCheck && expectedFirst === "pause" ? paused && shownPaused && resumed && seeked : true);
 
     // Menu actions reach this page only from Rust (menu.rs `dispatch`): a `menu` event
     // emitted by the mini window does nothing, the real handler does.
@@ -502,7 +511,7 @@ async function miniPlayerCheck() {
     Object.assign(out, {
       opened, titleOk, wasPlaying, canCheck, firstOk,
       ...(canCheck ? { paused, shownPaused, resumed, seeked } : { paused: "skipped (muted)", shownPaused: "skipped (muted)", resumed: "skipped (muted)", seeked: "skipped (muted)" }),
-      rejectsBad, mainShown, commands, perms,
+      rejectsBad, mainShown, commands, commandsExact, perms,
       forgedMenuIgnored, menuDispatched, controlActed, controlKeptHidden,
       liveBeforeClose, miniClosed, mainUntouched, liveAfterClose, playingWhileHidden, quietWhileHidden, liveAfterReshow, reshowTitleOk, mainCloseHides,
       info: miniBridgeInfo(),

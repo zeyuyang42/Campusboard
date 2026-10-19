@@ -58,8 +58,9 @@ function useMiniState() {
     // Hidden: the main window stops sending state until the next hello.
     const onVis = () => send({ type: document.visibilityState === "visible" ? "hello" : "bye" });
     document.addEventListener("visibilitychange", onVis);
-    void initMiniWindow(() => send({ type: "bye" }));
-    return () => { cancelled = true; off?.(); document.removeEventListener("visibilitychange", onVis); };
+    let offClose: (() => void) | undefined;
+    void initMiniWindow(() => send({ type: "bye" })).then((u) => { if (cancelled) u?.(); else offClose = u; });
+    return () => { cancelled = true; off?.(); offClose?.(); document.removeEventListener("visibilitychange", onVis); };
   }, []);
   return st;
 }
@@ -163,10 +164,14 @@ function useSelftestHook(s: MiniState | null) {
   latest.current = s;
   useEffect(() => {
     if (import.meta.env.VITE_SELFTEST !== "1") return;
+    // StrictMode runs this effect twice: the first run's cleanup happens before its listener
+    // exists, so the listener checks `cancelled` once registered (a second listener would
+    // press every button twice).
     let off: (() => void) | null = null;
+    let cancelled = false;
     void (async () => {
       const b = bus ?? (await createBus("main"));
-      off = await b.on("mini:selftest", async (payload) => {
+      const unlisten = await b.on("mini:selftest", async (payload) => {
         const req = payload as { do?: string; cmd?: string; sec?: number; id?: number };
         if (req.do === "click") (document.querySelector(`[data-cmd="${String(req.cmd)}"]`) as HTMLButtonElement | null)?.click();
         if (req.do === "seek" && typeof req.sec === "number") send({ type: "seek", sec: req.sec });
@@ -193,7 +198,9 @@ function useSelftestHook(s: MiniState | null) {
         }
         await b.send("mini:selftest-result", report);
       });
+      if (cancelled) { unlisten(); return; }
+      off = unlisten;
     })();
-    return () => off?.();
+    return () => { cancelled = true; off?.(); };
   }, []);
 }
