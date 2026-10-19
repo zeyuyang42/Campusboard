@@ -1,6 +1,6 @@
 [package]
 name = "bandcamp-player"
-version = "0.3.0"
+version = "0.4.0"
 description = "Personal Bandcamp player"
 authors = ["Bandcamp Player contributors"]
 edition = "2021"
