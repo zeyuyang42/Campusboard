@@ -15,6 +15,10 @@ export {
   fadeProgress, crossfadeGains, IDLE as TRANSITION_IDLE, transitionAfter, preloadStale, standbyUsable, elementRole, routeElementEvent,
   type PlaybackSettings, type TransitionKind, type TransitionState, type TransitionEvent, type ElementRole, type ElementEventType,
 } from "./services/transition.js";
+export {
+  sleepTimerFor, sleepChoiceOf, sleepStopsAtEnd, sleepSecondsLeft, sleepScale, sleepGain, formatSleepLeft, SLEEP_MINUTES, SLEEP_FADE_SEC,
+  type SleepChoice, type SleepTimer,
+} from "./services/sleepTimer.js";
 export { audioEventPatch, swappingAfter, type SwapEvent, type AudioEventType, type AudioElementState, type AudioEventPatch } from "./services/audioEvents.js";
 export {
   MINI_EVENTS, parseMiniCommand, parseMiniState, buildMiniState, miniStateKey, MiniStateThrottle, extrapolatePosition, miniLiveAfter,

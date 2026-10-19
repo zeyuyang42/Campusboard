@@ -1,6 +1,6 @@
 // Bridge from the native menu bar (src-tauri/src/menu.rs) to app actions.
 // Rust runs window.__bcMenu(<item id>) in the main webview (see initAppMenu).
-import { VOLUME_STEP } from "@bc/core";
+import { VOLUME_STEP, type SleepChoice } from "@bc/core";
 import { isTauri } from "./env";
 import { usePlayer } from "../player/store";
 import { useUi } from "../ui/store";
@@ -27,6 +27,8 @@ const actions: Record<string, () => void> = {
   "shuffle": () => usePlayer.getState().toggleShuffle(),
   "repeat": () => usePlayer.getState().cycleRepeat(),
   "shortcuts": () => navigateTo("/settings#shortcuts"),
+  // Controls > Sleep Timer (#70)
+  ...Object.fromEntries((["off", 15, 30, 45, 60, "track", "album"] as SleepChoice[]).map((c) => [`sleep:${c}`, () => usePlayer.getState().setSleep(c)])),
 };
 
 export function runMenuAction(id: string): boolean {

@@ -238,6 +238,7 @@ details.about-wrap summary { cursor: pointer; color: var(--text-muted); margin-t
 .right { display: flex; align-items: center; justify-content: flex-end; gap: 4px; min-width: 0; }
 .vol { display: flex; align-items: center; gap: 4px; width: 130px; }
 .vol input[type=range] { width: 100%; accent-color: var(--accent); }
+.sleep-left { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .player .error-pill { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% + 10px); background: var(--danger); color: #fff; padding: 6px 12px; border-radius: 999px; font-size: 13px; white-space: nowrap; }
 
 /* ---------- queue drawer ---------- */

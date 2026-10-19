@@ -125,3 +125,17 @@ describe("commands map to store actions", () => {
     expect(focus).toHaveBeenCalled();
   });
 });
+
+describe("the sleep timer (#70)", () => {
+  it("adds nothing to the mini window: its countdown sends no state", () => {
+    h.state().hydrate({ queue: [h.toQueueTrack(track({ title: "Song" }))], index: 0, position: 3, volume: 1, shuffle: false, repeat: "off" });
+    command({ type: "hello" });
+    const n = stateSends().length;
+    h.state().setSleep(15);
+    vi.advanceTimersByTime(5000);
+    expect(h.state().sleepLeft).toBe(895);
+    expect(stateSends()).toHaveLength(n);
+    expect(JSON.stringify(stateSends().at(-1)![1])).not.toMatch(/sleep/i);
+    h.state().setSleep("off");
+  });
+});

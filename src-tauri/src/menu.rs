@@ -99,6 +99,23 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             &sep()?,
             &item(app, "shuffle", "Shuffle", Some("CmdOrCtrl+Shift+S"))?,
             &item(app, "repeat", "Repeat", Some("CmdOrCtrl+Shift+R"))?,
+            &sep()?,
+            &Submenu::with_items(
+                app,
+                "Sleep Timer",
+                true,
+                &[
+                    &item(app, "sleep:off", "Off", None)?,
+                    &sep()?,
+                    &item(app, "sleep:15", "15 Minutes", None)?,
+                    &item(app, "sleep:30", "30 Minutes", None)?,
+                    &item(app, "sleep:45", "45 Minutes", None)?,
+                    &item(app, "sleep:60", "60 Minutes", None)?,
+                    &sep()?,
+                    &item(app, "sleep:track", "End of Track", None)?,
+                    &item(app, "sleep:album", "End of Album", None)?,
+                ],
+            )?,
         ],
     )?;
 
@@ -127,7 +144,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 }
 
 /// Playback items act on the player wherever the user is (the mini window included),
-/// so they don't bring the main window forward.
+/// so they don't bring the main window forward. So do the Sleep Timer items (`sleep:*`).
 const CONTROLS: &[&str] = &["play-pause", "next", "previous", "volume-up", "volume-down", "shuffle", "repeat"];
 
 /// What a custom menu item (app menu or menu-bar icon) does.
@@ -153,7 +170,7 @@ fn route(id: &str) -> Route {
         crate::tray::SHOW_ID => Route::ShowMain,
         crate::tray::TRACK_ID => Route::Ignore,
         _ if id.starts_with("close-window") => Route::Close,
-        _ if CONTROLS.contains(&id) => Route::Control,
+        _ if CONTROLS.contains(&id) || id.starts_with("sleep:") => Route::Control,
         _ => Route::Raise,
     }
 }
@@ -291,6 +308,8 @@ mod tests {
         assert_eq!(route("settings"), Route::Raise);
         assert_eq!(route("nav:library"), Route::Raise);
         assert_eq!(route("volume-up"), Route::Control);
+        assert_eq!(route("sleep:30"), Route::Control);
+        assert_eq!(route("sleep:off"), Route::Control);
     }
 
     #[test]

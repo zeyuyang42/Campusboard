@@ -1,13 +1,41 @@
 import { Link } from "react-router-dom";
-import { toggleAction } from "@bc/core";
+import { formatSleepLeft, sleepChoiceOf, toggleAction, type SleepChoice } from "@bc/core";
 import { usePlayer } from "../player/store";
 import { ArtImage } from "./ArtImage";
 import { NextIcon, PauseIcon, PlayIcon, PrevIcon, QueueIcon, RepeatIcon, RepeatOneIcon, ShuffleIcon, VolumeIcon } from "./Icons";
 import { SeekBar } from "./SeekBar";
 import { useUi } from "../ui/store";
-import { ExpandIcon, MenuIcon, MiniPlayerIcon } from "./Icons";
+import { ClockIcon, ExpandIcon, MenuIcon, MiniPlayerIcon } from "./Icons";
+import { openMenuFromEvent, type MenuItem } from "../ui/menu";
 import { toggleMiniPlayer } from "../player/miniBridge";
 import { useRadioNow } from "../player/radio";
+
+/** The sleep timer's choices (#70), as the clock button's menu lists them. */
+export function sleepMenu(radio: boolean): MenuItem[] {
+  const { sleep, setSleep, shuffle } = usePlayer.getState();
+  const chosen = sleepChoiceOf(sleep);
+  const opt = (choice: SleepChoice, label: string): MenuItem => ({ label, hint: chosen === choice ? "✓" : undefined, onSelect: () => setSleep(choice) });
+  return [
+    { kind: "label", label: "Sleep timer" },
+    opt("off", "Off"),
+    { kind: "separator" },
+    opt(15, "15 minutes"), opt(30, "30 minutes"), opt(45, "45 minutes"), opt(60, "60 minutes"),
+    { kind: "separator" },
+    opt("track", radio ? "End of episode" : "End of track"),
+    // In shuffled order the next track is almost never from the same album, so "end of
+    // album" would mean the end of this track: offered only in album order.
+    shuffle && chosen !== "album" ? { label: "End of album", disabled: true, hint: "not with shuffle", onSelect: () => undefined } : opt("album", "End of album"),
+  ];
+}
+
+/** What is left on the timer, quietly, next to its button. */
+function SleepLeft({ radio }: { radio: boolean }) {
+  const sleep = usePlayer((p) => p.sleep);
+  const left = usePlayer((p) => p.sleepLeft);
+  if (!sleep) return null;
+  const text = sleep.kind === "minutes" ? formatSleepLeft(left ?? sleep.minutes * 60) : sleep.kind === "track" ? (radio ? "end of episode" : "end of track") : "end of album";
+  return <span className="sleep-left">{text}</span>;
+}
 
 export function PlayerBar() {
   const s = usePlayer();
@@ -54,6 +82,8 @@ export function PlayerBar() {
           <button className="icon-btn" onClick={s.toggleMute} title="Mute"><VolumeIcon muted={s.volume === 0} /></button>
           <input type="range" min={0} max={1} step={0.01} value={s.volume} aria-label="Volume" onChange={(e) => s.setVolume(Number(e.target.value))} />
         </div>
+        <SleepLeft radio={!!cur?.radio} />
+        <button className={`icon-btn ${s.sleep ? "on" : ""}`} title="Sleep timer" aria-label="Sleep timer" aria-haspopup="menu" onClick={(e) => openMenuFromEvent(e, { items: sleepMenu(!!cur?.radio) })}><ClockIcon /></button>
         <button className="icon-btn" title="Mini player (⌘⇧M)" onClick={() => void toggleMiniPlayer().catch(() => undefined)}><MiniPlayerIcon /></button>
         <button className={`icon-btn ${s.queueOpen ? "on" : ""}`} title="Queue (Q)" onClick={() => s.setQueueOpen(!s.queueOpen)}><QueueIcon /></button>
         <button className={`icon-btn keep ${nowPlayingOpen ? "on" : ""}`} title="Now playing (N)" disabled={!cur} onClick={() => setNowPlayingOpen(!nowPlayingOpen)}><ExpandIcon /></button>
