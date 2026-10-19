@@ -10,3 +10,4 @@ export * from "./fanItems.js";
 export * from "./plays.js";
 export * from "./releases.js";
 export * from "./importPending.js";
+export * from "./albumNotes.js";

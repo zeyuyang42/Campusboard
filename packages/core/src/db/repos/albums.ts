@@ -24,6 +24,9 @@ const ALBUM_PLAYS = "FROM plays p JOIN tracks t ON t.id = p.track_id WHERE t.alb
 const PLAY_COUNT = `(SELECT COUNT(*) ${ALBUM_PLAYS})`;
 const LAST_PLAYED = `(SELECT MAX(p.played_at) ${ALBUM_PLAYS})`;
 
+/** The album's star rating (#73), 0 when unrated. */
+const RATING = "COALESCE((SELECT n.rating FROM album_notes n WHERE n.album_id = al.id), 0)";
+
 /** Every album column the UI uses; ends with the FROM/JOIN so callers can add joins and WHERE. */
 export const ALBUM_SELECT = `
   SELECT al.*, ar.name AS artist_name, ${WISHLISTED} AS wishlisted,
@@ -31,13 +34,14 @@ export const ALBUM_SELECT = `
     (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id AND t.streamable = 1) AS streamable_count,
     ${PLAY_COUNT} AS play_count,
     ${LAST_PLAYED} AS last_played_at,
-    (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id AND t.local_path IS NOT NULL) AS downloaded_count
+    (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id AND t.local_path IS NOT NULL) AS downloaded_count,
+    ${RATING} AS rating
   FROM albums al JOIN artists ar ON ar.id = al.artist_id`;
 
-export type AlbumFilter = "all" | "purchased" | "wishlist" | "downloaded";
+export type AlbumFilter = "all" | "purchased" | "wishlist" | "downloaded" | "rated";
 /** Albums with at least one offline copy (#2). */
 const DOWNLOADED = "EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND t.local_path IS NOT NULL)";
-const FILTERS: Record<AlbumFilter, string | null> = { all: null, purchased: "al.owned = 1", wishlist: WISHLISTED, downloaded: DOWNLOADED };
+const FILTERS: Record<AlbumFilter, string | null> = { all: null, purchased: "al.owned = 1", wishlist: WISHLISTED, downloaded: DOWNLOADED, rated: `${RATING} > 0` };
 
 // Bandcamp release dates are stored as sent ("01 Oct 2021 00:00:00 GMT"), which does not
 // sort as text. This turns them into YYYY + month position + DD; NULL stays NULL (last in DESC).
@@ -49,7 +53,7 @@ export const RELEASE_KEY = `(substr(al.release_date, 8, 4) || printf('%02d', ins
  * its ORDER BY in sorts(). "played" and "plays" put never-played albums last, newest first
  * (NULL sorts last in DESC).
  */
-export const ALBUM_SORTS = ["added", "played", "plays", "artist", "title", "release"] as const;
+export const ALBUM_SORTS = ["added", "played", "plays", "artist", "title", "release", "rating"] as const;
 export type AlbumSort = (typeof ALBUM_SORTS)[number];
 
 /**
@@ -64,6 +68,8 @@ const sorts = (plays = "play_count", last = "last_played_at"): Record<AlbumSort,
   artist: `ar.name COLLATE NOCASE, ${RELEASE_KEY} DESC, al.id DESC`,
   title: "al.title COLLATE NOCASE, ar.name COLLATE NOCASE, al.id",
   release: `${RELEASE_KEY} DESC, al.title COLLATE NOCASE, al.id`,
+  // Highest first; unrated albums last, newest first among equals.
+  rating: `${RATING} DESC, al.created_at DESC, al.id DESC`,
 });
 const SORTS = sorts();
 const INLINE_SORTS = sorts(PLAY_COUNT, LAST_PLAYED);
@@ -137,6 +143,8 @@ export async function deleteAlbum(db: Db, id: number): Promise<boolean> {
   // A purchased or wishlisted release the user removes stays out on later syncs.
   await dismissAlbum(db, id);
   const r = await db.run("DELETE FROM albums WHERE id = ?", [id]);
+  // The foreign key cascades this; also right with foreign keys off (vacuumOrphans catches the rest).
+  await db.run("DELETE FROM album_notes WHERE album_id = ?", [id]);
   await db.run("DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM albums)");
   return r.changes > 0;
 }

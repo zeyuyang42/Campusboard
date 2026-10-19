@@ -13,7 +13,7 @@ import { getSetting, setSetting } from "../db/repos/settings.js";
 import { recomputeOwned } from "../db/repos/fanItems.js";
 import { addPending, resolvePending, type PendingRow } from "../db/repos/importPending.js";
 import { normalizePlaylistName } from "../db/repos/playlists.js";
-import { ALBUM_SORTS } from "../db/repos/albums.js";
+import { addPendingNotes, exportAlbumNotes, NOTE_MAX, RATING_MAX } from "../db/repos/albumNotes.js";
 import { isBandcampHost, normalizeBandcampUrl } from "../scrape/url.js";
 import { normalizeFanUsername } from "../scrape/fan.js";
 import { releasePath } from "../db/repos/releases.js";
@@ -74,7 +74,19 @@ const PlaylistSchema = z.object({
 
 const PlaySchema = TrackRefSchema.extend({ played_at: sqlTime, seconds: z.number().min(0).max(86_400) });
 
-const LibraryViewSchema = z.object({ sort: z.enum(ALBUM_SORTS), filter: z.enum(["all", "purchased", "wishlist"]) });
+/**
+ * The sorts and filters a version 1 file may carry. Fixed, not ALBUM_SORTS: a newer sort
+ * (Rating, #73) would make older builds refuse the whole file, so such a view isn't exported.
+ */
+const LibraryViewSchema = z.object({ sort: z.enum(["added", "played", "plays", "artist", "title", "release"]), filter: z.enum(["all", "purchased", "wishlist"]) });
+
+/** An album's note and rating (#73), by album URL. Older builds drop the whole field. */
+const NoteSchema = z.object({
+  album_url: httpsUrl,
+  rating: z.number().int().min(0).max(RATING_MAX),
+  note: str(NOTE_MAX * 2), // UTF-16 units; the repo keeps NOTE_MAX characters
+  updated_at: sqlTime,
+});
 
 export const LibraryExportSchema = z.object({
   format: z.literal(LIBRARY_FORMAT),
@@ -102,6 +114,8 @@ export const LibraryExportSchema = z.object({
     theme: z.object({ theme: z.unknown(), basePreset: str(100).optional(), mode: z.literal("system").optional() }).nullable(),
     library_view: LibraryViewSchema.nullable(),
   }),
+  /** Added after version 1 shipped; optional so older files still parse. */
+  notes: z.array(NoteSchema).max(MAX_ITEMS).optional(),
   account: z.object({
     username: str(100).nullable().refine((u) => {
       if (u === null) return true;
@@ -214,6 +228,7 @@ export async function exportLibrary(db: Db, opts: { history?: boolean; appVersio
       library_view: view.success ? view.data : null,
     },
     account: { username: account?.username ?? null },
+    notes: await exportAlbumNotes(db),
   };
 }
 
@@ -344,6 +359,8 @@ export interface LibraryImportPreview {
    * and how many albums carry a Purchased or Wishlist mark.
    */
   account: { username: string | null; applies: boolean; marks: number };
+  /** Album notes and ratings in the file (#73). */
+  notes: number;
 }
 
 function accountApplies(s: LibraryState, data: LibraryExport): boolean {
@@ -371,6 +388,7 @@ export async function previewLibraryImport(db: Db, data: LibraryExport): Promise
     settings: { theme: !!data.settings.theme, libraryView: !!data.settings.library_view },
     newReleases: { muted: data.new_releases.muted.length, dismissed: data.new_releases.dismissed.length },
     account: { username: data.account.username, applies: accountApplies(s, data), marks: data.albums.filter((a) => a.owned || a.wishlisted).length },
+    notes: data.notes?.length ?? 0,
   };
 }
 
@@ -455,6 +473,17 @@ export async function importLibrary(db: Db, runner: JobRunner, data: LibraryExpo
       return url ? [{ kind: "dismissed", band_id: d.band_id, release_url: url, item_type: d.item_type, title: d.title, art_id: d.art_id, artist_override: d.artist_override }] : [];
     }),
   ]);
+
+  // Notes and ratings wait by album URL and merge as their albums arrive: a local edit that
+  // is as new or newer is kept (#73). Only addresses an album here could have.
+  if (data.notes?.length) {
+    // Matched by the address as exported (al.url), like playlist entries and plays. A time
+    // after the export or after now (a clock ahead, a hand-edited file) is capped, so it
+    // can't win over every later local edit.
+    const exported = new Date(data.exported_at);
+    const cap = [now(), ...(Number.isNaN(exported.getTime()) ? [] : [exported.toISOString().replace("T", " ").slice(0, 19)])].sort()[0];
+    await addPendingNotes(db, data.notes.filter((n) => safeReleaseUrl(n.album_url)).map((n) => (n.updated_at > cap ? { ...n, updated_at: cap } : n)));
+  }
 
   const resolved = await resolvePending(db);
 

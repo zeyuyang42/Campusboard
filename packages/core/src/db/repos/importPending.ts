@@ -1,5 +1,6 @@
 import type { Db } from "../Db.js";
 import { now, valuesList } from "../Db.js";
+import { mergePendingNotes } from "./albumNotes.js";
 
 /**
  * What a library file asked for that waits on an album, track or artist arriving here
@@ -55,6 +56,7 @@ const TID = `COALESCE(
  * and plays were added.
  */
 export async function resolvePending(db: Db, albumId?: number): Promise<{ tracks: number; plays: number }> {
+  await mergePendingNotes(db, albumId); // album notes wait in their own table (#73)
   if (!(await db.get("SELECT 1 AS x FROM import_pending LIMIT 1"))) return { tracks: 0, plays: 0 };
   let T = "";
   let tp: unknown[] = [];
@@ -122,13 +124,14 @@ export async function resolvePending(db: Db, albumId?: number): Promise<{ tracks
   return { tracks, plays };
 }
 
-export interface PendingCount { tracks: number; plays: number; other: number }
+export interface PendingCount { tracks: number; plays: number; other: number; notes: number }
 
 /** How much of an imported library still waits for its albums. */
 export async function countPending(db: Db): Promise<PendingCount> {
   const rows = await db.select<{ kind: string; n: number }>("SELECT kind, COUNT(*) AS n FROM import_pending GROUP BY kind");
   const n = (k: string) => rows.find((r) => r.kind === k)?.n ?? 0;
-  return { tracks: n("playlist_track"), plays: n("play"), other: n("mute") + n("dismissed") };
+  const notes = (await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM album_notes_pending"))?.n ?? 0;
+  return { tracks: n("playlist_track"), plays: n("play"), other: n("mute") + n("dismissed"), notes };
 }
 
 /** Forget waiting plays (Clear history), so they can't come back when their albums arrive. */
@@ -138,5 +141,6 @@ export async function clearPendingPlays(db: Db): Promise<number> {
 
 /** Stop waiting: forget everything still pending. */
 export async function clearPending(db: Db): Promise<number> {
-  return (await db.run("DELETE FROM import_pending")).changes;
+  const notes = (await db.run("DELETE FROM album_notes_pending")).changes;
+  return notes + (await db.run("DELETE FROM import_pending")).changes;
 }

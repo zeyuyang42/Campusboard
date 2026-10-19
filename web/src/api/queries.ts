@@ -5,6 +5,8 @@ import { repos, type Job, type PlayState } from "@bc/core";
 export const keys = {
   albums: (sort: string, filter = "all", q = "") => ["albums", sort, filter, q] as const,
   album: (id: number) => ["album", id] as const,
+  // Under "album" so a refresh or an imported library (which invalidate "album") reload it.
+  albumNote: (id: number) => ["album", id, "note"] as const,
   artists: ["artists"] as const,
   artist: (id: number) => ["artist", id] as const,
   tracks: (q: string) => ["tracks", q] as const,
@@ -40,7 +42,7 @@ export const useAlbums = (sort: string, filter = "all", q = "") =>
 export type LibraryView = { sort: repos.AlbumSort; filter: repos.AlbumFilter };
 const LIBRARY_VIEW_KEY = "library_view";
 const DEFAULT_VIEW: LibraryView = { sort: "added", filter: "all" };
-const FILTERS: readonly string[] = ["all", "purchased", "wishlist", "downloaded"] satisfies repos.AlbumFilter[];
+const FILTERS: readonly string[] = ["all", "purchased", "wishlist", "downloaded", "rated"] satisfies repos.AlbumFilter[];
 
 function toLibraryView(v: unknown): LibraryView {
   const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
@@ -148,6 +150,38 @@ export function usePlaylistMutations() {
     addTracks: useMutation({ mutationFn: async ({ id, trackIds }: { id: number; trackIds: number[] }) => (await core()).addToPlaylist(id, trackIds), onSuccess: (_d, v) => inv(v.id) }),
     reorder: useMutation({ mutationFn: async ({ id, ids }: { id: number; ids: number[] }) => (await core()).reorderPlaylist(id, ids), onSuccess: (_d, v) => inv(v.id) }),
     removeTrack: useMutation({ mutationFn: async ({ id, ptid }: { id: number; ptid: number }) => (await core()).removeFromPlaylist(id, ptid), onSuccess: (_d, v) => inv(v.id) }),
+  };
+}
+
+/** Your note and rating for an album (#73). */
+export const useAlbumNote = (id: number) => useQuery({ queryKey: keys.albumNote(id), queryFn: async () => (await core()).albumNote(id), enabled: id > 0 });
+
+// Rating and note writes of one album run one after another: the SQL plugin pools
+// connections, so two quick upserts could otherwise commit out of order.
+const noteWrites = new Map<number, Promise<unknown>>();
+function serialWrite<T>(albumId: number, fn: () => Promise<T>): Promise<T> {
+  const run = (noteWrites.get(albumId) ?? Promise.resolve()).then(fn, fn);
+  const tail = run.catch(() => undefined);
+  noteWrites.set(albumId, tail);
+  void tail.then(() => { if (noteWrites.get(albumId) === tail) noteWrites.delete(albumId); });
+  return run;
+}
+
+/**
+ * Save a rating or a note. The cache takes the new value at once (also for the save made as
+ * the page goes away), so the album page shows it on return before any refetch; it is read
+ * back from the database once the write is done, or failed. The Library's Rating sort and
+ * Rated filter follow a rating.
+ */
+export function useAlbumNoteWriter(id: number) {
+  const qc = useQueryClient();
+  const write = (patch: Partial<repos.AlbumNote>, fn: (c: Awaited<ReturnType<typeof core>>) => Promise<unknown>) => {
+    qc.setQueryData<repos.AlbumNote | null>(keys.albumNote(id), (old) => ({ rating: 0, note: "", updated_at: "", ...(old ?? {}), ...patch }));
+    return serialWrite(id, async () => fn(await core())).finally(() => { void qc.invalidateQueries({ queryKey: keys.albumNote(id) }); });
+  };
+  return {
+    setRating: (rating: number) => write({ rating }, (c) => c.setAlbumRating(id, rating)).then(() => { void qc.invalidateQueries({ queryKey: ["albums"] }); }),
+    setNote: (note: string) => write({ note }, (c) => c.setAlbumNote(id, note)),
   };
 }
 
