@@ -3,18 +3,27 @@ import { z } from "zod";
 const Hex = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Colors must be 6-digit hex like #23262D");
 const FontName = z.string().trim().min(1).max(80).regex(/^[A-Za-z0-9 ,'\-]+$/, "Font names may only contain letters, digits, spaces, commas, apostrophes and hyphens");
 
+export const PaletteSchema = z.object({
+  surface: Hex,
+  surfaceRaised: Hex,
+  text: Hex,
+  textMuted: Hex,
+  accent: Hex,
+  danger: Hex,
+});
+
 export const ThemeSchema = z.object({
   version: z.literal(1),
   name: z.string().trim().min(1).max(40),
-  mode: z.enum(["dark", "light"]),
-  palette: z.object({
-    surface: Hex,
-    surfaceRaised: Hex,
-    text: Hex,
-    textMuted: Hex,
-    accent: Hex,
-    danger: Hex,
-  }),
+  /** "system" follows the Mac's appearance and needs both paletteDark and paletteLight. */
+  mode: z.enum(["dark", "light", "system"]),
+  /** The palette of a dark or light theme. For "system", a copy of the side last picked or edited. */
+  palette: PaletteSchema,
+  /** Optional light/dark pair, kept across mode switches so "system" always has both sides. */
+  paletteDark: PaletteSchema.optional(),
+  paletteLight: PaletteSchema.optional(),
+  /** "high" holds the art-derived accent to WCAG AAA (7:1) against the surface. */
+  contrast: z.enum(["standard", "high"]).default("standard"),
   radius: z.number().min(0).max(24),
   density: z.enum(["comfortable", "compact"]),
   fonts: z.object({ display: FontName, ui: FontName }),
@@ -33,9 +42,60 @@ export const ThemeSchema = z.object({
       message: "a background file must be a plain file name", path: ["value"],
     })
     .default({ source: "none", value: "", blur: 12, dim: 0.5 }),
+}).refine((t) => t.mode !== "system" || (t.paletteDark && t.paletteLight), {
+  message: "a system theme needs both paletteDark and paletteLight", path: ["mode"],
 });
 
 export type Theme = z.infer<typeof ThemeSchema>;
+export type Palette = z.infer<typeof PaletteSchema>;
+export type Appearance = "dark" | "light";
+/** A theme settled to one appearance: what applyTheme paints and the mini window receives. */
+export type ResolvedTheme = Theme & { mode: Appearance };
+
+/** Settle a theme for the current system appearance. Pure: mode + appearance in, palette out. */
+export function resolveTheme(t: Theme, systemDark: boolean): ResolvedTheme {
+  if (t.mode !== "system") return t as ResolvedTheme;
+  const mode: Appearance = systemDark ? "dark" : "light";
+  const palette = (mode === "dark" ? t.paletteDark : t.paletteLight) ?? t.palette;
+  return { ...t, mode, palette };
+}
+
+type Pair = Pick<Theme, "paletteDark" | "paletteLight">;
+
+/**
+ * Switch a theme's mode. A stored pair supplies the new side's palette; a side the theme
+ * lacks comes from the palette on screen (same appearance) or `fallback` (the other one).
+ */
+export function withMode(t: Theme, mode: Theme["mode"], systemDark: boolean, fallback: Required<Pair>): Theme {
+  const shown = resolveTheme(t, systemDark);
+  const paletteDark = t.paletteDark ?? (shown.mode === "dark" ? shown.palette : fallback.paletteDark);
+  const paletteLight = t.paletteLight ?? (shown.mode === "light" ? shown.palette : fallback.paletteLight);
+  const dark = mode === "system" ? systemDark : mode === "dark";
+  return { ...t, mode, paletteDark, paletteLight, palette: dark ? paletteDark : paletteLight };
+}
+
+/** Edit the colors on screen: `palette`, plus the matching side of the pair when there is one. */
+export function withPalette(t: Theme, patch: Partial<Palette>, systemDark: boolean): Theme {
+  const shown = resolveTheme(t, systemDark);
+  const palette = { ...shown.palette, ...patch };
+  const side = shown.mode === "dark" ? "paletteDark" : "paletteLight";
+  return { ...t, palette, ...(t[side] ? { [side]: palette } : {}) };
+}
+
+/**
+ * A system theme as the dark or light theme its `palette` holds (pair kept), which builds
+ * before system themes accept. `followSystem` turns it back into a system theme.
+ */
+export function toPortable(t: Theme): Theme {
+  if (t.mode !== "system") return t;
+  return { ...t, mode: JSON.stringify(t.palette) === JSON.stringify(t.paletteLight) ? "light" : "dark" };
+}
+export function followSystem(t: Theme): Theme {
+  return t.paletteDark && t.paletteLight ? { ...t, mode: "system" } : t;
+}
+
+/** Minimum accent contrast against the surface: AAA (7:1) for high contrast, 3:1 (UI) otherwise. */
+export const accentRatio = (t: Pick<Theme, "contrast">): number => (t.contrast === "high" ? 7 : 3);
 
 export interface ThemeParseResult {
   theme?: Theme;

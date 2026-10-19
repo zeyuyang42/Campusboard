@@ -18,7 +18,7 @@ import { isBandcampHost, normalizeBandcampUrl } from "../scrape/url.js";
 import { normalizeFanUsername } from "../scrape/fan.js";
 import { releasePath } from "../db/repos/releases.js";
 import { ACCOUNT_KEY, setUsername } from "./account.js";
-import { parseTheme } from "../theme/schema.js";
+import { followSystem, parseTheme, toPortable } from "../theme/schema.js";
 import { PLAYLIST_NAME_MAX, RELEASE_CHECK_SETTING_KEY } from "../config.js";
 import type { JobRunner } from "./jobRunner.js";
 import type { Job } from "../types.js";
@@ -94,8 +94,12 @@ export const LibraryExportSchema = z.object({
     })).max(MAX_ITEMS),
   }),
   settings: z.object({
-    /** As stored under settings.key='theme'; validated with ThemeSchema on import. */
-    theme: z.object({ theme: z.unknown(), basePreset: str(100).optional() }).nullable(),
+    /**
+     * As stored under settings.key='theme'; validated with ThemeSchema on import. A system theme
+     * is written as its dark or light side plus mode "system" here, so older builds (which
+     * refuse mode "system" and drop the unknown key) still import the library.
+     */
+    theme: z.object({ theme: z.unknown(), basePreset: str(100).optional(), mode: z.literal("system").optional() }).nullable(),
     library_view: LibraryViewSchema.nullable(),
   }),
   account: z.object({
@@ -202,7 +206,11 @@ export async function exportLibrary(db: Db, opts: { history?: boolean; appVersio
     history,
     new_releases: { checks_enabled: checks?.enabled !== false, muted, dismissed },
     settings: {
-      theme: validTheme ? { theme: validTheme, ...(theme?.basePreset ? { basePreset: theme.basePreset } : {}) } : null,
+      theme: validTheme ? {
+        theme: toPortable(validTheme),
+        ...(theme?.basePreset ? { basePreset: theme.basePreset } : {}),
+        ...(validTheme.mode === "system" ? { mode: "system" as const } : {}),
+      } : null,
       library_view: view.success ? view.data : null,
     },
     account: { username: account?.username ?? null },
@@ -415,7 +423,8 @@ export async function importLibrary(db: Db, runner: JobRunner, data: LibraryExpo
   }
 
   if (opts.settings !== false) {
-    const t = data.settings.theme && parseTheme(data.settings.theme.theme).theme;
+    const parsed = data.settings.theme && parseTheme(data.settings.theme.theme).theme;
+    const t = parsed && data.settings.theme?.mode === "system" ? followSystem(parsed) : parsed;
     if (t) await setSetting(db, THEME_SETTING_KEY, { theme: t, basePreset: data.settings.theme?.basePreset ?? t.name });
     if (data.settings.library_view) await setSetting(db, LIBRARY_VIEW_SETTING_KEY, data.settings.library_view);
     await setSetting(db, RELEASE_CHECK_SETTING_KEY, { enabled: data.new_releases.checks_enabled });

@@ -169,6 +169,12 @@ src-tauri/
   continues (`persist.ts` prevents the close and calls `hide()`), the Dock icon
   reopens it (`RunEvent::Reopen` in lib.rs), Cmd+Q quits. Menu accelerators use
   Cmd so they never fight text fields; plain-key shortcuts stay in `shortcuts.ts`.
+- Appearance (#43, selftest `appearance`): `Window.setTheme` sets the NSWindow
+  appearance, which is also what WKWebView's `prefers-color-scheme` reports, so a
+  pinned dark/light theme pins the query too and a system theme must call
+  `setTheme(null)` before it can follow macOS again (`setNativeAppearance` in
+  theme/store.ts). Needs `core:window:allow-set-theme` (main window only; the
+  undecorated mini window gets the theme already resolved from the main window).
 - Hidden window (verified 2026-10-18, selftest `hiddenPlayback`): with the window
   hidden for 20 s while playing, `document.visibilityState` is `hidden` but
   `timeupdate` keeps arriving at the normal rate (80 reports, max gap 254 ms), and

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseTheme, parseThemeJson, PRESETS, DEFAULT_THEME, themeVars, fontStack } from "../src/theme/index.js";
+import { parseTheme, parseThemeJson, PRESETS, DEFAULT_THEME, themeVars, fontStack, resolveTheme } from "../src/theme/index.js";
 import { contrast, ensureContrast, hexToRgb, rgbToOklch, oklchToRgb, rgbToHex } from "../src/theme/color.js";
 
 describe("ThemeSchema", () => {
@@ -28,7 +28,7 @@ describe("ThemeSchema", () => {
 
 describe("themeVars", () => {
   it("emits the full variable set and clamps a low-contrast accent", () => {
-    const v = themeVars({ ...DEFAULT_THEME, palette: { ...DEFAULT_THEME.palette, accent: "#2A2D33" } });
+    const v = themeVars(resolveTheme({ ...PRESETS[0], palette: { ...PRESETS[0].palette, accent: "#2A2D33" } }, true));
     expect(v["--surface"]).toBe("#23262D");
     expect(contrast(hexToRgb(v["--accent-fallback"]), hexToRgb("#23262D"))).toBeGreaterThanOrEqual(3);
     expect(v["--row-h"]).toBe("48px");

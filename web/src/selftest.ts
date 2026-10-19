@@ -15,7 +15,7 @@ import { resendMenuBar } from "./lib/menuBar";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { backupLibraryDatabase, exportLibraryFile } from "./lib/libraryFile";
 import { miniBridgeInfo } from "./player/miniBridge";
-import { MINI_EVENTS, positionToGain, toggleAction, type Track } from "@bc/core";
+import { DEFAULT_THEME, MINI_EVENTS, positionToGain, toggleAction, type Track } from "@bc/core";
 import { FAN_ITEMS_ENDPOINT, fanPageUrl, parseFanItemsResponse, parseFanPage, repos, type FanItem } from "@bc/core";
 
 /**
@@ -349,6 +349,40 @@ async function windowCheck(s: Step) {
   const result = { maximized, minimized, hidden: visibleWhileHidden === false, visibleAgain, focused, errors };
   // `focused` is informational: a background terminal can keep focus from the window.
   return { ok: Object.keys(errors).length === 0 && maximized === true && minimized === true && result.hidden && visibleAgain === true, ...result };
+}
+
+/**
+ * Follow the system appearance (#43): setTheme needs core:window:allow-set-theme, and a
+ * window appearance change must reach prefers-color-scheme, the store's listener and :root
+ * without a reload. Shows a system theme without saving it, then puts the saved one back.
+ */
+async function appearanceCheck(s: Step) {
+  const win = getCurrentWindow();
+  const { useTheme } = await import("./theme/store");
+  const saved = useTheme.getState();
+  const read = () => ({
+    query: window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light",
+    resolved: useTheme.getState().resolved.mode,
+    scheme: document.documentElement.style.getPropertyValue("--color-scheme"),
+  });
+  const out: Record<string, unknown> = {};
+  try {
+    useTheme.getState().load({ ...DEFAULT_THEME, mode: "system" }, DEFAULT_THEME.name);
+    s("light"); await win.setTheme("light"); await sleep(600);
+    out.light = read();
+    s("dark"); await win.setTheme("dark"); await sleep(600);
+    out.dark = read();
+    s("system"); await win.setTheme(null); await sleep(600);
+    out.system = { ...read(), native: await win.theme() };
+  } catch (e) {
+    out.error = String(e);
+  } finally {
+    useTheme.getState().load(saved.theme, saved.basePreset);
+    await win.setTheme(saved.theme.mode === "system" ? null : saved.theme.mode).catch(() => undefined);
+  }
+  const same = (v: unknown, m: string) => JSON.stringify(v) === JSON.stringify({ query: m, resolved: m, scheme: m });
+  out.ok = !out.error && same(out.light, "light") && same(out.dark, "dark");
+  return out;
 }
 
 /**
@@ -871,6 +905,7 @@ export async function runSelfTest() {
     out.challengeUntil = await block("challengeUntil", () => core.challengeUntil().then((u) => (u ? new Date(u).toISOString() : null)), 10_000);
     // Window permissions the menu bar and close-to-hide rely on.
     out.window = await block("window", (s) => windowCheck(s), 30_000);
+    out.appearance = await block("appearance", (s) => appearanceCheck(s), 15_000);
     // startDragging needs a live mouse-down to do anything, but a missing
     // capability rejects the call outright; record what it says.
     out.dragPermission = await block("dragPermission", () => getCurrentWindow().startDragging().then(() => "ok", (e) => String(e)), 10_000);
@@ -883,7 +918,7 @@ export async function runSelfTest() {
     // Overall ok needs every block that reports its own `ok` to pass (a timed-out or thrown
     // block reports ok: false). The listed blocks must be present as objects: one caught and
     // stored as a string threw.
-    const required = ["import", "libraryFilter", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "syncGuards", "newReleases", "preorder", "libraryFile", "window"];
+    const required = ["import", "libraryFilter", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "syncGuards", "newReleases", "preorder", "libraryFile", "window", "appearance"];
     const failed = Object.entries(out)
       .filter(([k, v]) => required.includes(k) || hasOk(v))
       .filter(([, v]) => (v as { ok?: unknown } | null)?.ok !== true)

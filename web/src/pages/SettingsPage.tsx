@@ -25,7 +25,9 @@ const SHORTCUTS: [string, string][] = [
 const FONT_SUGGESTIONS = ["Bricolage Grotesque Variable", "Instrument Sans Variable", "Helvetica Neue", "Avenir Next", "Georgia", "Iowan Old Style", "Menlo", "SF Mono"];
 
 export function SettingsPage() {
-  const { theme, basePreset, update, replace, applyPreset, reset } = useTheme();
+  const { theme, resolved, basePreset, update, replace, applyPreset, reset } = useTheme();
+  // Following the system, a preset applies its side for the current appearance: show that one.
+  const swatch = (p: Theme) => (theme.mode === "system" ? (resolved.mode === "dark" ? p.paletteDark : p.paletteLight) : undefined) ?? p.palette;
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [info, setInfo] = useState<{ version: string; dataDir: string | null } | null>(null);
   useEffect(() => { void appInfo().then(setInfo); }, []);
@@ -71,7 +73,7 @@ export function SettingsPage() {
         <div className="chips">
           {PRESETS.map((p) => (
             <button key={p.name} className={`chip ${basePreset === p.name ? "on" : ""}`} onClick={() => applyPreset(p.name)}>
-              <span className="swatch" style={{ background: p.palette.surface, borderColor: p.palette.accent }} />
+              <span className="swatch" style={{ background: swatch(p).surface, borderColor: swatch(p).accent }} />
               {p.name}
             </button>
           ))}
@@ -80,6 +82,7 @@ export function SettingsPage() {
           <label>Theme name <input value={theme.name} maxLength={40} onChange={(e) => update({ name: e.target.value })} /></label>
           <label>Base
             <select value={theme.mode} onChange={(e) => update({ mode: e.target.value as Theme["mode"] })}>
+              <option value="system">Match system</option>
               <option value="dark">Dark</option>
               <option value="light">Light</option>
             </select>
@@ -100,7 +103,7 @@ export function SettingsPage() {
               ["danger", "Remove and delete"],
             ] as [keyof Theme["palette"], string][]
           ).map(([key, label]) => (
-            <ColorField key={key} label={label} value={theme.palette[key]} onChange={(v) => update({ palette: { [key]: v } })} />
+            <ColorField key={key} label={label} value={resolved.palette[key]} onChange={(v) => update({ palette: { [key]: v } })} />
           ))}
         </div>
       </section>

@@ -72,7 +72,7 @@ export async function initMiniBridge() {
   let bus: MiniBus;
   try { bus = await createBus("mini"); } catch { return; }
   const throttle = new MiniStateThrottle(1000);
-  const current = () => buildMiniState(usePlayer.getState(), appliedPalette(), useTheme.getState().theme);
+  const current = () => buildMiniState(usePlayer.getState(), appliedPalette(), useTheme.getState().resolved);
   const push = (force: boolean) => {
     const s = current();
     if (force) throttle.reset();
