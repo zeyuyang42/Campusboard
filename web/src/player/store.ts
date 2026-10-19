@@ -80,7 +80,8 @@ function recordPlay(p: CountedPlay) {
 }
 
 /** Resolve a fresh CDN URL for the track and point the audio element at it. */
-function load(track: QueueTrack, autoplay: boolean, force = false) {
+/** Plays when it is ready if `wantsPlay` is still set then; skips on to the next track on failure only if so. */
+function load(track: QueueTrack, force = false) {
   const seq = ++loadSeq;
   loading = true;
   retriedFor = force ? track.id : null;
@@ -104,12 +105,13 @@ function load(track: QueueTrack, autoplay: boolean, force = false) {
     } catch (e) {
       if (seq !== loadSeq) return;
       loading = false;
+      const wanted = usePlayer.getState().wantsPlay;
       usePlayer.setState({ error: `Couldn't play "${track.title}". ${friendlyError(e)}`, status: "paused", wantsPlay: false });
       // During a Bandcamp cooldown every stale track would fail the same way: stop here
       // with the "try again after" message instead of skipping through the whole queue.
       if ((e as { code?: unknown } | null)?.code === "challenge_cooldown") return;
       const { queue, index } = usePlayer.getState();
-      if (autoplay && index < queue.length - 1) setTimeout(() => usePlayer.getState().next(true), 800);
+      if (wanted && index < queue.length - 1) setTimeout(() => usePlayer.getState().next(true), 800);
     }
   })();
 }
@@ -142,7 +144,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       set({ originalOrder: playable });
     }
     set({ queue, index, status: "loading", wantsPlay: true, position: 0, duration: 0, error: null });
-    load(queue[index], true);
+    load(queue[index]);
   },
 
   play: () => {
@@ -151,7 +153,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     set({ wantsPlay: true });
     // The track's URL is still resolving: load() starts it when it arrives.
     if (loading) set({ status: "loading" });
-    else if (!audioEl.src) load(cur, true);
+    else if (!audioEl.src) load(cur);
     else {
       // Play after the queue ended restarts the track from the top: a new playback.
       if (audioEl.ended) startPlayback(cur);
@@ -186,7 +188,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       ni = 0;
     }
     set({ index: ni, status: "loading", wantsPlay: true, position: 0, duration: 0 });
-    load(queue[ni], true);
+    load(queue[ni]);
   },
   prev: () => {
     const { queue, index } = get();
@@ -198,13 +200,13 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     }
     const ni = index - 1;
     set({ index: ni, status: "loading", wantsPlay: true, position: 0, duration: 0 });
-    load(queue[ni], true);
+    load(queue[ni]);
   },
   jumpTo: (i) => {
     const { queue } = get();
     if (i < 0 || i >= queue.length) return;
     set({ index: i, status: "loading", wantsPlay: true, position: 0, duration: 0 });
-    load(queue[i], true);
+    load(queue[i]);
   },
   seek: (sec) => {
     plays.seeked();
@@ -278,7 +280,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     const cur = queue[index];
     if (cur) {
       pendingSeek = s.position;
-      load(cur, false);
+      load(cur);
     }
   },
 }));
@@ -322,8 +324,10 @@ audioEl.addEventListener("error", () => {
   const cur = usePlayer.getState().current();
   if (!cur) return;
   if (retriedFor !== cur.id) {
-    // Most likely an expired stream URL: ask the server to re-scrape and try once more.
-    load(cur, usePlayer.getState().status !== "paused", true);
+    // Most likely an expired stream URL: ask the server to re-scrape and try once more. A
+    // paused player (the listener, or the system) stays paused after the retry.
+    if (usePlayer.getState().status === "paused") usePlayer.setState({ wantsPlay: false });
+    load(cur, true);
     return;
   }
   usePlayer.setState({ error: `Couldn't play "${cur.title}"`, status: "paused", wantsPlay: false });

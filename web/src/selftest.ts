@@ -14,7 +14,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { backupLibraryDatabase, exportLibraryFile } from "./lib/libraryFile";
 import { miniBridgeInfo } from "./player/miniBridge";
-import { MINI_EVENTS } from "@bc/core";
+import { MINI_EVENTS, toggleAction } from "@bc/core";
 import { FAN_ITEMS_ENDPOINT, fanPageUrl, parseFanItemsResponse, parseFanPage, repos, type FanItem } from "@bc/core";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -394,12 +394,25 @@ async function miniPlayerCheck() {
     const wasPlaying = usePlayer.getState().status === "playing" && !audioEl.paused;
     await win.hide(); await sleep(300);
     // Muted media in a hidden window can stall ("waiting" sets the store to loading; Play/Pause
-    // then still pauses, see toggleAction) or be paused by WebKit (then the press plays).
-    // Start from playing so the first press is a pause; the status it started from is recorded.
-    for (let t = 0; wasPlaying && t < 4000 && usePlayer.getState().status !== "playing"; t += 100) await sleep(100);
-    out.statusBeforeToggle = usePlayer.getState().status;
+    // then still pauses) or be paused by WebKit (then the press plays). Try to get it playing
+    // again; if it won't, the pause/resume checks are skipped and the command path is checked.
+    const playingNow = () => usePlayer.getState().status === "playing" && !audioEl.paused;
+    for (let t = 0; wasPlaying && t < 4000 && !playingNow(); t += 100) await sleep(100);
+    if (wasPlaying && audioEl.muted && !playingNow()) {
+      usePlayer.getState().play();
+      for (let t = 0; t < 3000 && !playingNow(); t += 100) await sleep(100);
+    }
+    const canCheck = wasPlaying && playingNow();
+    const before = usePlayer.getState();
+    out.statusBeforeToggle = before.status;
+    // What the first press must do, from the store's state at that moment (see toggleAction).
+    const expectedFirst = toggleAction(before.status, before.wantsPlay);
+    out.expectedFirst = expectedFirst;
     const c0 = miniBridgeInfo().commands;
     await ask({ do: "click", cmd: "toggle" }); await sleep(900);
+    const firstOk = expectedFirst === "pause"
+      ? audioEl.paused && usePlayer.getState().status === "paused" && !usePlayer.getState().wantsPlay
+      : usePlayer.getState().wantsPlay;
     const paused = audioEl.paused && usePlayer.getState().status === "paused";
     const shownPaused = (await ask({ do: "state" }))?.status === "paused";
     await ask({ do: "click", cmd: "toggle" }); await sleep(1800);
@@ -415,8 +428,9 @@ async function miniPlayerCheck() {
     const mainShown = await win.isVisible();
     const commands = miniBridgeInfo().commands - c0;
     const perms = report?.setOnTop === "ok" && report?.drag === "ok" && report?.sqlDenied === true && report?.commandDenied === true;
-    // Without playback (the stream didn't start) only the command path is checked.
-    const playbackOk = wasPlaying ? paused && shownPaused && resumed && seeked : commands >= 4;
+    // Without playback (the stream didn't start, or muted media stayed paused while hidden)
+    // only the command path and the first press's decision are checked.
+    const playbackOk = firstOk && (canCheck ? paused && shownPaused && resumed && seeked : commands >= 4);
 
     // Menu actions reach this page only from Rust (menu.rs `dispatch`): a `menu` event
     // emitted by the mini window does nothing, the real handler does.
@@ -460,7 +474,9 @@ async function miniPlayerCheck() {
     const menuOk = forgedMenuIgnored && menuDispatched && controlActed && controlKeptHidden;
     const closeOk = liveBeforeClose && miniClosed && mainUntouched && !liveAfterClose && quietWhileHidden && mainCloseHides && liveAfterReshow && reshowTitleOk;
     Object.assign(out, {
-      opened, titleOk, wasPlaying, paused, shownPaused, resumed, seeked, rejectsBad, mainShown, commands, perms,
+      opened, titleOk, wasPlaying, canCheck, firstOk,
+      ...(canCheck ? { paused, shownPaused, resumed, seeked } : { paused: "skipped (muted)", shownPaused: "skipped (muted)", resumed: "skipped (muted)", seeked: "skipped (muted)" }),
+      rejectsBad, mainShown, commands, perms,
       forgedMenuIgnored, menuDispatched, controlActed, controlKeptHidden,
       liveBeforeClose, miniClosed, mainUntouched, liveAfterClose, playingWhileHidden, quietWhileHidden, liveAfterReshow, reshowTitleOk, mainCloseHides,
       info: miniBridgeInfo(),
