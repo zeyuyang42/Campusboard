@@ -1,6 +1,7 @@
 mod backup;
 mod menu;
 mod mini;
+mod tray;
 
 use std::path::PathBuf;
 use tauri::Manager;
@@ -272,7 +273,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![library_db_url, backup_library, selftest_take_backup, mini::toggle_mini_player, menu::selftest_menu])
+        .invoke_handler(tauri::generate_handler![library_db_url, backup_library, selftest_take_backup, mini::toggle_mini_player, menu::selftest_menu, tray::set_menu_bar])
         .build(context)
         .unwrap_or_else(|e| startup_failed(&e));
 

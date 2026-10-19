@@ -730,6 +730,9 @@ export async function runSelfTest() {
     // startDragging needs a live mouse-down to do anything, but a missing
     // capability rejects the call outright; record what it says.
     out.dragPermission = await getCurrentWindow().startDragging().then(() => "ok", (e) => String(e));
+    // The menu-bar command is registered and granted. Called with the icon off, so no icon
+    // appears on the screen.
+    out.menuBar = await invoke("set_menu_bar", { enabled: false, track: null }).then(() => ({ ok: true }), (e) => ({ ok: false, error: String(e) }));
     // Overall ok needs every block that reports its own `ok` to pass. The listed blocks must
     // be present as objects: one caught and stored as a string threw.
     const required = ["libraryFilter", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "syncGuards", "newReleases", "preorder", "libraryFile", "window"];

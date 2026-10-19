@@ -5,6 +5,7 @@ import { initPersistence } from "./persist";
 import { loadPlaybackSettings } from "./store";
 import { initAppMenu } from "../lib/appMenu";
 import { initMiniBridge } from "./miniBridge";
+import { initMenuBar } from "../lib/menuBar";
 
 let done = false;
 export function initPlayer(_qc: QueryClient) {
@@ -16,4 +17,5 @@ export function initPlayer(_qc: QueryClient) {
   void initPersistence();
   void initAppMenu();
   void initMiniBridge();
+  void initMenuBar();
 }

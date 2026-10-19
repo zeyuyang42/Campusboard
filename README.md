@@ -63,6 +63,9 @@ Requires macOS 13.3 or later. Your library lives in
   button turns that off), with the artwork, the track, a seek bar and the
   transport controls. The square button switches to a large-artwork layout.
   It keeps working with the main window closed.
+- **Menu bar icon**: Settings → When the window is closed (off by default)
+  adds an icon to the menu bar with the current track, Play/Pause, Next,
+  Previous, Show Window and Quit.
 - **Gapless and crossfade**: Settings → Playback. The next track loads in the
   background and starts as the current one ends (on by default). Crossfade
   (off by default, up to 10 s) blends tracks from different albums; tracks of
