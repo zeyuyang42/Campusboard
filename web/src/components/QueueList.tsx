@@ -20,7 +20,7 @@ export function QueueList() {
           {...rowProps(i)}
           onContextMenu={(e) => openMenuFromEvent(e, actions([t], { remove: i === index ? undefined : { label: "Remove from queue", onSelect: () => removeAt(i) } }))}
         >
-          <ArtImage artId={t.art_id} size={7} alt="" />
+          <ArtImage artId={t.art_id} imageId={t.radio?.image_id} size={7} alt="" />
           <div className="t" onClick={() => jumpTo(i)} onDoubleClick={() => jumpTo(i)}>
             <div className="title">{t.title}</div>
             <div className="sub meta"><span>{t.track_artist ?? t.artist_name}</span><span>{t.album_title}</span></div>

@@ -26,6 +26,9 @@ export const keys = {
   artistMuted: (id: number) => ["releases", "muted", id] as const,
   // Under "jobs" so every job update (an album arriving) refreshes it.
   pendingImports: ["jobs", "pending-imports"] as const,
+  radioShows: ["radio", "list"] as const,
+  // Under "albums" so an import refreshes which featured releases are in the library.
+  radioShow: (id: number) => ["albums", "radio-show", id] as const,
 };
 
 const core = getCore;
@@ -182,6 +185,12 @@ export async function savePlayPosition(trackId: number | null, positionSec: numb
 /** One track's lyrics, read when Now playing shows them (queue entries don't carry them). */
 export const useTrackLyrics = (id: number | null) =>
   useQuery({ queryKey: ["tracks", "lyrics", id], queryFn: async () => (await (await core()).tracksByIds([id!]))[0]?.lyrics ?? null, enabled: id != null, staleTime: Infinity });
+
+/** The latest Bandcamp Radio episodes. Core caches the page for a day; this keeps it for the session. */
+export const useRadioShows = () => useQuery({ queryKey: keys.radioShows, queryFn: async () => (await core()).radioShows(), staleTime: 60 * 60 * 1000 });
+/** One episode's tracklist (core keeps it in memory after the first read, so refetches are free). */
+export const useRadioShow = (id: number | null) =>
+  useQuery({ queryKey: keys.radioShow(id ?? 0), queryFn: async () => (await core()).radioShow(id!), enabled: id != null && id > 0, staleTime: Infinity });
 
 /** Playlist entries, plays and preferences from an imported library still waiting for their albums. */
 export const usePendingImports = () => useQuery({ queryKey: keys.pendingImports, queryFn: async () => (await core()).pendingImports() });

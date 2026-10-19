@@ -126,11 +126,19 @@ function startPlayback(track: QueueTrack) {
 /** Seconds listened in the current playback (read by the selftest). */
 export const listenedSeconds = () => plays.listenedSeconds;
 function recordPlay(p: CountedPlay) {
+  // A radio episode (negative id) is not a library track: history stays about the library.
+  if (p.trackId <= 0) return;
   void getCore()
     .then((c) => c.recordPlay(p.trackId, p.seconds))
     // Counts on track rows, the Library's played sorts and shelf, and Settings' total.
     .then(() => invalidateQueries(["albums", "album", "tracks", "playlist", "history"]))
     .catch(() => undefined); // history is best-effort; playback never depends on it
+}
+
+/** A fresh stream URL for a queue entry: a library track's, or a radio episode's (#44). */
+async function streamUrlFor(track: QueueTrack, force = false): Promise<{ url: string; expires_at: number }> {
+  const core = await getCore();
+  return track.radio ? core.radioStreamUrl(track.radio.show_id, force) : core.getFreshStreamUrl(track.id, force);
 }
 
 /** Resolve a fresh CDN URL for the track and point the active audio element at it. */
@@ -145,8 +153,7 @@ function load(track: QueueTrack, force = false) {
   if (!force && !skippingError) { failStreak = 0; cancelPendingSkip(); }
   void (async () => {
     try {
-      const core = await getCore();
-      const { url } = await core.getFreshStreamUrl(track.id, force);
+      const { url } = await streamUrlFor(track, force);
       if (seq !== loadSeq) return; // a newer load superseded this one
       loading = false;
       const el = active();
@@ -328,7 +335,7 @@ function preload(track: QueueTrack) {
   const seq = ++txSeq;
   void (async () => {
     try {
-      const { url, expires_at } = await (await getCore()).getFreshStreamUrl(track.id);
+      const { url, expires_at } = await streamUrlFor(track);
       if (seq !== txSeq || tx.phase !== "preloading") return;
       dispatch({ type: "resolved", expiresAt: expires_at });
       const el = other();

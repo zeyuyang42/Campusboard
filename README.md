@@ -50,6 +50,10 @@ Requires macOS 13.3 or later. Your library lives in
   Bandcamp page every few minutes (each artist at most once a day) and lists
   releases that appeared since its first look, to import or dismiss. Turn it off
   or press **Check now** in Settings; mute an artist from their page.
+- **Radio**: the latest Bandcamp Radio episodes (Bandcamp Selects, The Metal
+  Show and the rest). An episode plays as one long track; Now playing shows its
+  tracklist with the release on air marked, and Import, Open album and Buy on
+  Bandcamp for each. Episodes don't count in listening history.
 - **Playlists**: right-click any track or album, or select several tracks
   (click, Shift-click, Cmd-click) and use the bar that appears. Drag rows to
   reorder.

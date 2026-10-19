@@ -7,21 +7,27 @@ import { SeekBar } from "./SeekBar";
 import { useUi } from "../ui/store";
 import { ExpandIcon, MenuIcon, MiniPlayerIcon } from "./Icons";
 import { toggleMiniPlayer } from "../player/miniBridge";
+import { useRadioNow } from "../player/radio";
 
 export function PlayerBar() {
   const s = usePlayer();
   const cur = s.queue[s.index] ?? null;
   const { nowPlayingOpen, setNowPlayingOpen, toggleSidebar } = useUi();
+  const { entry } = useRadioNow(cur?.radio ? cur : null);
   return (
     <footer className="player">
       <div className="now">
         <button className="icon-btn menu-toggle" title="Menu" onClick={toggleSidebar}><MenuIcon /></button>
         {cur ? (
           <>
-            <button className="art-btn" title="Now playing (N)" onClick={() => setNowPlayingOpen(!nowPlayingOpen)}><ArtImage artId={cur.art_id} size={7} alt="" /></button>
+            <button className="art-btn" title="Now playing (N)" onClick={() => setNowPlayingOpen(!nowPlayingOpen)}><ArtImage artId={cur.art_id} imageId={cur.radio?.image_id} size={7} alt="" /></button>
             <div className="t">
               <div className="title" title={cur.title}>{cur.title}</div>
-              <div className="sub"><span>{cur.track_artist ?? cur.artist_name}</span><Link to={`/album/${cur.album_id}`}>{cur.album_title}</Link></div>
+              {cur.radio ? (
+                <div className="sub"><Link to="/radio">{cur.radio.program}</Link>{entry && <span title={`${entry.artist}, ${entry.title}`}>{entry.artist}, “{entry.title}”</span>}</div>
+              ) : (
+                <div className="sub"><span>{cur.track_artist ?? cur.artist_name}</span><Link to={`/album/${cur.album_id}`}>{cur.album_title}</Link></div>
+              )}
             </div>
           </>
         ) : (

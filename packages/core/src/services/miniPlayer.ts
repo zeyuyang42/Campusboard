@@ -19,6 +19,8 @@ export interface MiniTrack {
   artist: string;
   album: string;
   artId: number | null;
+  /** A radio episode's image (no "a" prefix), shown when there is no album art. */
+  imageId?: number | null;
 }
 
 /** The art-fitted colors the main window paints on :root (see web/src/theme/usePalette.ts). */
@@ -84,8 +86,10 @@ function parseTrack(x: unknown): MiniTrack | null {
   if (!isObj(x)) return null;
   const id = x.id, title = text(x.title), artist = text(x.artist), album = text(x.album);
   if (typeof id !== "number" || !Number.isInteger(id) || title == null || artist == null || album == null) return null;
-  const artId = typeof x.artId === "number" && Number.isInteger(x.artId) && x.artId > 0 ? x.artId : null;
-  return { id, title, artist, album, artId };
+  const posInt = (v: unknown) => (typeof v === "number" && Number.isInteger(v) && v > 0 ? v : null);
+  const artId = posInt(x.artId);
+  const imageId = posInt(x.imageId);
+  return imageId ? { id, title, artist, album, artId, imageId } : { id, title, artist, album, artId };
 }
 
 /**
@@ -104,7 +108,7 @@ export function parseMiniState(x: unknown): MiniState | null {
 
 /** What buildMiniState reads from the player store (a structural subset of its state). */
 export interface MiniSource {
-  queue: readonly { id: number; title: string; artist_name: string; track_artist?: string | null; album_title: string; art_id: number | null }[];
+  queue: readonly { id: number; title: string; artist_name: string; track_artist?: string | null; album_title: string; art_id: number | null; radio?: { image_id: number | null } }[];
   index: number;
   status: MiniStatus;
   position: number;
@@ -116,7 +120,10 @@ export function buildMiniState(s: MiniSource, palette: MiniPalette | null, theme
   const duration = Number.isFinite(s.duration) && s.duration > 0 ? s.duration : 0;
   const pos = Number.isFinite(s.position) && s.position > 0 ? s.position : 0;
   return {
-    track: t ? { id: t.id, title: t.title, artist: t.track_artist || t.artist_name, album: t.album_title, artId: t.art_id ?? null } : null,
+    track: t ? {
+      id: t.id, title: t.title, artist: t.track_artist || t.artist_name, album: t.album_title, artId: t.art_id ?? null,
+      ...(t.radio?.image_id ? { imageId: t.radio.image_id } : {}),
+    } : null,
     status: t ? s.status : "idle",
     position: duration ? Math.min(pos, duration) : pos,
     duration,

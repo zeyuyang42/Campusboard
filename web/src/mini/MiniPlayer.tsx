@@ -123,7 +123,7 @@ export function MiniPlayer() {
     <div className={`mini ${tall ? "tall" : "compact"}`} data-tauri-drag-region data-status={s?.status ?? "idle"}>
       <div className="mini-ambient" aria-hidden="true" />
       <div className="mini-art" data-tauri-drag-region>
-        {track?.artId ? <ArtImage artId={track.artId} size={tall ? 16 : 7} alt="" /> : null}
+        {track?.artId || track?.imageId ? <ArtImage artId={track.artId} imageId={track.imageId} size={tall ? 16 : 7} alt="" /> : null}
         {/* The art is a drag handle too; an <img> would otherwise start a native image drag. */}
         <div className="mini-art-cover" data-tauri-drag-region />
       </div>

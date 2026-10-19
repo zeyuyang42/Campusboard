@@ -400,3 +400,23 @@ details.about-wrap summary { cursor: pointer; color: var(--text-muted); margin-t
 .card .sub .preorder { color: var(--text); }
 .album-head .owned-note { font-size: 13px; color: var(--accent); margin: -6px 0 12px; }
 .library-filter { width: 280px; max-width: 100%; }
+
+/* ---------- radio (#44) ---------- */
+.radio-intro { margin: -8px 0 24px; max-width: 60ch; line-height: 1.5; }
+.radio-card .radio-desc { color: var(--text-muted); font-size: 12.5px; line-height: 1.45; margin: 6px 0 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.radio-card.current .title { color: var(--accent); }
+.np-featuring { color: var(--text-muted); font-size: 14px; margin-top: 8px; }
+.radio-tracklist { list-style: none; margin: 0; padding: 8px; }
+.radio-entry { display: grid; grid-template-columns: 36px 1fr auto auto; align-items: center; gap: 10px; padding: 6px 8px; border-radius: var(--radius-sm); }
+.radio-entry:hover { background: var(--surface-hover); }
+.radio-entry.current .title { color: var(--accent); }
+.radio-entry > img, .radio-entry > div[aria-hidden] { width: 36px; height: 36px; border-radius: 4px; object-fit: cover; background: var(--surface-hover); }
+.radio-entry .t { min-width: 0; }
+.radio-entry .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.radio-entry .sub { color: var(--text-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.radio-entry .sub .album::before { content: ", "; }
+.radio-entry-actions { display: flex; gap: 2px; opacity: 0; }
+.radio-entry:hover .radio-entry-actions, .radio-entry:focus-within .radio-entry-actions, .radio-entry.current .radio-entry-actions { opacity: 1; }
+.radio-entry-time { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; padding: 2px 4px; border-radius: 4px; }
+.radio-entry-time:hover { color: var(--text); background: var(--surface-raised); }
+.radio-entry-error { font-size: 12px; margin-top: 2px; white-space: normal; }

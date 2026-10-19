@@ -827,6 +827,18 @@ export async function runSelfTest() {
       const browse = await core.browse("https://illuminatihotties.bandcamp.com");
       return { releases: browse.items.length, band: browse.band?.name, inLibrary: browse.items.filter((i) => i.album_id).length, firstTitle: browse.items[0]?.title };
     });
+    // Bandcamp Radio (#44): one show-list request through the http scope; a second call must
+    // come from the page cache (a day). The episode page and its audio are left to the tests.
+    out.radio = await block("radio", async () => {
+      const before = await core.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM page_cache WHERE url = 'https://bandcamp.com/radio'");
+      const shows = await core.radioShows();
+      const again = await core.radioShows();
+      const cached = await core.db.get<{ fetched_at: number }>("SELECT fetched_at FROM page_cache WHERE url = 'https://bandcamp.com/radio'");
+      const first = shows[0];
+      const ok = shows.length > 0 && again.length === shows.length && !!cached && !!first &&
+        first.id > 0 && !!first.title && !!first.program && /^https:\/\/bandcamp\.com\/radio\//.test(first.url);
+      return { ok, count: shows.length, cachedBefore: before?.n ?? 0, first: first ? { id: first.id, title: first.title, program: first.program, date: first.date, image: !!first.image_id } : null };
+    }, 30_000);
     out.newReleases = await block("newReleases", () => newReleasesCheck(core, album));
     out.preorder = await block("preorder", () => preorderCheck(core, album));
     // Custom artist domain: the http scope must allow the custom host (it 303s to name.bandcamp.com),

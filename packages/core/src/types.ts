@@ -114,6 +114,12 @@ export interface QueueTrack extends Track {
   album_title: string;
   artist_name: string;
   art_id: number | null;
+  /**
+   * Set for a Bandcamp Radio episode (see services/radio.ts): `id` and `album_id` are then
+   * minus the show id, so it never matches a library track and is never counted or saved
+   * to a playlist.
+   */
+  radio?: QueueRadio;
 }
 
 export interface PlayState {
@@ -236,4 +242,52 @@ export interface CollectionRefreshStatus {
   enabled: boolean;
   /** ms timestamp of the most recent automatic refresh, or null if none yet. */
   last_auto_at: number | null;
+}
+
+/** One Bandcamp Radio episode as the show list gives it (bandcamp.com/radio). */
+export interface RadioShowSummary {
+  /** Bandcamp's show id (the `?show=` number). */
+  id: number;
+  /** The episode's own title, usually the featured artist. */
+  title: string;
+  /** The programme it belongs to ("Bandcamp Selects", "The Metal Show", ...). */
+  program: string;
+  /** ISO time the episode was published, or null. */
+  date: string | null;
+  description: string | null;
+  /** Bandcamp image id (no "a" prefix, see radioImageUrl). */
+  image_id: number | null;
+  /** Canonical show page, https://bandcamp.com/radio/<programme>/<id>. */
+  url: string;
+}
+
+/** One featured track in an episode, with the playhead time it starts at. */
+export interface RadioEntry {
+  /** Seconds into the episode's audio. */
+  timecode: number;
+  duration: number | null;
+  title: string;
+  artist: string;
+  album_title: string | null;
+  art_id: number | null;
+  /**
+   * What Import and Buy link to: the album when the track is on one, else the track,
+   * normalised with normalizeBandcampUrl. Null when Bandcamp gave nothing usable.
+   */
+  url: string | null;
+  /** Library album id when `url` is already imported (set by core, not the parser). */
+  album_id: number | null;
+}
+
+export interface RadioShow extends RadioShowSummary {
+  /** Length of the episode's single audio file, in seconds. */
+  duration: number | null;
+  tracks: RadioEntry[];
+}
+
+/** What a queue entry carries when it is a radio episode rather than a library track. */
+export interface QueueRadio {
+  show_id: number;
+  image_id: number | null;
+  program: string;
 }
