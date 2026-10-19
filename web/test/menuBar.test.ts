@@ -46,6 +46,14 @@ describe("menu bar icon", () => {
     expect(calls()).toHaveLength(3);
   });
 
+  it("the selftest's resend repeats the last state instead of removing the icon", async () => {
+    h.core.settings.set(menuBar.MENU_BAR_SETTING_KEY, true);
+    await menuBar.initMenuBar();
+    await h.startPlaying([track({ title: "One" })]);
+    await menuBar.resendMenuBar();
+    expect(calls().at(-1)).toEqual({ enabled: true, track: "One" });
+  });
+
   it("the toggle creates and removes the icon and is persisted", async () => {
     await menuBar.initMenuBar();
     await h.startPlaying([track({ title: "One" })]);

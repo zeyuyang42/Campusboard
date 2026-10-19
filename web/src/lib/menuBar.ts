@@ -37,6 +37,14 @@ function sync() {
   invoke("set_menu_bar", { enabled, track }).catch((e) => console.warn("menu bar icon:", e));
 }
 
+/**
+ * Send Rust what it was last told again: the selftest's check of the command and its grant.
+ * The icon stays as the user's setting has it.
+ */
+export function resendMenuBar(): Promise<unknown> {
+  return invoke("set_menu_bar", { ...sent });
+}
+
 let started = false;
 export async function initMenuBar() {
   if (started || !isTauri) return;

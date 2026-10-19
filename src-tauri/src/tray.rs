@@ -14,17 +14,21 @@ pub const TRACK_ID: &str = "tray:track";
 pub const SHOW_ID: &str = "tray:show";
 const MAX_LABEL: usize = 48;
 
-/// The first row's text: the track title, shortened to fit a menu.
+/// The first row's text: the track title without control characters, shortened to fit a
+/// menu. `&` is doubled after the cut because muda strips a single `&` as a mnemonic marker
+/// on macOS ("Rock & Roll" would show as "Rock  Roll").
 fn track_label(track: Option<&str>) -> String {
-    let t = track.map(str::trim).filter(|t| !t.is_empty());
-    match t {
-        None => "Nothing playing".into(),
+    let clean: Option<String> = track.map(|t| t.chars().filter(|c| !c.is_control()).collect());
+    let t = clean.as_deref().map(str::trim).filter(|t| !t.is_empty());
+    let shown = match t {
+        None => return "Nothing playing".into(),
         Some(t) if t.chars().count() > MAX_LABEL => {
             let cut: String = t.chars().take(MAX_LABEL - 1).collect();
             format!("{}…", cut.trim_end())
         }
         Some(t) => t.to_string(),
-    }
+    };
+    shown.replace('&', "&&")
 }
 
 fn build_menu<R: Runtime>(app: &AppHandle<R>, track: Option<&str>) -> tauri::Result<Menu<R>> {
@@ -83,5 +87,17 @@ mod tests {
         let label = track_label(Some(&long));
         assert_eq!(label.chars().count(), MAX_LABEL);
         assert!(label.ends_with('…'));
+    }
+
+    #[test]
+    fn track_label_keeps_ampersands_and_drops_control_characters() {
+        assert_eq!(track_label(Some("Rock & Roll")), "Rock && Roll");
+        assert_eq!(track_label(Some("Line\none\tTab")), "LineoneTab");
+        assert_eq!(track_label(Some("\n\t")), "Nothing playing");
+        // The length is counted before escaping.
+        let long = format!("{}&{}", "a".repeat(10), "b".repeat(70));
+        let label = track_label(Some(&long));
+        assert_eq!(label.chars().count(), MAX_LABEL + 1);
+        assert!(label.contains("a&&b"));
     }
 }
