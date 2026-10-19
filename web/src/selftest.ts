@@ -457,12 +457,15 @@ async function miniPlayerCheck() {
     const rejectsBad = miniBridgeInfo().rejected === rejected0 + 1;
     await ask({ do: "click", cmd: "showMain" }); await sleep(800);
     const mainShown = await win.isVisible();
+    // Exactly the four sent (toggle, toggle, seek, showMain): a doubled listener in either
+    // window doubles every press, and two toggles cancel out.
     const commands = miniBridgeInfo().commands - c0;
+    const commandsExact = commands === 4;
     const perms = report?.setOnTop === "ok" && report?.drag === "ok" && report?.sqlDenied === true && report?.commandDenied === true;
     // Without playback (the stream didn't start, or muted media stayed paused while hidden)
     // only the command path and the first press's decision are checked.
     // The pause/resume pair is only checked when the first press paused a playing track.
-    const playbackOk = firstOk && (canCheck && expectedFirst === "pause" ? paused && shownPaused && resumed && seeked : commands >= 4);
+    const playbackOk = firstOk && commandsExact && (canCheck && expectedFirst === "pause" ? paused && shownPaused && resumed && seeked : true);
 
     // Menu actions reach this page only from Rust (menu.rs `dispatch`): a `menu` event
     // emitted by the mini window does nothing, the real handler does.
@@ -508,7 +511,7 @@ async function miniPlayerCheck() {
     Object.assign(out, {
       opened, titleOk, wasPlaying, canCheck, firstOk,
       ...(canCheck ? { paused, shownPaused, resumed, seeked } : { paused: "skipped (muted)", shownPaused: "skipped (muted)", resumed: "skipped (muted)", seeked: "skipped (muted)" }),
-      rejectsBad, mainShown, commands, perms,
+      rejectsBad, mainShown, commands, commandsExact, perms,
       forgedMenuIgnored, menuDispatched, controlActed, controlKeptHidden,
       liveBeforeClose, miniClosed, mainUntouched, liveAfterClose, playingWhileHidden, quietWhileHidden, liveAfterReshow, reshowTitleOk, mainCloseHides,
       info: miniBridgeInfo(),

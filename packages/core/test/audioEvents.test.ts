@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { audioEventPatch } from "../src/services/audioEvents.js";
+import { audioEventPatch, swappingAfter } from "../src/services/audioEvents.js";
 import { toggleAction } from "../src/services/playerToggle.js";
 
 const el = (paused: boolean, o: { ended?: boolean; internal?: boolean } = {}) => ({ paused, ended: o.ended ?? false, internal: o.internal ?? false });
@@ -43,5 +43,23 @@ describe("audio events (#55)", () => {
     state = { ...state, ...audioEventPatch("pause", el(true))! };
     expect(state.wantsPlay).toBe(false);
     expect(toggleAction(state.status as "paused", state.wantsPlay)).toBe("play");
+  });
+});
+
+describe("the store's source-swap flag", () => {
+  it("is set afresh by every load: only a playing element can send a swap pause", () => {
+    expect(swappingAfter(false, { type: "load", paused: false })).toBe(true);
+    expect(swappingAfter(true, { type: "load", paused: true })).toBe(false); // not left over from an earlier load
+  });
+  it("is cleared by the pause, the new track playing, an error or a refused play()", () => {
+    for (const ev of [{ type: "pause" }, { type: "playing", paused: false }, { type: "error" }, { type: "playRejected" }] as const) {
+      expect(swappingAfter(true, ev)).toBe(false);
+    }
+    expect(swappingAfter(true, { type: "playing", paused: true })).toBe(true); // a stale playing changes nothing
+  });
+  it("a load that fails to play can't make a later system pause look internal", () => {
+    let swapping = swappingAfter(false, { type: "load", paused: false });
+    swapping = swappingAfter(swapping, { type: "error" });
+    expect(audioEventPatch("pause", { paused: true, ended: false, internal: swapping })).toEqual({ status: "paused", wantsPlay: false });
   });
 });

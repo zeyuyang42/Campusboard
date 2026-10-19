@@ -45,3 +45,27 @@ export function audioEventPatch(type: AudioEventType, el: AudioElementState): Au
       return el.internal ? { status: "paused" } : { status: "paused", wantsPlay: false };
   }
 }
+
+/** What can change the store's `swapping` flag (load() swapped the source of a playing element). */
+export type SwapEvent =
+  | { type: "load"; paused: boolean } // load() is about to set a new source
+  | { type: "pause" }
+  | { type: "playing"; paused: boolean }
+  | { type: "error" }
+  | { type: "playRejected" };
+
+/**
+ * The `swapping` flag after an event. Each load sets it afresh (true only if the element was
+ * playing, so a "pause" may follow); that pause, the new track playing, an error or a refused
+ * play() clear it, so it can never stay true and swallow a later system pause.
+ */
+export function swappingAfter(swapping: boolean, ev: SwapEvent): boolean {
+  switch (ev.type) {
+    case "load": return !ev.paused;
+    case "playing": return ev.paused ? swapping : false;
+    case "pause":
+    case "error":
+    case "playRejected":
+      return false;
+  }
+}
