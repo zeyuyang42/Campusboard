@@ -15,7 +15,7 @@ import { createCore } from "../src/core.js";
 import { parseTheme } from "../src/theme/schema.js";
 import type { Db } from "../src/db/Db.js";
 import * as jobs from "../src/db/repos/jobs.js";
-import { PRESETS } from "../src/theme/presets.js";
+import { DEFAULT_THEME, PRESETS } from "../src/theme/presets.js";
 import {
   exportLibrary, importLibrary, parseLibraryExport, previewLibraryImport, backupDatabase,
   LIBRARY_EXPORT_VERSION, MAX_LIBRARY_FILE_CHARS, MAX_PLAYLIST_ENTRIES, MAX_PLAYS, type LibraryExport,
@@ -131,6 +131,19 @@ describe("library export", () => {
 });
 
 describe("library import", () => {
+  it("writes a system theme so older builds accept it, and restores it as system", async () => {
+    const sys = { ...DEFAULT_THEME, mode: "system" as const };
+    await setSetting(src, "theme", { theme: sys, basePreset: "Dusk" });
+    const out = JSON.parse(JSON.stringify(await exportLibrary(src)));
+    // What a build before system themes checks: mode is dark or light, the pair is extra.
+    expect(["dark", "light"]).toContain(out.settings.theme.theme.mode);
+    expect(out.settings.theme.mode).toBe("system");
+    const dst = new NodeDb();
+    const r = await importLibrary(dst, runnerFor(dst, fakeBandcamp()), parseLibraryExport(JSON.stringify(out)).data!);
+    await waitJob(dst, r.job!.id);
+    expect(await getSetting(dst, "theme")).toEqual({ theme: sys, basePreset: "Dusk" });
+  });
+
   it("round-trips into an empty library: albums, playlist order, history, settings, flags and preferences", async () => {
     const dst = new NodeDb();
     const f = fakeBandcamp();

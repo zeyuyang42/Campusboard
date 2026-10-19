@@ -73,7 +73,8 @@ Requires macOS 13.3 or later. Your library lives in
   background and starts as the current one ends (on by default). Crossfade
   (off by default, up to 10 s) blends tracks from different albums; tracks of
   the same album always play back to back as recorded.
-- **Themes**: Settings → pick a preset, adjust colors, fonts, corner radius,
+- **Themes**: Settings → pick a preset (including High contrast), follow the
+  system appearance or pin dark or light, adjust colors, fonts, corner radius,
   density, the album-art wash and an optional background image. Export writes a
   `.theme.json` you can send to a friend; Import loads one.
 - **Moving to another Mac**: Settings → Library. Export library writes a JSON
@@ -118,6 +119,15 @@ theme can't break the app. Example:
 
 `accent` is only used when nothing is playing; while a track plays, the accent
 and the backdrop come from its artwork, clamped so text stays readable.
+
+`mode` is `"dark"`, `"light"` or `"system"`. A system theme follows the Mac's
+appearance as it changes and needs both sides as `paletteDark` and
+`paletteLight` (same keys as `palette`); every preset carries the pair, so
+choosing Settings → Base → Match system keeps the preset's colors. New
+libraries start on Dusk following the system. `"contrast": "high"` (the High
+contrast preset) holds the art-derived accent to WCAG AAA (7:1). Version 0.4
+and earlier refuse a `"system"` file; dark and light files with a pair import
+there, since unknown keys are dropped.
 
 ## Development
 

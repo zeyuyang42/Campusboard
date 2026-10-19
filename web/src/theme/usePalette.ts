@@ -1,5 +1,5 @@
 // Keeps --accent / --ambient-* on :root in step with the playing track's artwork and the theme.
-import { fitPalette, type AppliedPalette, type ArtPalette } from "@bc/core";
+import { accentRatio, fitPalette, type AppliedPalette, type ArtPalette } from "@bc/core";
 import { usePlayer } from "../player/store";
 import { useTheme } from "./store";
 import { getCore } from "../api/core";
@@ -20,7 +20,7 @@ export function onPaletteChange(fn: () => void): () => void {
 
 function paint() {
   const root = document.documentElement.style;
-  const { theme } = useTheme.getState();
+  const theme = useTheme.getState().resolved;
   if (!currentPalette) {
     root.removeProperty("--accent");
     root.removeProperty("--accent-text");
@@ -30,7 +30,7 @@ function paint() {
     listeners.forEach((fn) => fn());
     return;
   }
-  const fit = fitPalette(currentPalette, theme.palette.surface, 3);
+  const fit = fitPalette(currentPalette, theme.palette.surface, accentRatio(theme));
   root.setProperty("--accent", fit.accent);
   root.setProperty("--accent-text", fit.accentText);
   root.setProperty("--ambient-1", fit.ambient1);

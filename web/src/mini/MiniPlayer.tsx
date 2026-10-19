@@ -2,7 +2,7 @@
 // (parseMiniState), commands go back (MiniCommand); nothing here plays audio or opens the
 // database. The palette and theme are the main window's, painted with setProperty only.
 import { useEffect, useRef, useState } from "react";
-import { applyTheme, extrapolatePosition, MINI_EVENTS, parseMiniState, parseTheme, type MiniCommand, type MiniState } from "@bc/core";
+import { applyTheme, extrapolatePosition, MINI_EVENTS, parseMiniState, parseTheme, resolveTheme, type MiniCommand, type MiniState } from "@bc/core";
 import { createBus, type MiniBus } from "./bus";
 import { hideMini, initMiniWindow, savedOnTop, setOnTop, setTall, TALL_MIN_HEIGHT } from "./window";
 import { ArtImage } from "../components/ArtImage";
@@ -20,7 +20,9 @@ function paint(s: MiniState) {
   if (themeJson !== lastTheme) {
     lastTheme = themeJson;
     const theme = parseTheme(s.theme).theme;
-    if (theme) applyTheme(theme, root);
+    // The main window sends the theme already settled to light or dark (it watches the system
+    // appearance and re-sends on a change); resolving again only matters for an unsettled one.
+    if (theme) applyTheme(resolveTheme(theme, window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true), root);
   }
   const p = s.palette;
   if (p) {

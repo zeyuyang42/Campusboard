@@ -94,7 +94,8 @@ export function ensureContrast(color: RGB, surface: RGB, minRatio: number): RGB 
   const dir = surfaceL > 0.5 ? -1 : 1; // light surface: darken; dark surface: lighten
   for (let step = 1; step <= 40; step++) {
     const L = Math.max(0, Math.min(1, base.L + dir * step * 0.02));
-    const candidate = oklchToRgb(toGamut({ ...base, L }));
+    // Rounded to whole channels, as it will be painted (hex), so the ratio holds after rounding.
+    const candidate = hexToRgb(rgbToHex(oklchToRgb(toGamut({ ...base, L }))));
     if (contrast(candidate, surface) >= minRatio) return candidate;
   }
   return dir > 0 ? { r: 255, g: 255, b: 255 } : { r: 0, g: 0, b: 0 };

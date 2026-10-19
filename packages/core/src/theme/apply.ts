@@ -1,4 +1,4 @@
-import type { Theme } from "./schema.js";
+import { accentRatio, type ResolvedTheme } from "./schema.js";
 import { hexToRgb, rgbToHex, mix, ensureContrast } from "./color.js";
 
 const BUNDLED = { display: "Bricolage Grotesque Variable", ui: "Instrument Sans Variable" };
@@ -15,19 +15,20 @@ export function fontStack(family: string, role: "display" | "ui"): string {
 export interface ThemeVars { [name: string]: string }
 
 /** Compute every CSS custom property the stylesheet reads from a theme. Pure, testable. */
-export function themeVars(t: Theme): ThemeVars {
+export function themeVars(t: ResolvedTheme): ThemeVars {
   const surface = hexToRgb(t.palette.surface);
   const raised = hexToRgb(t.palette.surfaceRaised);
   const text = hexToRgb(t.palette.text);
   const dark = t.mode === "dark";
-  const accent = ensureContrast(hexToRgb(t.palette.accent), surface, 3);
+  const high = t.contrast === "high";
+  const accent = ensureContrast(hexToRgb(t.palette.accent), surface, accentRatio(t));
   const compact = t.density === "compact";
   return {
     "--surface": t.palette.surface,
     "--surface-raised": t.palette.surfaceRaised,
     "--surface-hover": rgbToHex(mix(raised, text, dark ? 0.06 : 0.05)),
     "--surface-active": rgbToHex(mix(raised, text, dark ? 0.11 : 0.09)),
-    "--line": dark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)",
+    "--line": dark ? `rgba(255,255,255,${high ? 0.3 : 0.08})` : `rgba(0,0,0,${high ? 0.3 : 0.08})`,
     "--text": t.palette.text,
     "--text-muted": t.palette.textMuted,
     "--accent-fallback": rgbToHex(accent),
@@ -47,8 +48,8 @@ export function themeVars(t: Theme): ThemeVars {
   };
 }
 
-/** Write the theme onto an element (normally document.documentElement). Only setProperty, never string CSS. */
-export function applyTheme(t: Theme, root: { style: { setProperty(name: string, value: string): void }; dataset?: DOMStringMap }): void {
+/** Write a resolved theme (see resolveTheme) onto an element. Only setProperty, never string CSS. */
+export function applyTheme(t: ResolvedTheme, root: { style: { setProperty(name: string, value: string): void }; dataset?: DOMStringMap }): void {
   const vars = themeVars(t);
   for (const [k, v] of Object.entries(vars)) root.style.setProperty(k, v);
   if (root.dataset) root.dataset.theme = t.mode;
