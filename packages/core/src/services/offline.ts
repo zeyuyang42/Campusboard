@@ -4,7 +4,7 @@ import { getSetting, setSetting } from "../db/repos/settings.js";
 import type { FetchQueue } from "../scrape/http.js";
 import { ScrapeError } from "../scrape/errors.js";
 import { getFreshStreamUrl } from "./streamService.js";
-import { OFFLINE_SETTING_KEY } from "../config.js";
+import { DOWNLOAD_MIN_SHARE, OFFLINE_SETTING_KEY } from "../config.js";
 import type { OfflineStats } from "../types.js";
 
 /**
@@ -49,9 +49,16 @@ const MB = 1_000_000;
 
 export interface OfflineSettings { cap_mb: number | null }
 
+/** How many forced album re-scrapes downloads may still spend on CDN refusals (one per job). */
+export interface DownloadBudget { rescrapes: number }
+
 export class OfflineService {
   /** Names being written or finalised right now; the sweep leaves them alone. */
   private busy = new Set<string>();
+  /** Downloads in flight by track id, so remove() can stop them. */
+  private inflight = new Map<number, AbortController>();
+  /** In-flight tracks remove() was asked for: their download must not finalise. */
+  private discarded = new Set<number>();
   /** Finalising a download, removals and the sweep run one at a time. */
   private chain: Promise<unknown> = Promise.resolve();
 
@@ -116,11 +123,14 @@ export class OfflineService {
    * Save one library track's stream to the offline folder: "have" if it already has a copy,
    * "saved" once the file and its rows are written. The stream URL comes from
    * getFreshStreamUrl (an album page refresh through the queue when it's stale), the mp3
-   * through FetchQueue.download. A CDN that refuses the URL (expired, 4xx) gets one retry
-   * with a freshly scraped URL. The file is written as `<name>.part` and renamed when
-   * complete, so a cut-off download never looks like a copy.
+   * through FetchQueue.download. A CDN that refuses the URL (4xx) gets a retry with a freshly
+   * scraped URL while `budget` allows one (a download job shares one budget across its
+   * tracks, so a CDN that refuses a whole album costs one page fetch, not one per track); a
+   * refusal after that is `cdn_refused`. The file is written as `<name>.part` and renamed when
+   * complete, so a cut-off download never looks like a copy. remove() while it runs stops it
+   * and discards whatever it wrote.
    */
-  async download(trackId: number): Promise<"have" | "saved"> {
+  async download(trackId: number, budget: DownloadBudget = { rescrapes: 1 }): Promise<"have" | "saved"> {
     const files = this.need();
     const row = await getTrackRow(this.db, trackId);
     if (!row) throw new ScrapeError("not_found", `Track ${trackId} is no longer in the library`);
@@ -129,24 +139,32 @@ export class OfflineService {
     if (!row.streamable) throw new ScrapeError("not_streamable", `"${row.title}" is not streamable on Bandcamp`);
     const name = offlineFileName(row.track_id);
     const part = `${name}.part`;
+    const ctrl = new AbortController();
+    this.inflight.set(trackId, ctrl);
     this.busy.add(part);
     this.busy.add(name);
     try {
-      let bytes = 0;
-      for (let attempt = 0; ; attempt++) {
-        const { url } = await getFreshStreamUrl(this.db, this.queue, trackId, attempt > 0);
+      let got = { bytes: 0, expected: null as number | null };
+      for (let forced = false; ;) {
+        const { url } = await getFreshStreamUrl(this.db, this.queue, trackId, forced);
         try {
-          bytes = await this.queue.download(url, (body) => files.write(part, body));
+          got = await this.queue.download(url, (body) => files.write(part, body), { signal: ctrl.signal });
           break;
         } catch (e) {
           const status = e instanceof ScrapeError ? (e.detail as { status?: number } | undefined)?.status : undefined;
-          if (attempt === 0 && status != null && status >= 400 && status < 500) continue;
-          throw e;
+          if (status == null || status < 400 || status >= 500) throw e;
+          if (!forced && budget.rescrapes > 0) { budget.rescrapes--; forced = true; continue; }
+          throw new ScrapeError("cdn_refused", `Bandcamp's audio server refused "${row.title}" (HTTP ${status}) even with a fresh link`, { status });
         }
       }
-      if (bytes < 1024) throw new ScrapeError("fetch_failed", `The download of "${row.title}" was empty`);
+      const { bytes, expected } = got;
       const quality = (await this.db.get<{ q: string }>("SELECT stream_quality AS q FROM tracks WHERE id = ?", [trackId]))?.q ?? "mp3-128";
+      // No Content-Length to check against: an mp3-128 much shorter than its duration was cut off.
+      const floor = expected == null && quality === "mp3-128" && row.duration ? row.duration * 16_000 * DOWNLOAD_MIN_SHARE : 1024;
+      if (bytes < Math.max(1024, floor)) throw new ScrapeError("fetch_failed", `The download of "${row.title}" was incomplete (${bytes} bytes)`, { network: true });
       await this.exclusive(async () => {
+        // Removed while it downloaded: nothing of it stays.
+        if (this.discarded.has(trackId)) throw new ScrapeError("fetch_failed", `The download of "${row.title}" was stopped`, { aborted: true });
         await files.rename(part, name);
         try {
           // Fails (foreign key) if the album was removed while this track downloaded.
@@ -167,10 +185,15 @@ export class OfflineService {
       await files.remove(part).catch(() => undefined);
       throw e;
     } finally {
+      this.inflight.delete(trackId);
+      this.discarded.delete(trackId);
       this.busy.delete(part);
       this.busy.delete(name);
     }
   }
+
+  /** Track ids being downloaded right now. */
+  downloading(): number[] { return [...this.inflight.keys()]; }
 
   /** Clear the rows of tracks whose file is gone (no file removed). */
   private async forget(trackIds: number[]): Promise<void> {
@@ -180,9 +203,18 @@ export class OfflineService {
     await this.db.run(`DELETE FROM track_files WHERE track_id IN (${marks})`, trackIds);
   }
 
-  /** Remove the offline copies of these tracks: rows first, files last. Returns how many there were. */
+  /**
+   * Remove the offline copies of these tracks: rows first, files last. A track among them
+   * that is downloading right now is stopped, and its download discards what it wrote (it
+   * checks before finalising, which runs after this in the same exclusive chain). Returns
+   * how many copies there were.
+   */
   async remove(trackIds: number[]): Promise<number> {
     if (!trackIds.length) return 0;
+    for (const id of trackIds) {
+      const ctrl = this.inflight.get(id);
+      if (ctrl) { this.discarded.add(id); ctrl.abort(); }
+    }
     return this.exclusive(async () => {
       const rows: { id: number; local_path: string | null }[] = [];
       for (let i = 0; i < trackIds.length; i += 500) {
@@ -196,15 +228,16 @@ export class OfflineService {
     });
   }
 
+  /** Remove an album's copies, including a track of it that is downloading right now. */
   async removeAlbum(albumId: number): Promise<number> {
-    const ids = (await this.db.select<{ id: number }>("SELECT id FROM tracks WHERE album_id = ? AND local_path IS NOT NULL", [albumId])).map((r) => r.id);
+    const ids = (await this.db.select<{ id: number }>("SELECT id FROM tracks WHERE album_id = ?", [albumId])).map((r) => r.id);
     return this.remove(ids);
   }
 
-  /** Remove every offline copy, then sweep the folder of anything left. */
+  /** Remove every offline copy (stopping any download in flight), then sweep the folder of anything left. */
   async removeAll(): Promise<number> {
     const ids = (await this.db.select<{ id: number }>("SELECT id FROM tracks WHERE local_path IS NOT NULL")).map((r) => r.id);
-    const n = await this.remove(ids);
+    const n = await this.remove([...new Set([...ids, ...this.inflight.keys()])]);
     await this.sweep();
     return n;
   }

@@ -11,6 +11,10 @@ export type ScrapeErrorCode =
   | "fetch_failed"
   /** Offline copies (#2): the size limit in Settings > Storage is reached. */
   | "storage_full"
+  /** Offline copies: writing the file failed (detail { full: true } when the disk is full). */
+  | "disk_error"
+  /** Offline copies: the audio CDN kept refusing an album's streams, even after a fresh page. */
+  | "cdn_refused"
   /** Offline copies: this build or window has no offline folder. */
   | "offline_unavailable"
   /** The player: the network is down and the track has no offline copy. */

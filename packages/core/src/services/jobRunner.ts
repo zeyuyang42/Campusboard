@@ -16,7 +16,7 @@ import { settleRelease } from "../db/repos/releases.js";
 import { resolvePending } from "../db/repos/importPending.js";
 import { getSetting, setSettingWhileJobRuns } from "../db/repos/settings.js";
 import type { CookieStatus, Job, JobItem, SyncSummary } from "../types.js";
-import { downloadItemTrack, downloadItemUrl, type OfflineService } from "./offline.js";
+import { downloadItemTrack, downloadItemUrl, type DownloadBudget, type OfflineService } from "./offline.js";
 
 /** Thrown inside a job when it was cancelled while waiting; process() swallows it. */
 class JobCancelled extends Error {}
@@ -64,6 +64,8 @@ export class JobRunner {
   private forceFlags = new Map<number, boolean>();
   /** Collection syncs started by the background refresh (this session; a resumed one counts as manual). */
   private autoSyncs = new Set<number>();
+  /** Per download job: the one forced album re-scrape its tracks may spend on CDN refusals. */
+  private downloadBudgets = new Map<number, DownloadBudget>();
   private reset: Promise<void>;
   private resetFailed = false;
   private resetRetried = false;
@@ -264,9 +266,11 @@ export class JobRunner {
             await jobs.failQueuedItems(this.db, job.id, `[client_challenge] Skipped: Bandcamp kept returning its bot check`);
             break;
           }
-          if (e instanceof ScrapeError && e.code === "storage_full") {
-            // The size limit in Settings: the rest would stop the same way.
-            full = `[storage_full] ${e.message}`;
+          const fullDisk = e instanceof ScrapeError && e.code === "disk_error" && (e.detail as { full?: boolean } | undefined)?.full;
+          if (e instanceof ScrapeError && (e.code === "storage_full" || e.code === "cdn_refused" || fullDisk)) {
+            // The size limit, a full disk, or a CDN that refuses this album even after a fresh
+            // page: the rest would stop the same way, so they fail now with that reason.
+            full = `[${e.code}] ${e.message}`;
             await jobs.failQueuedItems(this.db, job.id, full);
             break;
           }
@@ -297,6 +301,7 @@ export class JobRunner {
     } finally {
       this.forceFlags.delete(job.id);
       this.autoSyncs.delete(job.id);
+      this.downloadBudgets.delete(job.id);
       this.onChange();
     }
   }
@@ -363,7 +368,9 @@ export class JobRunner {
       // Checked per track, so the limit stops a job part way (the last copy may pass it a little).
       if (await offline.capReached()) throw new ScrapeError("storage_full", "Offline copies reached the size limit in Settings");
       try {
-        await offline.download(t.id);
+        let budget = this.downloadBudgets.get(jobId);
+        if (!budget) this.downloadBudgets.set(jobId, (budget = { rescrapes: 1 }));
+        await offline.download(t.id, budget);
         return t.album_id;
       } catch (e) {
         if (!(e instanceof ScrapeError)) throw e;

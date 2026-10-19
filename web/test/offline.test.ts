@@ -27,7 +27,7 @@ describe("offline copies in the player (#2)", () => {
     expect(h.active().src).toContain(`/stream/${b.id}`);
   });
 
-  it("a media error on the file falls back to the stream", async () => {
+  it("a media error on the file falls back to the stream and forgets the copy", async () => {
     const t = track();
     h.core.local.set(t.id, localUrl(t.id));
     const el = await h.startPlaying([t]);
@@ -35,6 +35,44 @@ describe("offline copies in the player (#2)", () => {
     await flush();
     expect(h.core.getFreshStreamUrl).toHaveBeenCalledWith(t.id, true);
     expect(el.src).toContain(`/stream/${t.id}?force`);
+    expect(h.core.removeTrackDownloads).toHaveBeenCalledWith([t.id]);
+    // The next play streams straight away.
+    h.state().playTracks([t]);
+    await flush();
+    expect(h.core.getFreshStreamUrl).toHaveBeenLastCalledWith(t.id, false);
+  });
+
+  it("a media error on a stream never touches offline copies", async () => {
+    const el = await h.startPlaying([track()]);
+    el.emit("error");
+    await flush();
+    expect(h.core.removeTrackDownloads).not.toHaveBeenCalled();
+  });
+
+  it("during a Bandcamp cooldown, skips ahead to a downloaded track instead of stopping", async () => {
+    const list = tracks(4);
+    h.core.local.set(list[2].id, localUrl(list[2].id));
+    h.core.cooldownUntil = Date.now() + 60_000;
+    h.state().playTracks(list);
+    await flush(); // A: cooldown, but C is downloaded
+    expect(h.state().error).toContain(list[0].title);
+    vi.advanceTimersByTime(800);
+    await flush(); // B: cooldown again
+    vi.advanceTimersByTime(800);
+    await flush(); // C: plays from its file
+    expect(h.state()).toMatchObject({ index: 2, wantsPlay: true });
+    expect(h.active().src).toBe(localUrl(list[2].id));
+  });
+
+  it("during a cooldown with nothing downloaded, stops as before", async () => {
+    const list = tracks(3);
+    h.core.cooldownUntil = Date.now() + 60_000;
+    h.state().playTracks(list);
+    await flush();
+    vi.advanceTimersByTime(800);
+    await flush();
+    expect(h.state()).toMatchObject({ index: 0, wantsPlay: false, status: "paused" });
+    expect(h.core.getFreshStreamUrl).toHaveBeenCalledTimes(1);
   });
 
   it("preloads a downloaded next track from its file for a gapless switch", async () => {

@@ -213,12 +213,34 @@ function load(track: QueueTrack, force = false) {
       const el = active();
       el.pause();
       if (el.hasAttribute("src")) { el.removeAttribute("src"); el.load(); }
-      // During a Bandcamp cooldown every stale track would fail the same way: stop here
-      // with the "try again after" message instead of skipping through the whole queue.
-      if ((e as { code?: unknown } | null)?.code === "challenge_cooldown") return;
+      // During a Bandcamp cooldown every stale track would fail the same way: stop here with
+      // the "try again after" message instead of skipping through the whole queue, unless the
+      // queue has downloaded tracks (#2), which need no request: then skip on towards them.
+      if ((e as { code?: unknown } | null)?.code === "challenge_cooldown") {
+        if (wanted) void skipIfDownloadedAhead(seq);
+        return;
+      }
       if (wanted) skipAfterError(true);
     }
   })();
+}
+
+/** A cooldown stopped a load: skip on if another queue entry has an offline copy (#2). */
+async function skipIfDownloadedAhead(seq: number) {
+  const { queue, index } = usePlayer.getState();
+  const others = queue.filter((t, i) => i !== index && t.id > 0).map((t) => t.id);
+  const saved = others.length ? await getCore().then((c) => c.downloadedTrackIds(others)).catch(() => []) : [];
+  if (seq !== loadSeq || !saved.length) return; // something else loaded meanwhile, or nothing to reach
+  skipAfterError(true);
+}
+
+/** A local file the element couldn't play is forgotten (#2): the retry and later plays stream. */
+const isLocalSrc = (src: string) => /^(asset:|https?:\/\/asset\.localhost\/|blob:)/.test(src);
+function forgetLocalCopy(trackId: number) {
+  void getCore()
+    .then((c) => c.removeTrackDownloads([trackId]))
+    .then(() => invalidateQueries(["album", "albums", "tracks", "playlist", "offline"]))
+    .catch(() => undefined);
 }
 
 /**
@@ -792,6 +814,7 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
     const cur = usePlayer.getState().current();
     if (!cur) return;
     if (retriedFor !== cur.id) {
+      if (cur.id > 0 && isLocalSrc(el.src)) forgetLocalCopy(cur.id);
       // Most likely an expired stream URL: ask the server to re-scrape and try once more. A
       // paused player (the listener, or the system) stays paused after the retry.
       if (usePlayer.getState().status === "paused") usePlayer.setState({ wantsPlay: false });

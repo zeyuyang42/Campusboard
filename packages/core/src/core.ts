@@ -172,6 +172,16 @@ export function createCore(deps: CoreDeps) {
       return offline.removeAlbum(albumId);
     },
     removeTrackDownloads: (trackIds: number[]) => offline.remove(trackIds),
+    /** Which of these tracks have an offline copy (by the rows; one query, no file checks). */
+    downloadedTrackIds: async (trackIds: number[]): Promise<number[]> => {
+      const ids = trackIds.filter((id) => id > 0).slice(0, 10_000);
+      const out: number[] = [];
+      for (let i = 0; i < ids.length; i += 500) {
+        const chunk = ids.slice(i, i + 500);
+        out.push(...(await db.select<{ id: number }>(`SELECT id FROM tracks WHERE local_path IS NOT NULL AND id IN (${chunk.map(() => "?").join(",")})`, chunk)).map((r) => r.id));
+      }
+      return out;
+    },
     /** Cancel every download and remove every offline copy. */
     removeAllDownloads: async () => { await runner.cancelDownloads(); return offline.removeAll(); },
     offlineStats: () => offline.stats(),

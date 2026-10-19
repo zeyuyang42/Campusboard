@@ -171,6 +171,93 @@ describe("offline copies (#2)", () => {
     expect(files.files.size).toBe(0);
   });
 
+  it("Remove download while a track is in flight stops it and keeps nothing (review #77)", async () => {
+    const { files, offline, runner } = setup();
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    let reached!: () => void;
+    const atWrite = new Promise<void>((r) => { reached = r; });
+    const write = files.write.bind(files);
+    files.write = async (name, body) => { reached(); await held; return write(name, body); };
+    const job = (await runner.enqueueDownload(albumId))!;
+    await atWrite;
+    expect(offline.downloading()).toHaveLength(1);
+    await runner.cancelDownloads(ALBUM);
+    const removing = offline.removeAlbum(albumId);
+    release();
+    await removing;
+    await waitFor(async () => offline.downloading().length === 0 && !(await db.get("SELECT 1 FROM jobs WHERE status = 'running'")));
+    expect((await jobs.getJob(db, job.id))!.status).toBe("cancelled");
+    expect(files.files.size).toBe(0);
+    expect(await db.get("SELECT COUNT(*) AS n FROM tracks WHERE local_path IS NOT NULL")).toEqual({ n: 0 });
+    expect(await db.get("SELECT COUNT(*) AS n FROM track_files")).toEqual({ n: 0 });
+  });
+
+  it("a CDN that keeps refusing costs one forced page fetch per job, then fails the rest", async () => {
+    const { bc, runner } = setup(() => new Response("forbidden", { status: 403, headers: { "content-type": "text/plain" } }));
+    const want = await streamable();
+    // Fresh-looking URLs, so only the forced re-scrape fetches the album page.
+    await db.run("UPDATE tracks SET stream_expires_at = ?", [Date.now() + 10 * 3600_000]);
+    const job = (await runner.enqueueDownload(albumId))!;
+    await waitFor(settled(db, job.id));
+    const j = (await jobs.getJob(db, job.id))!;
+    expect(bc.calls.filter((u) => u === ALBUM)).toHaveLength(1);
+    expect(bc.cdnCount()).toBe(2); // the first track, then once more with the fresh link
+    expect(j.status).toBe("failed");
+    expect(j.error).toMatch(/^\[cdn_refused\]/);
+    expect(j.items!.filter((i) => /cdn_refused/.test(i.error ?? ""))).toHaveLength(want.length);
+  });
+
+  it("the sweep leaves a download in progress alone", async () => {
+    const { files, offline } = setup();
+    const [t] = await streamable();
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    let reached!: () => void;
+    const midWrite = new Promise<void>((r) => { reached = r; });
+    files.write = async (name, body) => {
+      files.files.set(name, new Uint8Array(1)); // partly written
+      reached();
+      await held;
+      files.files.set(name, new Uint8Array(await new Response(body).arrayBuffer()));
+    };
+    const pending = offline.download(t.id);
+    await midWrite;
+    files.files.set("5.mp3.part", new Uint8Array(1)); // a stale one from an old run
+    expect(await offline.sweep()).toBe(1);
+    expect(files.files.has(`${t.track_id}.mp3.part`)).toBe(true);
+    release();
+    expect(await pending).toBe("saved");
+    expect([...files.files.keys()]).toEqual([`${t.track_id}.mp3`]);
+  });
+
+  it("without a Content-Length, a file far shorter than the track is refused", async () => {
+    const noLength = (n: number) => () => new Response(new Uint8Array(n), { status: 200, headers: { "content-type": "audio/mpeg" } });
+    const [t] = await streamable();
+    // 10 s of mp3-128 is ~160 kB. A fresh URL, so no page refresh rewrites the duration.
+    await db.run("UPDATE tracks SET duration = 10, stream_expires_at = ? WHERE id = ?", [Date.now() + 10 * 3600_000, t.id]);
+    const short = setup(noLength(50_000));
+    const err = await short.offline.download(t.id).catch((e) => e);
+    expect(err.code).toBe("fetch_failed");
+    expect(err.message).toMatch(/incomplete/);
+    expect(short.files.files.size).toBe(0);
+    const whole = setup(noLength(160_000));
+    expect(await whole.offline.download(t.id)).toBe("saved");
+  });
+
+  it("labels a failure writing the file as a disk error, not the network", async () => {
+    const { files, offline, runner } = setup();
+    const [t] = await streamable();
+    files.write = async (_name, body) => { await body.cancel(); throw new Error("ENOSPC: no space left on device, write"); };
+    const err = await offline.download(t.id).catch((e) => e);
+    expect(err.code).toBe("disk_error");
+    expect(err.detail).toEqual({ full: true });
+    // In a job, a full disk stops the rest like the size limit.
+    const job = (await runner.enqueueDownload(albumId))!;
+    await waitFor(settled(db, job.id));
+    expect((await jobs.getJob(db, job.id))!.error).toMatch(/^\[disk_error\]/);
+  });
+
   it("stops at the size limit and fails the rest with storage_full", async () => {
     const { files, offline, runner } = setup();
     await offline.setCap(0.001);

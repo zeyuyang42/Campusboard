@@ -316,7 +316,16 @@ src-tauri/
   slot for the request, then streams the body; plugin-fs `writeFile` with a
   ReadableStream opens the file and writes each plugin-http chunk, so nothing is
   buffered), honour the challenge cooldown, resume after a restart and cancel
-  between tracks. A file is written as `.part` and renamed when complete. The
+  between tracks; Remove download / Remove all also abort the track in flight
+  (its AbortSignal goes through `FetchQueue.download`), and its finalising step,
+  queued behind the removal on the same exclusive chain, discards the file.
+  `download()` has an idle timeout (`DOWNLOAD_IDLE_MS`, no data for 60 s) that
+  starts once the queue slot is ours, not a total one, and tells a failure
+  reading the body (`fetch_failed`, `network`) from one writing the file
+  (`disk_error`, `full` on ENOSPC). A CDN 4xx gets one forced album re-scrape per
+  job; a 4xx after that is `cdn_refused` and fails the job's remaining tracks,
+  like `storage_full` and a full disk. Without a Content-Length, an mp3-128 under
+  60% of duration × 16 kB/s counts as cut off. A file is written as `.part` and renamed when complete. The
   folder is `<db stem>-offline/` next to the database (`library-offline`,
   `library-dev-offline`, or beside a `BCP_DB_PATH`), in Application Support
   rather than Caches (macOS may purge Caches). lib.rs creates it and adds it,
@@ -328,7 +337,9 @@ src-tauri/
   after deleting an album, refreshing one, `vacuumOrphans`): files no track
   names go, rows whose file is gone are cleared. The player asks
   `core.localTrackUrl` first (no request at all), streams otherwise, and after a
-  media error retries with the stream. A stream fetch that gets no answer
+  media error on a local file forgets that copy and retries with the stream.
+  During a challenge cooldown a failed load skips on (rather than stopping) when
+  another queue entry has a copy (`core.downloadedTrackIds`). A stream fetch that gets no answer
   (`fetch_failed` with `detail.network`) marks the player offline for 30 s,
   during which tracks without a copy fail at once and the #74 skip moves on to
   the downloaded ones. Radio episodes always stream. The library export never

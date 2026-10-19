@@ -17,6 +17,8 @@ const MESSAGES: Record<string, string> = {
   offline: "You're offline and this track isn't downloaded.",
   storage_full: "Downloads reached the size limit in Settings → Storage.",
   offline_unavailable: "Downloads aren't available here.",
+  cdn_refused: "Bandcamp's audio server refused this album's tracks, even with fresh links. Try again later.",
+  disk_error: "Couldn't save the download on this Mac. Check that the disk has free space.",
 };
 
 export function friendlyError(err: unknown, fallback = "Something went wrong."): string {

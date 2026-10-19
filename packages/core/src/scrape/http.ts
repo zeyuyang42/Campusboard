@@ -1,4 +1,4 @@
-import { DOWNLOAD_TIMEOUT_MS, FETCH_TIMEOUT_MS, RATE_LIMIT_MS, USER_AGENT } from "../config.js";
+import { DOWNLOAD_IDLE_MS, FETCH_TIMEOUT_MS, RATE_LIMIT_MS, USER_AGENT } from "../config.js";
 import { ScrapeError } from "./errors.js";
 import { ChallengeGate } from "./challenge.js";
 import { isChallengePage } from "./html.js";
@@ -87,16 +87,33 @@ export class FetchQueue {
    * Download `url` (an offline copy's mp3, #2) and hand its body to `sink` as a stream, so
    * the file is written as it arrives rather than buffered. Only the request's start takes a
    * queue slot, like every other request; the body then streams outside the queue (the job
-   * runner downloads one track at a time). No retries. Resolves to the bytes `sink` consumed,
-   * which must match Content-Length when the CDN sends one. HTTP errors carry `{ status }`.
+   * runner downloads one track at a time). No retries.
+   *
+   * The timeout is an idle one, started once the queue slot is ours: the download fails when
+   * no data arrives for DOWNLOAD_IDLE_MS, however long the whole file takes. `signal` stops it
+   * (Remove download while a track is in flight). Errors: HTTP errors carry `{ status }`; no
+   * answer, a stalled or cut-off body carries `{ network: true }`; a stop carries
+   * `{ aborted: true }`; a failure writing the file is `disk_error`.
+   * Resolves to the bytes written and the Content-Length (null when the CDN sent none).
    */
-  async download(url: string, sink: (body: ReadableStream<Uint8Array>) => Promise<void>, init: RequestInit = {}): Promise<number> {
+  async download(url: string, sink: (body: ReadableStream<Uint8Array>) => Promise<void>, init: RequestInit = {}): Promise<{ bytes: number; expected: number | null }> {
     await this.gate.ready();
     this.gate.assertClear();
+    const outer = init.signal;
+    if (outer?.aborted) throw stopped(url);
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), DOWNLOAD_TIMEOUT_MS);
+    const onAbort = () => ctrl.abort();
+    outer?.addEventListener("abort", onAbort);
+    let idle: ReturnType<typeof setTimeout> | undefined;
+    let stalled = false;
+    const touch = () => {
+      clearTimeout(idle);
+      idle = setTimeout(() => { stalled = true; ctrl.abort(); }, DOWNLOAD_IDLE_MS);
+    };
     try {
       const res = await this.schedule(async () => {
+        if (outer?.aborted) throw stopped(url);
+        touch();
         try {
           return await this.fetchImpl(url, {
             ...init,
@@ -104,6 +121,7 @@ export class FetchQueue {
             headers: { "User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9", ...(init.headers ?? {}) },
           });
         } catch (e) {
+          if (outer?.aborted) throw stopped(url);
           throw new ScrapeError("fetch_failed", `Failed to fetch ${url}: ${String(e)}`, { network: true });
         }
       });
@@ -114,23 +132,44 @@ export class FetchQueue {
         throw new ScrapeError("fetch_failed", `HTTP ${res.status}${res.ok ? " (a page, not audio)" : ""} for ${url}`, { status: res.status });
       }
       if (!res.body) throw new ScrapeError("fetch_failed", `Empty answer for ${url}`, { status: res.status });
+      // Read the body ourselves, so a failure reading it (network) can be told apart from a
+      // failure writing it (disk), and every chunk restarts the idle timer.
       let bytes = 0;
-      const counted = res.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
-        transform(chunk, c) { bytes += chunk.byteLength; c.enqueue(chunk); },
-      }));
+      let readFailed = false;
+      const reader = res.body.getReader();
+      const counted = new ReadableStream<Uint8Array>({
+        async pull(c) {
+          let r: ReadableStreamReadResult<Uint8Array>;
+          try { r = await reader.read(); } catch (e) { readFailed = true; c.error(e); return; }
+          if (r.done) { c.close(); return; }
+          touch();
+          bytes += r.value.byteLength;
+          c.enqueue(r.value);
+        },
+        cancel(reason) { return reader.cancel(reason); },
+      });
       try {
         await sink(counted);
       } catch (e) {
+        if (outer?.aborted) throw stopped(url);
+        if (readFailed || stalled || ctrl.signal.aborted) {
+          throw new ScrapeError("fetch_failed", `Download of ${url} stopped: ${stalled ? "no data for a while" : String(e)}`, { network: true });
+        }
         if (e instanceof ScrapeError) throw e;
-        throw new ScrapeError("fetch_failed", `Download of ${url} stopped: ${String(e)}`, { network: true });
+        void reader.cancel().catch(() => undefined);
+        const full = /ENOSPC|no space|disk full/i.test(String(e));
+        throw new ScrapeError("disk_error", full ? `The disk is full (${String(e)})` : `Couldn't save the file: ${String(e)}`, { full });
       }
-      const expected = Number(res.headers.get("content-length"));
-      if (ctrl.signal.aborted || (expected > 0 && bytes !== expected)) {
-        throw new ScrapeError("fetch_failed", `Download of ${url} was cut short (${bytes} of ${expected || "?"} bytes)`, { network: true });
+      if (outer?.aborted) throw stopped(url);
+      const length = Number(res.headers.get("content-length"));
+      const expected = Number.isFinite(length) && length > 0 ? length : null;
+      if (stalled || (expected != null && bytes !== expected)) {
+        throw new ScrapeError("fetch_failed", `Download of ${url} was cut short (${bytes} of ${expected ?? "?"} bytes)`, { network: true });
       }
-      return bytes;
+      return { bytes, expected };
     } finally {
-      clearTimeout(timer);
+      clearTimeout(idle);
+      outer?.removeEventListener("abort", onAbort);
     }
   }
 
@@ -177,4 +216,9 @@ export class FetchQueue {
     const until = await this.gate.trip();
     return new ScrapeError("client_challenge", `Bandcamp returned a bot challenge page for ${url}`, { until });
   }
+}
+
+/** The error for a download stopped through its signal (Remove download, #2). */
+function stopped(url: string): ScrapeError {
+  return new ScrapeError("fetch_failed", `Download of ${url} was stopped`, { aborted: true });
 }
