@@ -51,11 +51,13 @@ describe("wiring", () => {
   let h: Harness;
   let mod: typeof import("../src/lib/notifications");
   const win = { visible: false, focused: false };
+  const settle = async () => { await flush(); vi.advanceTimersByTime(mod.SETTLE_MS + 50); await flush(); };
   const notified = () => invoke.mock.calls.filter(([c]) => c === "plugin:notification|notify").map(([, a]) => (a as { options: unknown }).options);
 
   beforeEach(async () => {
     useFakeTimers();
     invoke.mockClear();
+    win.visible = false; win.focused = false;
     Object.assign(window, { __TAURI_INTERNALS__: {} });
     h = await boot();
     Object.assign(h.win, { isVisible: vi.fn(async () => win.visible), isFocused: vi.fn(async () => win.focused) });
@@ -81,17 +83,45 @@ describe("wiring", () => {
     expect(h.core.settings.get(mod.NOTIFY_SETTING_KEY)).toBe(true);
 
     await h.startPlaying([track({ title: "One" }), track({ title: "Two" })]);
-    await flush();
+    await settle();
     expect(notified()).toHaveLength(0); // the first track since launch
 
     h.state().next();
     await flush();
+    expect(notified()).toHaveLength(0); // not before it settles
+    await settle();
     expect(notified()).toEqual([{ title: "Two", body: "Artist — Album" }]);
 
     win.visible = true; win.focused = true;
     h.state().prev();
-    await flush();
+    await settle();
     expect(notified()).toHaveLength(1);
+  });
+
+  it("holding Next posts only the track it stops on", async () => {
+    await mod.initTrackNotifications();
+    await mod.useTrackNotifications.getState().setEnabled(true);
+    await h.startPlaying([1, 2, 3, 4, 5].map((n) => track({ title: `T${n}` })));
+    await settle();
+    for (let i = 0; i < 4; i++) {
+      h.state().next();
+      await flush();
+      vi.advanceTimersByTime(300);
+    }
+    await settle();
+    expect(notified()).toEqual([{ title: "T5", body: "Artist — Album" }]);
+  });
+
+  it("skipping away and back before it settles posts nothing", async () => {
+    await mod.initTrackNotifications();
+    await mod.useTrackNotifications.getState().setEnabled(true);
+    await h.startPlaying([track(), track()]);
+    await settle();
+    h.state().next();
+    await flush();
+    h.state().prev();
+    await settle();
+    expect(notified()).toHaveLength(0);
   });
 
   it("stays off when permission is refused", async () => {

@@ -54,7 +54,7 @@ src-tauri/
   src/tray.rs              optional menu-bar icon (Settings, off by default); `set_menu_bar` from web/src/lib/menuBar.ts; items reuse menu.rs ids
   migrations/*.sql         schema; every statement is IF NOT EXISTS so an old library.db can be adopted
   capabilities/default.json  URL scope for http (bandcamp.com, bcbits.com, custom-domain paths; LAN denied), fs scope ($APPDATA), window permissions, app commands
-  capabilities/mini.json   the mini window: events, drag, hide, set-always-on-top, set-size only
+  capabilities/mini.json   the mini window: events, drag, hide, set-always-on-top, set-size, and the read-only notification:allow-is-permission-granted (see Facts)
   tauri.conf.json          window (Overlay title bar), CSP, bundle targets, min macOS 13.3
 ```
 
@@ -140,7 +140,11 @@ src-tauri/
   resolves "granted" without prompting (checked in the crate source,
   2026-10-19); the user controls it in System Settings → Notifications. Under
   `tauri dev` notifications are attributed to Terminal; only the built app
-  posts under its own name.
+  posts under its own name. The plugin injects a `window.Notification` shim into
+  every webview (its `js_init_script` has no window scope or config option), and
+  the shim calls `is_permission_granted` on each page load. So mini.json grants
+  only that read-only command, or every mini window load logs an ACL rejection.
+  Nothing in the mini window can post a notification.
 - The mini player window has no audio and no core (verified 2026-10-18, selftest
   `miniPlayer`): it drives the main window's store over `mini:state` /
   `mini:command` events, which keep working with the main window hidden. The
