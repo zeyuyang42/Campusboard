@@ -84,7 +84,7 @@ export function AccountSettings() {
       )}
       {cookieLine && <p className={cookieLine.error ? "error" : "muted"}>{cookieLine.text}</p>}
       {job && <JobProgress job={job} compact />}
-      <AutoRefresh />
+      {account?.username && <AutoRefresh />}
     </section>
   );
 }

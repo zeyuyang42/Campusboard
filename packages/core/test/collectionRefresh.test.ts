@@ -15,7 +15,7 @@ import { listAlbums } from "../src/db/repos/albums.js";
 import * as jobs from "../src/db/repos/jobs.js";
 import { createCore } from "../src/core.js";
 import {
-  COLLECTION_REFRESH_INTERVAL_MS, COLLECTION_REFRESH_SETTING_KEY, COLLECTION_REFRESH_START_DELAY_MS, COLLECTION_REFRESH_TICK_MS, RATE_LIMIT_MS,
+  COLLECTION_REFRESH_INTERVAL_MS, COLLECTION_REFRESH_LAST_KEY, COLLECTION_REFRESH_SETTING_KEY, COLLECTION_REFRESH_START_DELAY_MS, COLLECTION_REFRESH_TICK_MS, RATE_LIMIT_MS,
 } from "../src/config.js";
 import type { SyncSummary } from "../src/types.js";
 
@@ -169,7 +169,38 @@ describe("background collection refresh", () => {
     await refresher.tick();
     await refresher.setEnabled(false);
     expect(await refresher.status()).toEqual({ enabled: false, last_auto_at: T0 });
-    expect(await getSetting(db, COLLECTION_REFRESH_SETTING_KEY)).toEqual({ enabled: false, last_auto_at: T0 });
+    expect(await getSetting(db, COLLECTION_REFRESH_SETTING_KEY)).toEqual({ enabled: false });
+    expect(await getSetting(db, COLLECTION_REFRESH_LAST_KEY)).toBe(T0);
+  });
+
+  it("a toggle during a tick is never undone by the tick's write", async () => {
+    await setUsername(db, "examplefan");
+    const { refresher } = setup();
+    // Turn it off while the tick is between its checks and its write.
+    const pending = refresher.tick();
+    await refresher.setEnabled(false);
+    await pending;
+    expect((await refresher.status()).enabled).toBe(false);
+    expect((await refresher.status()).last_auto_at).not.toBeNull();
+    // And the other way round: a toggle after a run keeps the run time.
+    await refresher.setEnabled(true);
+    expect((await refresher.status()).last_auto_at).toBe(T0);
+  });
+
+  it("treats a last run in the future (clock moved back) as due", async () => {
+    await setUsername(db, "examplefan");
+    const { refresher } = setup();
+    await setSetting(db, COLLECTION_REFRESH_LAST_KEY, T0 + 30 * 24 * HOUR);
+    expect(await refresher.tick()).toMatchObject({ job_id: expect.any(Number) });
+  });
+
+  it("Remove account forgets the last automatic run, so a new account doesn't wait a day", async () => {
+    await setUsername(db, "examplefan");
+    const { refresher } = setup();
+    await refresher.tick();
+    await clearAccount(db);
+    expect((await refresher.status()).last_auto_at).toBeNull();
+    expect((await refresher.status()).enabled).toBe(true);
   });
 
   it("a failed refresh isn't retried until the next interval", async () => {

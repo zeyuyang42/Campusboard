@@ -38,5 +38,7 @@ export const COLLECTION_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 export const COLLECTION_REFRESH_START_DELAY_MS = 5 * 60 * 1000;
 /** Then it looks every this often whether a refresh is due and the app is idle. */
 export const COLLECTION_REFRESH_TICK_MS = 10 * 60 * 1000;
-/** settings key: { enabled?: boolean; last_auto_at?: number } (missing `enabled` means on). */
+/** settings key: { enabled: boolean } (missing means on). Written only by the toggle. */
 export const COLLECTION_REFRESH_SETTING_KEY = "collection_refresh";
+/** settings key: ms timestamp of the last automatic refresh. Written only by the refresher, so neither can undo the other. */
+export const COLLECTION_REFRESH_LAST_KEY = "collection_refresh_last";

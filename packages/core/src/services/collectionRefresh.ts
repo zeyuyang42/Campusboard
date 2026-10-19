@@ -5,7 +5,7 @@ import { getSetting, setSetting } from "../db/repos/settings.js";
 import { ACCOUNT_KEY, SYNC_KEY } from "./account.js";
 import { idleBlock } from "./idle.js";
 import {
-  COLLECTION_REFRESH_INTERVAL_MS, COLLECTION_REFRESH_SETTING_KEY, COLLECTION_REFRESH_START_DELAY_MS, COLLECTION_REFRESH_TICK_MS,
+  COLLECTION_REFRESH_INTERVAL_MS, COLLECTION_REFRESH_LAST_KEY, COLLECTION_REFRESH_SETTING_KEY, COLLECTION_REFRESH_START_DELAY_MS, COLLECTION_REFRESH_TICK_MS,
 } from "../config.js";
 import type { CollectionRefreshStatus, SyncSummary } from "../types.js";
 
@@ -18,8 +18,6 @@ export interface CollectionRefreshOptions {
 
 /** Why a tick did not start a sync. */
 export type RefreshSkip = "off" | "no_account" | "cooldown" | "job" | "not_due" | "busy";
-
-interface Stored { enabled?: boolean; last_auto_at?: number }
 
 /**
  * Keeps Purchased and Wishlist current without pressing Sync now.
@@ -75,18 +73,24 @@ export class CollectionRefresher {
     }
   }
 
-  private async stored(): Promise<Stored> {
-    return (await getSetting<Stored>(this.db, COLLECTION_REFRESH_SETTING_KEY)) ?? {};
+  // The toggle and the last-run time are separate rows, each written by one side only, so a
+  // tick can't turn the toggle back on and a toggle can't drop the last-run time.
+  private async enabled(): Promise<boolean> {
+    return (await getSetting<{ enabled?: boolean }>(this.db, COLLECTION_REFRESH_SETTING_KEY))?.enabled !== false;
+  }
+
+  private async lastAuto(): Promise<number | null> {
+    const v = await getSetting<number>(this.db, COLLECTION_REFRESH_LAST_KEY);
+    return typeof v === "number" && Number.isFinite(v) ? v : null;
   }
 
   async setEnabled(on: boolean): Promise<void> {
-    await setSetting(this.db, COLLECTION_REFRESH_SETTING_KEY, { ...(await this.stored()), enabled: on });
+    await setSetting(this.db, COLLECTION_REFRESH_SETTING_KEY, { enabled: on });
     this.opts.onChange?.();
   }
 
   async status(): Promise<CollectionRefreshStatus> {
-    const s = await this.stored();
-    return { enabled: s.enabled !== false, last_auto_at: s.last_auto_at ?? null };
+    return { enabled: await this.enabled(), last_auto_at: await this.lastAuto() };
   }
 
   /** One look: start the sync if it is due and nothing stands in the way. */
@@ -95,15 +99,15 @@ export class CollectionRefresher {
     if (this.busy) return { skipped: "busy" };
     this.busy = true;
     try {
-      const s = await this.stored();
-      if (s.enabled === false) return { skipped: "off" };
+      if (!(await this.enabled())) return { skipped: "off" };
       if (!(await getSetting<{ username?: string }>(this.db, ACCOUNT_KEY))?.username) return { skipped: "no_account" };
       const why = await idleBlock(this.db, this.gate);
       if (why) return { skipped: why };
       const lastSync = Date.parse((await getSetting<SyncSummary>(this.db, SYNC_KEY))?.at ?? "");
-      const last = Math.max(s.last_auto_at ?? 0, Number.isFinite(lastSync) ? lastSync : 0);
+      // A time in the future means the clock moved back: ignore it rather than wait for it.
+      const last = Math.max(...[(await this.lastAuto()) ?? 0, Number.isFinite(lastSync) ? lastSync : 0].filter((t) => t <= now), 0);
       if (now - last < this.intervalMs) return { skipped: "not_due" };
-      await setSetting(this.db, COLLECTION_REFRESH_SETTING_KEY, { ...s, last_auto_at: now });
+      await setSetting(this.db, COLLECTION_REFRESH_LAST_KEY, now);
       const job = await this.runner.enqueueSync({ auto: true });
       this.opts.onChange?.();
       return { job_id: job.id };
