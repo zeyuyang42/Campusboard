@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { toggleAction } from "@bc/core";
 import { usePlayer } from "../player/store";
 import { ArtImage } from "./ArtImage";
 import { NextIcon, PauseIcon, PlayIcon, PrevIcon, QueueIcon, RepeatIcon, RepeatOneIcon, ShuffleIcon, VolumeIcon } from "./Icons";
@@ -32,7 +33,8 @@ export function PlayerBar() {
           <button className={`icon-btn ${s.shuffle ? "on" : ""}`} title="Shuffle (S)" onClick={s.toggleShuffle}><ShuffleIcon /></button>
           <button className="icon-btn" title="Previous (Shift+←)" onClick={s.prev} disabled={!cur}><PrevIcon /></button>
           <button className="big" title="Play/Pause (Space)" onClick={s.toggle} disabled={!cur}>
-            {s.status === "playing" ? <PauseIcon size={20} /> : <PlayIcon size={20} />}
+            {/* The icon shows what the button does: Pause while buffering on the way to playing too. */}
+            {toggleAction(s.status, s.wantsPlay) === "pause" ? <PauseIcon size={20} /> : <PlayIcon size={20} />}
           </button>
           <button className="icon-btn keep" title="Next (Shift+→)" onClick={() => s.next()} disabled={!cur}><NextIcon /></button>
           <button className={`icon-btn ${s.repeat !== "off" ? "on" : ""}`} title={`Repeat: ${s.repeat} (R)`} onClick={s.cycleRepeat}>

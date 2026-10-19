@@ -393,9 +393,9 @@ async function miniPlayerCheck() {
     const titleOk = !!report && !!cur && report.title === cur.title;
     const wasPlaying = usePlayer.getState().status === "playing" && !audioEl.paused;
     await win.hide(); await sleep(300);
-    // Muted media in a hidden window can stall ("waiting" sets the store to loading), and
-    // Play/Pause while loading means play, as with the Space key. Start from playing so the
-    // first press is a pause; the status it started from is recorded.
+    // Muted media in a hidden window can stall ("waiting" sets the store to loading; Play/Pause
+    // then still pauses, see toggleAction) or be paused by WebKit (then the press plays).
+    // Start from playing so the first press is a pause; the status it started from is recorded.
     for (let t = 0; wasPlaying && t < 4000 && usePlayer.getState().status !== "playing"; t += 100) await sleep(100);
     out.statusBeforeToggle = usePlayer.getState().status;
     const c0 = miniBridgeInfo().commands;

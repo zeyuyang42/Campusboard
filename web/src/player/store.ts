@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { PlayCounter, type CountedPlay, type QueueTrack, type RepeatMode, type Track } from "@bc/core";
+import { PlayCounter, toggleAction, type CountedPlay, type QueueTrack, type RepeatMode, type Track } from "@bc/core";
 import { audioEl } from "./audio";
 import { getCore, invalidateQueries } from "../api/core";
 import { friendlyError } from "../lib/errors";
@@ -11,6 +11,12 @@ export interface PlayerState {
   originalOrder: QueueTrack[] | null; // set while shuffle is on
   index: number;
   status: Status;
+  /**
+   * The listener's intent: true from a play (or a track started to play) until a pause, the
+   * end of the queue or an error. Buffering never changes it, so Play/Pause during a stall
+   * pauses. `status` keeps following the audio element (Media Session, the icons).
+   */
+  wantsPlay: boolean;
   position: number;
   duration: number;
   volume: number;
@@ -54,6 +60,8 @@ function shuffled<T>(arr: T[]): T[] {
 let retriedFor: number | null = null;
 let pendingSeek: number | null = null;
 let loadSeq = 0;
+/** A load() is resolving its stream URL: the element still holds the previous track. */
+let loading = false;
 
 // Listening history: one PlayCounter follows the current playback (rule in core's playRule.ts).
 const plays = new PlayCounter();
@@ -74,20 +82,29 @@ function recordPlay(p: CountedPlay) {
 /** Resolve a fresh CDN URL for the track and point the audio element at it. */
 function load(track: QueueTrack, autoplay: boolean, force = false) {
   const seq = ++loadSeq;
+  loading = true;
   retriedFor = force ? track.id : null;
   void (async () => {
     try {
       const core = await getCore();
       const { url } = await core.getFreshStreamUrl(track.id, force);
       if (seq !== loadSeq) return; // a newer load superseded this one
+      loading = false;
       audioEl.src = url;
       audioEl.load();
       // A retry after a media error continues the same playback; anything else is a fresh one.
       if (!force || plays.trackId !== track.id) plays.start(track.id, track.duration);
-      if (autoplay) await audioEl.play().catch(() => undefined);
+      // A pause pressed while the URL was resolving wins; a play pressed then starts it here.
+      if (usePlayer.getState().wantsPlay) {
+        await audioEl.play().catch((e: unknown) => {
+          // Autoplay refused: nothing will play until the listener asks, so stop intending to.
+          if (seq === loadSeq && (e as { name?: unknown } | null)?.name === "NotAllowedError") usePlayer.setState({ wantsPlay: false, status: "paused" });
+        });
+      }
     } catch (e) {
       if (seq !== loadSeq) return;
-      usePlayer.setState({ error: `Couldn't play "${track.title}". ${friendlyError(e)}`, status: "paused" });
+      loading = false;
+      usePlayer.setState({ error: `Couldn't play "${track.title}". ${friendlyError(e)}`, status: "paused", wantsPlay: false });
       // During a Bandcamp cooldown every stale track would fail the same way: stop here
       // with the "try again after" message instead of skipping through the whole queue.
       if ((e as { code?: unknown } | null)?.code === "challenge_cooldown") return;
@@ -102,6 +119,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   originalOrder: null,
   index: 0,
   status: "idle",
+  wantsPlay: false,
   position: 0,
   duration: 0,
   volume: 1,
@@ -123,22 +141,30 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       index = 0;
       set({ originalOrder: playable });
     }
-    set({ queue, index, status: "loading", position: 0, duration: 0, error: null });
+    set({ queue, index, status: "loading", wantsPlay: true, position: 0, duration: 0, error: null });
     load(queue[index], true);
   },
 
   play: () => {
     const cur = get().current();
     if (!cur) return;
-    if (!audioEl.src) load(cur, true);
+    set({ wantsPlay: true });
+    // The track's URL is still resolving: load() starts it when it arrives.
+    if (loading) set({ status: "loading" });
+    else if (!audioEl.src) load(cur, true);
     else {
       // Play after the queue ended restarts the track from the top: a new playback.
       if (audioEl.ended) startPlayback(cur);
       void audioEl.play().catch(() => undefined);
     }
   },
-  pause: () => audioEl.pause(),
-  toggle: () => (get().status === "playing" ? get().pause() : get().play()),
+  pause: () => {
+    // While a track starts there may be no "pause" event to report it (the element can
+    // already be paused), so the status follows the intent here.
+    set(get().status === "loading" ? { wantsPlay: false, status: "paused" } : { wantsPlay: false });
+    audioEl.pause();
+  },
+  toggle: () => (toggleAction(get().status, get().wantsPlay) === "pause" ? get().pause() : get().play()),
 
   next: (auto = false) => {
     const { queue, index, repeat } = get();
@@ -154,12 +180,12 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       // End of queue: wrap when repeating (or when the user pressed Next), otherwise stop.
       if (auto && repeat !== "all") {
         audioEl.pause();
-        set({ status: "paused" });
+        set({ status: "paused", wantsPlay: false });
         return;
       }
       ni = 0;
     }
-    set({ index: ni, status: "loading", position: 0, duration: 0 });
+    set({ index: ni, status: "loading", wantsPlay: true, position: 0, duration: 0 });
     load(queue[ni], true);
   },
   prev: () => {
@@ -171,13 +197,13 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       return;
     }
     const ni = index - 1;
-    set({ index: ni, status: "loading", position: 0, duration: 0 });
+    set({ index: ni, status: "loading", wantsPlay: true, position: 0, duration: 0 });
     load(queue[ni], true);
   },
   jumpTo: (i) => {
     const { queue } = get();
     if (i < 0 || i >= queue.length) return;
-    set({ index: i, status: "loading", position: 0, duration: 0 });
+    set({ index: i, status: "loading", wantsPlay: true, position: 0, duration: 0 });
     load(queue[i], true);
   },
   seek: (sec) => {
@@ -248,7 +274,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     const curId = s.queue[s.index]?.id;
     const queue = s.queue.filter((t) => t && typeof t.id === "number" && typeof t.title === "string" && typeof t.album_id === "number");
     const index = Math.max(0, queue.findIndex((t) => t.id === curId));
-    set({ queue, index, volume: s.volume, shuffle: s.shuffle, repeat: s.repeat, position: queue.length ? s.position : 0, status: queue.length ? "paused" : "idle" });
+    set({ queue, index, volume: s.volume, shuffle: s.shuffle, repeat: s.repeat, position: queue.length ? s.position : 0, status: queue.length ? "paused" : "idle", wantsPlay: false });
     const cur = queue[index];
     if (cur) {
       pendingSeek = s.position;
@@ -284,11 +310,12 @@ audioEl.addEventListener("durationchange", () => {
 // Any jump of the playhead (seek bar, keys, media keys, restore) is not listening; a jump back
 // to the start after the play counted is a manual restart (a fresh playback).
 audioEl.addEventListener("seeking", () => plays.seeked(audioEl.currentTime));
-audioEl.addEventListener("play", () => usePlayer.setState({ status: "playing", error: null }));
-audioEl.addEventListener("playing", () => usePlayer.setState({ status: "playing", error: null }));
+audioEl.addEventListener("play", () => usePlayer.setState({ status: "playing", wantsPlay: true, error: null }));
+audioEl.addEventListener("playing", () => usePlayer.setState({ status: "playing", wantsPlay: true, error: null }));
 audioEl.addEventListener("pause", () => {
   if (!audioEl.ended) usePlayer.setState({ status: "paused" });
 });
+// Buffering: the playhead stops, the intent to play doesn't (see toggleAction).
 audioEl.addEventListener("waiting", () => usePlayer.setState({ status: "loading" }));
 audioEl.addEventListener("ended", () => usePlayer.getState().next(true));
 audioEl.addEventListener("error", () => {
@@ -299,7 +326,7 @@ audioEl.addEventListener("error", () => {
     load(cur, usePlayer.getState().status !== "paused", true);
     return;
   }
-  usePlayer.setState({ error: `Couldn't play "${cur.title}"`, status: "paused" });
+  usePlayer.setState({ error: `Couldn't play "${cur.title}"`, status: "paused", wantsPlay: false });
   const { queue, index } = usePlayer.getState();
   if (index < queue.length - 1) setTimeout(() => usePlayer.getState().next(true), 800);
 });
