@@ -55,6 +55,9 @@ export async function initPersistence() {
     await win.onCloseRequested(async (event) => {
       event.preventDefault();
       if (timer) window.clearTimeout(timer);
+      // The pending full save is replaced by this one; clear the handle too, or the 5 s
+      // position saves (which wait while a full save is pending) would stop for good.
+      timer = null;
       await savePlayState(snapshot()).catch(() => undefined);
       await win.hide().catch(() => undefined);
     });
