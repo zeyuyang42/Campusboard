@@ -1,3 +1,4 @@
+import { VOLUME_STEP } from "@bc/core";
 import { usePlayer } from "./store";
 import { useUi } from "../ui/store";
 import { focusFind } from "../lib/navigation";
@@ -12,8 +13,8 @@ export function initShortcuts() {
       case " ": e.preventDefault(); p.toggle(); break;
       case "ArrowRight": e.preventDefault(); e.shiftKey ? p.next() : p.seekBy(5); break;
       case "ArrowLeft": e.preventDefault(); e.shiftKey ? p.prev() : p.seekBy(-5); break;
-      case "ArrowUp": e.preventDefault(); p.setVolume(p.volume + 0.05); break;
-      case "ArrowDown": e.preventDefault(); p.setVolume(p.volume - 0.05); break;
+      case "ArrowUp": e.preventDefault(); p.stepVolume(VOLUME_STEP); break;
+      case "ArrowDown": e.preventDefault(); p.stepVolume(-VOLUME_STEP); break;
       case "s": case "S": p.toggleShuffle(); break;
       case "r": case "R": p.cycleRepeat(); break;
       case "q": case "Q": p.setQueueOpen(!p.queueOpen); break;

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { PlayCounter, toggleAction, type CountedPlay, type QueueTrack, type RepeatMode, type Track } from "@bc/core";
+import { PlayCounter, positionToGain, stepVolume, toggleAction, toggleMute, type CountedPlay, type QueueTrack, type RepeatMode, type Track } from "@bc/core";
 import { audioEl } from "./audio";
 import { getCore, invalidateQueries } from "../api/core";
 import { friendlyError } from "../lib/errors";
@@ -19,6 +19,7 @@ export interface PlayerState {
   wantsPlay: boolean;
   position: number;
   duration: number;
+  /** The volume slider's position (0-1); the element's gain is positionToGain(volume). */
   volume: number;
   shuffle: boolean;
   repeat: RepeatMode;
@@ -35,6 +36,10 @@ export interface PlayerState {
   seek: (sec: number) => void;
   seekBy: (delta: number) => void;
   setVolume: (v: number) => void;
+  /** Move the volume slider by `delta` (the ↑/↓ keys, Volume Up/Down in the menu). */
+  stepVolume: (delta: number) => void;
+  /** Mute, or go back to the level from before the mute. */
+  toggleMute: () => void;
   enqueueNext: (tracks: Track[]) => void;
   enqueueLast: (tracks: Track[]) => void;
   removeAt: (i: number) => void;
@@ -43,6 +48,7 @@ export interface PlayerState {
   toggleShuffle: () => void;
   cycleRepeat: () => void;
   setQueueOpen: (open: boolean) => void;
+  /** `volume` is a slider position (persist.ts derives it from the saved gain). */
   hydrate: (s: { queue: QueueTrack[]; index: number; position: number; volume: number; shuffle: boolean; repeat: RepeatMode }) => void;
 }
 
@@ -60,6 +66,8 @@ function shuffled<T>(arr: T[]): T[] {
 let retriedFor: number | null = null;
 let pendingSeek: number | null = null;
 let loadSeq = 0;
+/** The slider position before the Mute button silenced it, for unmuting. */
+let beforeMute: number | null = null;
 /** A load() is resolving its stream URL: the element still holds the previous track. */
 let loading = false;
 
@@ -219,9 +227,15 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   },
   seekBy: (d) => get().seek(audioEl.currentTime + d),
   setVolume: (v) => {
-    const vol = Math.max(0, Math.min(1, v));
-    audioEl.volume = vol;
+    const vol = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
+    audioEl.volume = positionToGain(vol);
     set({ volume: vol });
+  },
+  stepVolume: (delta) => get().setVolume(stepVolume(get().volume, delta)),
+  toggleMute: () => {
+    const r = toggleMute(get().volume, beforeMute);
+    get().setVolume(r.position);
+    beforeMute = r.beforeMute;
   },
 
   enqueueNext: (tracks) => {
@@ -278,7 +292,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   setQueueOpen: (open) => set({ queueOpen: open }),
 
   hydrate: (s) => {
-    audioEl.volume = s.volume;
+    audioEl.volume = positionToGain(s.volume);
     // Ignore anything that isn't a full queue entry (e.g. state written by older versions or tools).
     const curId = s.queue[s.index]?.id;
     const queue = s.queue.filter((t) => t && typeof t.id === "number" && typeof t.title === "string" && typeof t.album_id === "number");

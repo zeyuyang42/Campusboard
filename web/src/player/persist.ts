@@ -2,7 +2,7 @@ import { loadPlayState, savePlayState } from "../api/queries";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { usePlayer } from "./store";
 import { audioEl } from "./audio";
-import type { PlayState } from "@bc/core";
+import { gainToPosition, positionToGain, type PlayState } from "@bc/core";
 
 function snapshot(): PlayState {
   const s = usePlayer.getState();
@@ -13,14 +13,17 @@ function snapshot(): PlayState {
     queue_index: s.index,
     shuffle: s.shuffle,
     repeat: s.repeat,
-    volume: s.volume,
+    // Saved as the gain, as before the curve, so any build plays it at the same loudness.
+    volume: positionToGain(s.volume),
   };
 }
 
 export async function initPersistence() {
   try {
     const st = await loadPlayState();
-    usePlayer.getState().hydrate({ queue: st.queue, index: st.queue_index, position: st.position_sec, volume: st.volume, shuffle: st.shuffle, repeat: st.repeat });
+    // play_state.volume is the gain; the slider shows the position that gives it.
+    const volume = gainToPosition(st.volume);
+    usePlayer.getState().hydrate({ queue: st.queue, index: st.queue_index, position: st.position_sec, volume, shuffle: st.shuffle, repeat: st.repeat });
   } catch (e) {
     console.warn("could not restore play state", e);
   }
