@@ -106,6 +106,10 @@ let loading = false;
  * own, not the listener's or the system's. Cleared by that pause or once the new track plays.
  */
 let swapping = false;
+/** Tracks that failed in a row since something last played; a queue that all fails stops. */
+let failStreak = 0;
+/** The load() in progress was started by skipAfterError, so it continues the failure streak. */
+let skippingError = false;
 
 // Listening history: one PlayCounter follows the current playback (rule in core's playRule.ts).
 const plays = new PlayCounter();
@@ -132,6 +136,8 @@ function load(track: QueueTrack, force = false) {
   const seq = ++loadSeq;
   loading = true;
   retriedFor = force ? track.id : null;
+  // A load the listener asked for starts counting failures afresh.
+  if (!force && !skippingError) failStreak = 0;
   void (async () => {
     try {
       const core = await getCore();
@@ -160,8 +166,7 @@ function load(track: QueueTrack, force = false) {
       // During a Bandcamp cooldown every stale track would fail the same way: stop here
       // with the "try again after" message instead of skipping through the whole queue.
       if ((e as { code?: unknown } | null)?.code === "challenge_cooldown") return;
-      const { queue, index } = usePlayer.getState();
-      if (wanted && index < queue.length - 1) skipAfterError();
+      if (wanted) skipAfterError();
     }
   })();
 }
@@ -172,7 +177,15 @@ function load(track: QueueTrack, force = false) {
  * then hold a hidden page's timers indefinitely (#67), so it moves on right away.
  */
 function skipAfterError() {
-  const next = () => usePlayer.getState().next(true);
+  const { queue, index, repeat } = usePlayer.getState();
+  failStreak++;
+  // Stop at the end of the queue unless repeating all, and once every track has failed.
+  if (failStreak >= queue.length || (index >= queue.length - 1 && repeat !== "all")) return;
+  // A plain Next, not the end-of-track one: repeat-one would replay the failed track (#69).
+  const next = () => {
+    skippingError = true;
+    try { usePlayer.getState().next(); } finally { skippingError = false; }
+  };
   if (typeof document !== "undefined" && document.visibilityState === "hidden") next();
   else setTimeout(next, 800);
 }
@@ -645,6 +658,7 @@ const onAudioEvent = (type: AudioEventType) => {
   const patch = audioEventPatch(type, { paused: el.paused, ended: el.ended, internal: loading || swapping });
   if (type === "pause") swapping = swappingAfter(swapping, { type: "pause" });
   if (type === "playing") swapping = swappingAfter(swapping, { type: "playing", paused: el.paused });
+  if (type === "playing") failStreak = 0;
   // A pause from outside (the system) mid-crossfade stops the fading track too.
   if (type === "pause" && el.paused && tx.phase === "fading") {
     other().pause();
@@ -701,8 +715,7 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
       return;
     }
     usePlayer.setState({ error: `Couldn't play "${cur.title}"`, status: "paused", wantsPlay: false });
-    const { queue, index } = usePlayer.getState();
-    if (index < queue.length - 1) skipAfterError();
+    skipAfterError();
   },
 };
 

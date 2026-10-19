@@ -103,6 +103,72 @@ describe("skipping a track that fails (#67)", () => {
     el.emit("error"); // again: give up on this track
     expect(h.state().index).toBe(1);
   });
+
+  describe("with repeat (#69)", () => {
+    beforeEach(() => setVisibility("hidden"));
+
+    it("repeat-one: a media error after the retry advances to the next track", async () => {
+      const list = tracks(3);
+      const el = await h.startPlaying(list);
+      h.state().cycleRepeat(); h.state().cycleRepeat();
+      expect(h.state().repeat).toBe("one");
+      el.emit("error");
+      await flush();
+      el.emit("error");
+      await flush();
+      expect(h.state()).toMatchObject({ index: 1, wantsPlay: true });
+      expect(h.active().src).toContain(`/stream/${list[1].id}`);
+    });
+
+    it("repeat-one: a failed load advances instead of replaying the previous track's source", async () => {
+      const list = tracks(3);
+      const el = await h.startPlaying(list);
+      h.state().cycleRepeat(); h.state().cycleRepeat();
+      h.core.failing.add(list[1].id);
+      h.state().next(); // the listener presses Next onto a track that fails to load
+      await flush();
+      expect(h.state()).toMatchObject({ index: 2, wantsPlay: true });
+      expect(h.active().src).toContain(`/stream/${list[2].id}`);
+      expect(el.src).not.toContain(`/stream/${list[0].id}`);
+    });
+
+    it("repeat-all: a queue where every track fails stops instead of looping", async () => {
+      const list = tracks(3);
+      list.forEach((t) => h.core.failing.add(t.id));
+      h.state().cycleRepeat();
+      expect(h.state().repeat).toBe("all");
+      h.state().playTracks(list, 1);
+      await flush();
+      await flush();
+      expect(h.core.getFreshStreamUrl).toHaveBeenCalledTimes(3);
+      expect(h.state()).toMatchObject({ status: "paused", wantsPlay: false });
+      expect(h.state().index).toBe(0); // 1, 2, wrapped to 0, then stopped
+    });
+
+    it("repeat-all: a failure at the end of the queue wraps to a track that plays", async () => {
+      const list = tracks(3);
+      h.core.failing.add(list[2].id);
+      h.state().cycleRepeat();
+      h.state().playTracks(list, 2);
+      await flush();
+      expect(h.state()).toMatchObject({ index: 0, wantsPlay: true });
+      expect(h.active().src).toContain(`/stream/${list[0].id}`);
+    });
+
+    it("repeat-one: the end of a track that played still replays it", async () => {
+      const list = tracks(3);
+      const el = await h.startPlaying(list);
+      h.state().cycleRepeat(); h.state().cycleRepeat();
+      const calls = h.core.getFreshStreamUrl.mock.calls.length;
+      const plays = el.calls.play;
+      el.end();
+      await flush();
+      expect(h.state().index).toBe(0);
+      expect(el.currentTime).toBe(0);
+      expect(el.calls.play).toBe(plays + 1);
+      expect(h.core.getFreshStreamUrl.mock.calls.length).toBe(calls);
+    });
+  });
 });
 
 describe("the swapping flag", () => {
