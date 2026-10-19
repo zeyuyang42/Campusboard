@@ -294,11 +294,18 @@ src-tauri/
   back to 2013, 640 KB, programme names wrong for new shows) but
   `api/bcweekly/3/getshow` says "bad function"; use the pages. Costs: the list
   page at most once a day (page cache), an episode page once per play (page
-  cache 10 min, tracklist kept in memory), plus one `stream_redirect` hit by the
-  `<audio>` element itself (CSP `media-src` allows `https://bandcamp.com` for
-  it). An episode is a queue entry with `id = album_id = -showId` and a
-  `radio` field; it is not counted in listening history (`plays` keys library
-  tracks) and can't be added to a playlist.
+  cache 10 min, tracklist kept in memory) plus one `stream_redirect` request.
+  Core resolves that redirect itself through `FetchQueue.resolveRedirect`
+  (`redirect: "manual"`, which `api/core.ts` maps to plugin-http's
+  `maxRedirections: 0` = reqwest `Policy::none`, so the 302 and its Location come
+  back unfollowed; the browser-mode proxy reports it as `x-bc-location`). The
+  Location must match `RADIO_CDN_URL` (https, `*.bcbits.com/stream/`). The
+  `<audio>` element only ever gets the CDN URL, so the CSP is unchanged, and the
+  URL carries the CDN's real 24 h `ts`; it is reused in memory until an hour
+  before that. An episode restored at launch is not resolved until Play. An
+  episode is a queue entry with `id = album_id = -showId` and a `radio` field;
+  it is not counted in listening history (`plays` keys library tracks) and
+  can't be added to a playlist.
 
 ## Collection sync facts (verified 2026-10-17 with curl against a public profile)
 

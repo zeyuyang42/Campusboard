@@ -189,8 +189,8 @@ export const useTrackLyrics = (id: number | null) =>
 /** The latest Bandcamp Radio episodes. Core caches the page for a day; this keeps it for the session. */
 export const useRadioShows = () => useQuery({ queryKey: keys.radioShows, queryFn: async () => (await core()).radioShows(), staleTime: 60 * 60 * 1000 });
 /** One episode's tracklist (core keeps it in memory after the first read, so refetches are free). */
-export const useRadioShow = (id: number | null) =>
-  useQuery({ queryKey: keys.radioShow(id ?? 0), queryFn: async () => (await core()).radioShow(id!), enabled: id != null && id > 0, staleTime: Infinity });
+export const useRadioShow = (id: number | null, load = true) =>
+  useQuery({ queryKey: keys.radioShow(id ?? 0), queryFn: async () => (await core()).radioShow(id!), enabled: load && id != null && id > 0, staleTime: Infinity });
 
 /** Playlist entries, plays and preferences from an imported library still waiting for their albums. */
 export const usePendingImports = () => useQuery({ queryKey: keys.pendingImports, queryFn: async () => (await core()).pendingImports() });

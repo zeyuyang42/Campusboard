@@ -36,6 +36,15 @@ function bandcampProxy(): Plugin {
           // Follow redirects by hand so every hop passes the same check as the first URL.
           let url = target;
           let r = await fetch(url, { method: req.method, headers: withCookie(url), body: body && req.method !== "GET" ? body : undefined, redirect: "manual" });
+          // redirect: "manual" from the app (FetchQueue.resolveRedirect): report the first hop, never follow it.
+          if (req.headers["x-bc-redirect"] === "manual" && r.status >= 300 && r.status < 400 && r.headers.get("location")) {
+            await r.body?.cancel().catch(() => undefined);
+            res.statusCode = 200;
+            res.setHeader("x-bc-status", String(r.status));
+            res.setHeader("x-bc-location", new URL(r.headers.get("location")!, url).toString());
+            res.end();
+            return;
+          }
           for (let hop = 0; r.status >= 300 && r.status < 400 && r.headers.get("location"); hop++) {
             const next = new URL(r.headers.get("location")!, url).toString();
             if (hop >= MAX_REDIRECTS) { res.statusCode = 502; res.end("too many redirects"); return; }

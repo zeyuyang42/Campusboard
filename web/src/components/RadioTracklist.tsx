@@ -61,11 +61,11 @@ function RadioEntryRow({ entry, current, onSeek, onOpenAlbum }: { entry: RadioEn
       </div>
       <div className="radio-entry-actions">
         {entry.album_id ? (
-          <Link className="btn sm ghost" to={`/album/${entry.album_id}`} onClick={onOpenAlbum}>Open album</Link>
+          <Link className="btn sm ghost reveal" to={`/album/${entry.album_id}`} onClick={onOpenAlbum}>Open album</Link>
         ) : entry.url ? (
-          <button className="btn sm ghost" disabled={importing} onClick={start}>{importing ? "Importing…" : "Import"}</button>
+          <button className="btn sm ghost reveal" disabled={importing} onClick={start}>{importing ? "Importing…" : "Import"}</button>
         ) : null}
-        {entry.url && <ExternalLink className="btn sm ghost" href={entry.url} title={entry.url}>Buy on Bandcamp</ExternalLink>}
+        {entry.url && <ExternalLink className="btn sm ghost buy" href={entry.url} title={entry.url}>Buy on Bandcamp</ExternalLink>}
       </div>
       <button className="radio-entry-time" title="Play from here" onClick={onSeek}>{formatDuration(entry.timecode)}</button>
     </li>

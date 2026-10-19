@@ -3,8 +3,9 @@ import { NodeDb } from "./helpers/nodeDb.js";
 import { fixture } from "./helpers.js";
 import { FetchQueue } from "../src/scrape/http.js";
 import { ScrapeError } from "../src/scrape/errors.js";
-import { parseRadioList, parseRadioShow, radioEntryAt, radioImageUrl, radioShowUrl, RADIO_LIST_URL } from "../src/scrape/radio.js";
-import { RadioService, radioQueueTrack, radioStreamExpiry, isRadioTrack, RADIO_LIST_CACHE_MS, RADIO_STREAM_TTL_MS } from "../src/services/radio.js";
+import { parseRadioList, parseRadioShow, radioEntryAt, radioImageUrl, radioShowUrl, RADIO_CDN_URL, RADIO_LIST_URL, RADIO_STREAM_URL } from "../src/scrape/radio.js";
+import { readJsonAttr } from "../src/scrape/html.js";
+import { RadioService, radioQueueTrack, isRadioTrack, isQueueRadio, RADIO_LIST_CACHE_MS } from "../src/services/radio.js";
 import { upsertTralbum } from "../src/services/importService.js";
 import { parseTralbumPage } from "../src/scrape/parseTralbum.js";
 import { nowPlayingMetadata } from "../src/services/nowPlaying.js";
@@ -74,6 +75,55 @@ describe("parseRadioShow (an episode page)", () => {
   });
 });
 
+/** A fixture with its data-blob JSON edited, re-embedded the way Bandcamp escapes it. */
+function withBlob(name: string, edit: (blob: any) => void): string { // eslint-disable-line @typescript-eslint/no-explicit-any
+  const blob = readJsonAttr<any>(fixture(name), "data-blob"); // eslint-disable-line @typescript-eslint/no-explicit-any
+  edit(blob);
+  return `<html><head><title>x</title></head><body><div id="pagedata" data-blob="${JSON.stringify(blob).replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"></div></body></html>`;
+}
+
+describe("malformed entries are dropped, not fatal", () => {
+  it("an episode with a broken tracklist entry keeps its audio and the other entries", () => {
+    const html = withBlob("radio-show", (b) => {
+      const t = b.appData.show.tracks;
+      delete t[1].timecode; // can't be placed on the playhead: dropped
+      t[2].title = null; // kept, untitled
+      t[3] = "not an entry";
+      t[4].timecode = "12:00";
+    });
+    const s = parseRadioShow(html);
+    expect(s.stream_url).toMatch(RADIO_STREAM_URL);
+    expect(s.tracks).toHaveLength(15);
+    expect(s.tracks.find((t) => t.timecode === 876)?.title).toBe("");
+    expect(s.tracks.some((t) => t.timecode === 400)).toBe(false);
+  });
+
+  it("an episode without a tracklist or title still plays", () => {
+    const s = parseRadioShow(withBlob("radio-show", (b) => { b.appData.show.tracks = null; b.appData.show.title = null; }));
+    expect(s.tracks).toEqual([]);
+    expect(s.title).toBe("Bandcamp Selects");
+    expect(s.stream_url).toMatch(RADIO_STREAM_URL);
+  });
+
+  it("only a stream_redirect on bandcamp.com is taken as the stream", () => {
+    for (const u of ["https://t4.bcbits.com/stream/x/mp3-128/1?ts=1", "https://bandcamp.com/radio", "http://bandcamp.com/stream_redirect?x=1", "https://bandcamp.com.evil.example/stream_redirect?x=1"]) {
+      expect(parseRadioShow(withBlob("radio-show", (b) => { b.appData.show.compiledTrack.streamUrl = u; })).stream_url).toBeNull();
+    }
+  });
+
+  it("one bad show doesn't blank the list", () => {
+    const shows = parseRadioList(withBlob("radio", (b) => {
+      const l = b.appData.shows;
+      l[0].title = null;
+      delete l[1].itemId;
+      l[2] = 42;
+      l[3].imageId = "big";
+    }));
+    expect(shows).toHaveLength(17);
+    expect(shows[0]).toMatchObject({ title: "Hermanos Gutiérrez", image_id: null });
+  });
+});
+
 describe("radioEntryAt (now featuring)", () => {
   const tracks = [{ timecode: 0 }, { timecode: 400 }, { timecode: 876 }];
   it("is the last entry whose timecode the playhead reached", () => {
@@ -95,14 +145,26 @@ describe("radioEntryAt (now featuring)", () => {
   });
 });
 
-function setup(pages: Record<string, () => string>) {
+const cdnUrl = () => `https://t4.bcbits.com/stream/db2df1ace37978b61e4c9987ab84f27f/mp3-128/109676427?p=0&ts=${Math.floor(Date.now() / 1000) + 86400}&t=1d57&token=x`;
+
+/**
+ * Bandcamp offline: the pages from fixtures, and stream_redirect answering a 302 (only when
+ * asked not to follow it). `redirect` replaces the Location; `stale` makes the redirect 404.
+ */
+function setup(pages: Record<string, () => string>, opts: { redirect?: () => string; stale?: () => boolean } = {}) {
   const db = new NodeDb();
-  const fetch = vi.fn(async (url: string) => {
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.startsWith("https://bandcamp.com/stream_redirect?")) {
+      if (init?.redirect !== "manual") throw new Error("the stream redirect must not be followed");
+      if (opts.stale?.()) return new Response("", { status: 404 });
+      return new Response("<html>moved</html>", { status: 302, headers: { location: (opts.redirect ?? cdnUrl)() } });
+    }
     const page = pages[url];
     return page ? new Response(page(), { status: 200 }) : new Response("", { status: 404 });
   });
   const svc = new RadioService(db, new FetchQueue(fetch, 0));
-  return { db, fetch, svc };
+  const urls = () => fetch.mock.calls.map((c) => String(c[0]).replace(/\?.*$/, "?…"));
+  return { db, fetch, svc, urls };
 }
 
 describe("RadioService", () => {
@@ -122,31 +184,63 @@ describe("RadioService", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("shares one request between the tracklist and the stream URL, and marks imported releases", async () => {
-    const { db, fetch, svc } = setup(pages);
+  it("shares one page request between the tracklist and the stream, and marks imported releases", async () => {
+    const { db, svc, urls } = setup(pages);
     const album = parseTralbumPage(fixture("album"), 0);
     await upsertTralbum(db, { ...album, url: "https://omasta.bandcamp.com/album/hits-different" });
     const [show, stream] = await Promise.all([svc.show(SHOW_ID), svc.streamUrl(SHOW_ID)]);
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0][0]).toBe(radioShowUrl(SHOW_ID));
-    expect(stream.url).toContain("stream_redirect");
+    expect(urls()).toEqual([radioShowUrl(SHOW_ID).replace(/\?.*$/, "?…"), "https://bandcamp.com/stream_redirect?…"]);
     expect("stream_url" in show).toBe(false);
+    expect(stream.url).toMatch(RADIO_CDN_URL);
     const omasta = show.tracks.filter((t) => t.url === "https://omasta.bandcamp.com/album/hits-different");
     expect(omasta.length).toBe(4);
     expect(omasta.every((t) => typeof t.album_id === "number" && t.album_id > 0)).toBe(true);
     expect(show.tracks.filter((t) => t.album_id != null)).toHaveLength(4);
     // The tracklist again: from memory, no request.
     await svc.show(SHOW_ID);
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(urls()).toHaveLength(2);
   });
 
-  it("reuses a recent page for the stream URL, and reads it again when forced (a media error)", async () => {
-    const { fetch, svc } = setup(pages);
+  it("resolves the redirect to the CDN through the queue, with the CDN URL's own expiry", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-19T12:00:00Z") });
+    try {
+      const { fetch, svc } = setup(pages);
+      const s = await svc.streamUrl(SHOW_ID);
+      expect(s.url).toMatch(/^https:\/\/t4\.bcbits\.com\/stream\//);
+      expect(s.expires_at).toBe((Math.floor(Date.now() / 1000) + 86400) * 1000);
+      // The stream_redirect request carried the queue's plain headers and was not followed.
+      const [, init] = fetch.mock.calls[1];
+      expect(init).toMatchObject({ redirect: "manual" });
+      expect((init!.headers as Record<string, string>)["User-Agent"]).toBeTruthy();
+      // Reused for hours: no request until it nears its expiry.
+      vi.setSystemTime(Date.now() + 20 * 3600_000);
+      expect((await svc.streamUrl(SHOW_ID)).url).toBe(s.url);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      vi.setSystemTime(Date.now() + 3.5 * 3600_000);
+      await svc.streamUrl(SHOW_ID);
+      expect(fetch).toHaveBeenCalledTimes(4); // page (cache expired) + redirect
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("reads the page again and resolves afresh when forced (a media error)", async () => {
+    const { svc, urls } = setup(pages);
     await svc.streamUrl(SHOW_ID);
-    await svc.streamUrl(SHOW_ID);
-    expect(fetch).toHaveBeenCalledTimes(1);
     await svc.streamUrl(SHOW_ID, true);
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(urls()).toEqual(Array(2).fill([radioShowUrl(SHOW_ID).replace(/\?.*$/, "?…"), "https://bandcamp.com/stream_redirect?…"]).flat());
+  });
+
+  it("reads the page once more when a cached page's redirect has gone stale", async () => {
+    let stale = true;
+    const { svc, urls } = setup(pages, { stale: () => { const s = stale; stale = false; return s; } });
+    expect((await svc.streamUrl(SHOW_ID)).url).toMatch(RADIO_CDN_URL);
+    expect(urls()).toHaveLength(4);
+  });
+
+  it("refuses a redirect that leads anywhere but Bandcamp's stream CDN", async () => {
+    for (const to of ["https://evil.example/stream/x.mp3", "http://t4.bcbits.com/stream/x", "https://f4.bcbits.com/img/a1_16.jpg", "https://bcbits.com.evil.example/stream/x"]) {
+      const { svc } = setup(pages, { redirect: () => to });
+      await expect(svc.streamUrl(SHOW_ID)).rejects.toMatchObject({ code: "not_streamable" });
+    }
   });
 
   it("refuses ids that can't be a show without a request", async () => {
@@ -155,12 +249,24 @@ describe("RadioService", () => {
     await expect(svc.streamUrl(0)).rejects.toMatchObject({ code: "not_found" });
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("asks the library only about the episode's releases", async () => {
+    const { db, svc } = setup(pages);
+    const spy = vi.spyOn(db, "select");
+    await svc.show(SHOW_ID);
+    const [sql, params] = spy.mock.calls.find((c) => /FROM albums/.test(c[0]))!;
+    expect(sql).toMatch(/WHERE url IN \(/);
+    expect((params as string[]).length).toBe(new Set(parseRadioShow(fixture("radio-show")).tracks.map((t) => t.url)).size);
+  });
 });
 
-describe("radio stream expiry", () => {
-  it("counts from the URL's issue time", () => {
-    expect(radioStreamExpiry("https://bandcamp.com/stream_redirect?enc=mp3-128&track_id=1&ts=1792443737&t=ab", 0)).toBe(1792443737_000 + RADIO_STREAM_TTL_MS);
-    expect(radioStreamExpiry("https://bandcamp.com/stream_redirect?x=1", 5)).toBe(5 + RADIO_STREAM_TTL_MS);
+describe("a restored queue entry's radio field", () => {
+  it("must have the shape radioQueueTrack gives it", () => {
+    expect(isQueueRadio({ show_id: 1008, image_id: 47798096, program: "Bandcamp Selects" })).toBe(true);
+    expect(isQueueRadio({ show_id: 1008, image_id: null, program: "" })).toBe(true);
+    for (const bad of [null, "radio", { show_id: "1008", image_id: null, program: "x" }, { show_id: -1, image_id: null, program: "x" }, { show_id: 1, image_id: 1.5, program: "x" }, { show_id: 1, image_id: null }]) {
+      expect(isQueueRadio(bad)).toBe(false);
+    }
   });
 });
 

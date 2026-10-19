@@ -2,7 +2,7 @@ import { create } from "zustand";
 import {
   audioEventPatch, PlayCounter, swappingAfter, positionToGain, stepVolume, toggleAction, toggleMute,
   crossfadeGains, elementRole, fadeProgress, fadeSeconds, gaplessDelayMs, parsePlaybackSettings, preloadDue, preloadStale, routeElementEvent,
-  standbyUsable, transitionAfter, transitionKind, transitionPoint, upcomingIndex,
+  standbyUsable, transitionAfter, isQueueRadio, transitionKind, transitionPoint, upcomingIndex,
   CROSSFADE_MIN_SEC, DEFAULT_PLAYBACK, GAPLESS_ARM_SEC, GAPLESS_START_LEAD_MS, PLAYBACK_SETTING_KEY, STANDBY_PRIME_MS, TRANSITION_IDLE,
   type AudioEventType, type CountedPlay, type ElementEventType, type PlaybackSettings, type QueueTrack, type RepeatMode, type Track,
   type TransitionEvent, type TransitionKind, type TransitionState,
@@ -95,7 +95,11 @@ const active = () => audioEls[activeIdx];
 const other = () => audioEls[1 - activeIdx];
 
 let retriedFor: number | null = null;
-let pendingSeek: number | null = null;
+/**
+ * A position to apply once the track's metadata arrives (a seek before it had a source, a
+ * restore, a retry). Tied to the track it was set for: a load of another track drops it (#75).
+ */
+let pendingSeek: { trackId: number; sec: number } | null = null;
 let loadSeq = 0;
 /** The slider position before the Mute button silenced it, for unmuting. */
 let beforeMute: number | null = null;
@@ -149,6 +153,7 @@ function load(track: QueueTrack, force = false) {
   const seq = ++loadSeq;
   loading = true;
   retriedFor = force ? track.id : null;
+  if (pendingSeek && pendingSeek.trackId !== track.id) pendingSeek = null;
   // A load the listener asked for starts counting failures afresh and wins over a pending skip.
   if (!force && !skippingError) { failStreak = 0; cancelPendingSkip(); }
   void (async () => {
@@ -587,7 +592,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     plays.seeked();
     const el = active();
     if (Number.isFinite(el.duration)) el.currentTime = Math.max(0, Math.min(sec, el.duration));
-    else pendingSeek = sec;
+    else { const cur = get().current(); pendingSeek = cur ? { trackId: cur.id, sec } : null; }
     set({ position: sec });
   },
   seekBy: (d) => get().seek(active().currentTime + d),
@@ -677,13 +682,17 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // Ignore anything that isn't a full queue entry (e.g. state written by older versions or tools).
     const curId = s.queue[s.index]?.id;
     // Older versions persisted lyrics and had no cap.
-    const queue = s.queue.filter((t) => t && typeof t.id === "number" && typeof t.title === "string" && typeof t.album_id === "number").slice(0, MAX_QUEUE).map(toQueueTrack);
+    // A radio episode's `radio` field must have the shape radioQueueTrack gives it (#44).
+    const queue = s.queue.filter((t) => t && typeof t.id === "number" && typeof t.title === "string" && typeof t.album_id === "number" && (t.radio === undefined || isQueueRadio(t.radio))).slice(0, MAX_QUEUE).map(toQueueTrack);
     const index = Math.max(0, queue.findIndex((t) => t.id === curId));
     set({ queue, index, volume: s.volume, shuffle: s.shuffle, repeat: s.repeat, position: queue.length ? s.position : 0, status: queue.length ? "paused" : "idle", wantsPlay: false });
     const cur = queue[index];
     if (cur) {
-      pendingSeek = s.position;
-      load(cur);
+      pendingSeek = { trackId: cur.id, sec: s.position };
+      // An episode's URL costs a Bandcamp request: it is resolved on the first Play (play()
+      // loads a track without a source), not at launch.
+      if (cur.radio) usePlayer.setState({ duration: cur.duration ?? 0 });
+      else load(cur);
     }
   },
 }));
@@ -729,9 +738,9 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
   loadedmetadata: (el) => {
     usePlayer.setState({ duration: el.duration });
     plays.setDuration(el.duration);
-    if (pendingSeek != null) {
+    if (pendingSeek != null && pendingSeek.trackId === usePlayer.getState().current()?.id) {
       plays.seeked();
-      el.currentTime = pendingSeek;
+      el.currentTime = pendingSeek.sec;
       pendingSeek = null;
     }
   },
@@ -750,7 +759,7 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
   waiting: () => onAudioEvent("waiting"),
   // Gapless: the standby starts here if the early start didn't happen; otherwise the plain way.
   ended: () => { if (!stepTransition(true)) usePlayer.getState().next(true); },
-  error: () => {
+  error: (el) => {
     swapping = swappingAfter(swapping, { type: "error" });
     const cur = usePlayer.getState().current();
     if (!cur) return;
@@ -758,6 +767,9 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
       // Most likely an expired stream URL: ask the server to re-scrape and try once more. A
       // paused player (the listener, or the system) stays paused after the retry.
       if (usePlayer.getState().status === "paused") usePlayer.setState({ wantsPlay: false });
+      // Resume where it failed: a network blip mustn't restart an episode from the top.
+      const at = Math.max(Number.isFinite(el.currentTime) ? el.currentTime : 0, usePlayer.getState().position || 0);
+      if (!pendingSeek && at > 0) pendingSeek = { trackId: cur.id, sec: at };
       load(cur, true);
       return;
     }

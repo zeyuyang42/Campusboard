@@ -415,8 +415,12 @@ details.about-wrap summary { cursor: pointer; color: var(--text-muted); margin-t
 .radio-entry .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .radio-entry .sub { color: var(--text-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .radio-entry .sub .album::before { content: ", "; }
-.radio-entry-actions { display: flex; gap: 2px; opacity: 0; }
-.radio-entry:hover .radio-entry-actions, .radio-entry:focus-within .radio-entry-actions, .radio-entry.current .radio-entry-actions { opacity: 1; }
+.radio-entry-actions { display: flex; gap: 2px; }
+/* Buy stays visible, quietly; Import / Open album appear on hover, focus and the entry on air. */
+.radio-entry-actions .buy { color: var(--text-muted); }
+.radio-entry-actions .buy:hover { color: var(--text); }
+.radio-entry-actions .reveal { opacity: 0; }
+.radio-entry:hover .reveal, .radio-entry:focus-within .reveal, .radio-entry.current .reveal { opacity: 1; }
 .radio-entry-time { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; padding: 2px 4px; border-radius: 4px; }
 .radio-entry-time:hover { color: var(--text); background: var(--surface-raised); }
 .radio-entry-error { font-size: 12px; margin-top: 2px; white-space: normal; }

@@ -13,7 +13,7 @@ export function PlayerBar() {
   const s = usePlayer();
   const cur = s.queue[s.index] ?? null;
   const { nowPlayingOpen, setNowPlayingOpen, toggleSidebar } = useUi();
-  const { entry } = useRadioNow(cur?.radio ? cur : null);
+  const { entry } = useRadioNow(cur?.radio ? cur : null, s.wantsPlay || s.status === "playing");
   return (
     <footer className="player">
       <div className="now">

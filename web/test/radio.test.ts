@@ -62,11 +62,72 @@ describe("a radio episode in the player (#44)", () => {
     expect(h.standby().src).toContain("stream_redirect?show=1008");
   });
 
-  it("survives a restart: the saved queue entry keeps its radio details", async () => {
+  it("survives a restart without a request until Play, then resumes where it was", async () => {
     const saved = episode();
     h.state().hydrate({ queue: [JSON.parse(JSON.stringify(saved))], index: 0, position: 1900, volume: 1, shuffle: false, repeat: "off" });
     await flush();
     expect(h.state().current()).toEqual(saved);
+    expect(h.state()).toMatchObject({ status: "paused", position: 1900, duration: SHOW.duration });
+    expect(h.core.radioStreamUrl).not.toHaveBeenCalled();
+
+    h.state().play();
+    await flush();
     expect(h.core.radioStreamUrl).toHaveBeenCalledWith(SHOW.id, false);
+    const el = h.active();
+    el.emit("loadedmetadata", { duration: SHOW.duration, readyState: 1 });
+    expect(el.currentTime).toBe(1900);
+  });
+
+  it("drops a restored entry whose radio field is malformed", async () => {
+    const good = track();
+    const bad = { ...episode(), radio: { show_id: "1008", image_id: null, program: "x" } } as unknown as QueueTrack;
+    h.state().hydrate({ queue: [bad, good as QueueTrack], index: 1, position: 0, volume: 1, shuffle: false, repeat: "off" });
+    await flush();
+    expect(h.state().queue.map((t) => t.id)).toEqual([good.id]);
+  });
+
+  it("a media error mid-episode resumes at the same point, not from the top", async () => {
+    const el = await h.startPlaying([episode()], 0, SHOW.duration);
+    vi.advanceTimersByTime(300);
+    el.emit("timeupdate", { currentTime: 1900 });
+    el.emit("error");
+    await flush();
+    expect(h.core.radioStreamUrl).toHaveBeenLastCalledWith(SHOW.id, true);
+    expect(el.currentTime).toBe(0); // the new source starts from the top...
+    el.emit("loadedmetadata", { duration: SHOW.duration, readyState: 1 });
+    expect(el.currentTime).toBe(1900); // ...and jumps back to where it failed
+  });
+});
+
+describe("a pending seek belongs to its track (#75)", () => {
+  it("a seek during the URL fetch, then Next: the next track starts at 0", async () => {
+    const list = [track(), track()];
+    h.state().playTracks(list);
+    h.state().seek(40); // no source yet: kept for later
+    h.state().next();
+    await flush();
+    const el = h.active();
+    expect(h.state().current()?.id).toBe(list[1].id);
+    el.emit("loadedmetadata", { duration: 100, readyState: 1 });
+    expect(el.currentTime).toBe(0);
+  });
+
+  it("a seek during the URL fetch still applies to that track", async () => {
+    h.state().playTracks([track(), track()]);
+    h.state().seek(40);
+    await flush();
+    const el = h.active();
+    el.emit("loadedmetadata", { duration: 100, readyState: 1 });
+    expect(el.currentTime).toBe(40);
+  });
+
+  it("a restored position is not applied to a different track picked before it loaded", async () => {
+    const list = [track(), track()];
+    h.state().hydrate({ queue: list.map((t) => ({ ...t, album_title: "A", artist_name: "B", art_id: null })), index: 0, position: 70, volume: 1, shuffle: false, repeat: "off" });
+    h.state().jumpTo(1);
+    await flush();
+    const el = h.active();
+    el.emit("loadedmetadata", { duration: 100, readyState: 1 });
+    expect(el.currentTime).toBe(0);
   });
 });

@@ -86,7 +86,8 @@ export function initMediaSession() {
   const sync = (s: ReturnType<typeof usePlayer.getState>) => {
     const cur = s.queue[s.index] ?? null;
     const showId = cur?.radio?.show_id ?? null;
-    if (showId !== radioFor) {
+    // A restored episode waits for Play: its tracklist costs a Bandcamp request.
+    if (showId !== radioFor && (!showId || s.wantsPlay || s.status === "playing")) {
       radioFor = showId;
       radioTracks = null;
       if (showId) {
