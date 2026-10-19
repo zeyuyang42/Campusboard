@@ -11,7 +11,8 @@ npm install                      # Node 22.5+, Rust 1.90+, Xcode CLT
 npm run dev                      # tauri dev: Vite :5173 + the app window (hot reload); uses library-dev.db
 npm run dev:copy-library         # snapshot the installed app's library.db into library-dev.db (read-only on the source; --force to replace)
 npm run build                    # tauri build -> src-tauri/target/release/bundle/{macos,dmg}
-npm test                         # vitest in packages/core, offline, uses node:sqlite + saved HTML fixtures
+npm test                         # vitest: packages/core (node:sqlite + saved HTML fixtures), then web (happy-dom); offline
+npm run test -w web              # just the web suite (player store, persistence, mini bridge; ~1 s)
 npm run typecheck                # core + web
 VITE_BROWSER_MODE=1 npm run web:dev   # UI in a normal browser: sql.js + Vite fetch middleware, in-memory data
 VITE_SELFTEST=1 npm run dev      # app runs web/src/selftest.ts and writes results to settings.key='selftest'
@@ -34,6 +35,7 @@ packages/core/src/
   palette/                 quantize + pick + extract (canvas) + fitPalette + artUrl
   core.ts                  createCore({db, fetch, onJobsChange}) -> every function the UI calls
 packages/core/test/        vitest; helpers/nodeDb.ts runs src-tauri/migrations/*.sql on node:sqlite
+web/test/                  vitest + happy-dom for the player wiring; FakeAudio stands in for new Audio(), harness.ts boots a fresh store with a stub getCore()
 web/src/
   api/core.ts              getCore() singleton; Tauri plugins, or browserDb.ts when VITE_BROWSER_MODE=1
   api/queries.ts           TanStack Query hooks and mutations (names are stable; pages depend on them)
@@ -324,7 +326,12 @@ src-tauri/
 
 ## Verifying changes
 
-1. `npm test` and `npm run typecheck`.
+1. `npm test` and `npm run typecheck`. `npm test` runs both suites; the web one
+   (`web/test/`) covers `player/store.ts`, `persist.ts` and `miniBridge.ts` with fake
+   timers, a `FakeAudio` element whose events the test fires (`el.emit("pause", { paused: true })`)
+   and an in-memory core stub. A fix to the player's event handling, the two-element
+   handover or the save timers gets a test there first; the selftest and Playwright
+   cover what only a real WebKit element shows (timing, Now Playing).
 2. UI: run `VITE_BROWSER_MODE=1 npm run web:dev` and drive it with Playwright
    (installed outside the repo). Launch Chromium with
    `--autoplay-policy=no-user-gesture-required`; `window.__bcAudio` exposes the
