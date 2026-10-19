@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { NodeDb } from "./helpers/nodeDb.js";
 import { likeContains } from "../src/db/Db.js";
-import { listAlbums, ALBUM_SORTS } from "../src/db/repos/albums.js";
+import { listAlbums, listAlbumTracks, ALBUM_SORTS } from "../src/db/repos/albums.js";
 import { searchTracks } from "../src/db/repos/tracks.js";
 import { getArtist } from "../src/db/repos/artists.js";
 
@@ -137,5 +137,68 @@ describe("searchTracks", () => {
   it("escapes wildcards too", async () => {
     expect((await searchTracks(db, "%")).map((t) => t.title)).toEqual(["100% Rain"]);
     expect((await searchTracks(db, "_")).map((t) => t.title)).toEqual(["Sun_Rise"]);
+  });
+});
+
+describe("listAlbumTracks (bulk actions on filtered results)", () => {
+  type Args = Parameters<typeof listAlbums> extends [unknown, ...infer R] ? R : never;
+  const tracksOf = async (...args: Args) => (await listAlbumTracks(db, ...args)).map((t) => t.title);
+  // The albums the grid shows, expanded to their tracks in track order.
+  const expanded = async (...args: Args) => {
+    const out: string[] = [];
+    for (const a of await listAlbums(db, ...args)) {
+      const rows = db.raw.prepare("SELECT title FROM tracks WHERE album_id = ? ORDER BY track_num, id").all(a.id) as { title: string }[];
+      out.push(...rows.map((r) => r.title));
+    }
+    return out;
+  };
+  function play(trackTitle: string, at: string) {
+    const t = db.raw.prepare("SELECT id FROM tracks WHERE title = ?").get(trackTitle) as { id: number };
+    db.raw.prepare("INSERT INTO plays (track_id, played_at, seconds_listened) VALUES (?, ?, 60)").run(t.id, at);
+  }
+
+  it("follows every sort, albums contiguous, tracks in track order", async () => {
+    play("Roygbiv", "2026-02-01 00:00:00");
+    play("Aquarius", "2026-02-02 00:00:00");
+    play("Sun_Rise", "2026-03-01 00:00:00");
+    for (const sort of ALBUM_SORTS) expect(await tracksOf(sort), sort).toEqual(await expanded(sort));
+    expect(await tracksOf("release")).toEqual(["Pool Hopping", "MMMOOOAAAAAYAYA", "Sun_Rise", "100% Rain", "Paying Off The Happiness", "Roygbiv", "Aquarius", "Opener"]);
+    expect((await tracksOf("plays")).slice(0, 4)).toEqual(["Roygbiv", "Aquarius", "Sun_Rise", "100% Rain"]);
+    expect((await tracksOf("played")).slice(0, 4)).toEqual(["Sun_Rise", "100% Rain", "Roygbiv", "Aquarius"]);
+  });
+
+  it("orders tracks by track number, not insertion order", async () => {
+    const id = album(artist("Someone"), "Out of order", { created: "2027-01-01 00:00:00" });
+    db.raw.prepare("INSERT INTO tracks (track_id, album_id, title, track_num) VALUES (?, ?, ?, ?)").run(9002, id, "Second", 2);
+    db.raw.prepare("INSERT INTO tracks (track_id, album_id, title, track_num) VALUES (?, ?, ?, ?)").run(9001, id, "First", 1);
+    expect((await tracksOf("added")).slice(0, 2)).toEqual(["First", "Second"]);
+  });
+
+  it("uses the grid's filter: text, Purchased, Wishlist and their combinations", async () => {
+    expect(await tracksOf("title", "all", "hotties")).toEqual(["Paying Off The Happiness", "Pool Hopping", "MMMOOOAAAAAYAYA"]);
+    // A matching track brings its whole album, as in the grid.
+    expect(await tracksOf("title", "all", "roygbiv")).toEqual(["Roygbiv", "Aquarius"]);
+    expect(await tracksOf("title", "purchased")).toEqual(["Pool Hopping", "MMMOOOAAAAAYAYA"]);
+    expect(await tracksOf("title", "wishlist")).toEqual(["Paying Off The Happiness", "Sun_Rise", "100% Rain"]);
+    expect(await tracksOf("title", "wishlist", "rain")).toEqual(["Sun_Rise", "100% Rain"]);
+    expect(await tracksOf("title", "purchased", "rain")).toEqual([]);
+    expect(await tracksOf("title", "wishlist", "%")).toEqual(["Sun_Rise", "100% Rain"]);
+    for (const [f, q] of [["purchased", ""], ["wishlist", ""], ["wishlist", "hotties"], ["all", "a"]] as const) {
+      expect(await tracksOf("artist", f, q)).toEqual(await expanded("artist", f, q));
+    }
+  });
+
+  it("lists an album that is both purchased and wishlisted once under each", async () => {
+    wishlist(ids.lmdom);
+    expect(await tracksOf("title", "purchased")).toEqual(["Pool Hopping", "MMMOOOAAAAAYAYA"]);
+    expect(await tracksOf("title", "wishlist")).toEqual(["Paying Off The Happiness", "Pool Hopping", "MMMOOOAAAAAYAYA", "Sun_Rise", "100% Rain"]);
+  });
+
+  it("keeps unstreamable tracks (the player skips them) with queue-ready fields and no stream URL", async () => {
+    db.raw.prepare("UPDATE tracks SET streamable = (title != 'Aquarius')").run();
+    const rows = await listAlbumTracks(db, "title", "all", "roygbiv");
+    expect(rows.map((t) => [t.title, t.streamable])).toEqual([["Roygbiv", true], ["Aquarius", false]]);
+    expect(rows[0]).toMatchObject({ album_title: "Music Has the Right to Children", artist_name: "Boards of Canada" });
+    expect(rows[0]).not.toHaveProperty("stream_url");
   });
 });

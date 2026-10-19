@@ -178,6 +178,10 @@ export function useReleaseMutations() {
 export async function cancelJob(id: number) { return (await core()).cancelJob(id); }
 export async function loadPlayState() { return (await core()).playState(); }
 export async function savePlayState(s: PlayState) { return (await core()).savePlayState(s); }
+export async function savePlayPosition(trackId: number | null, positionSec: number, index: number) { return (await core()).savePlayPosition(trackId, positionSec, index); }
+/** One track's lyrics, read when Now playing shows them (queue entries don't carry them). */
+export const useTrackLyrics = (id: number | null) =>
+  useQuery({ queryKey: ["tracks", "lyrics", id], queryFn: async () => (await (await core()).tracksByIds([id!]))[0]?.lyrics ?? null, enabled: id != null, staleTime: Infinity });
 
 /** Playlist entries, plays and preferences from an imported library still waiting for their albums. */
 export const usePendingImports = () => useQuery({ queryKey: keys.pendingImports, queryFn: async () => (await core()).pendingImports() });

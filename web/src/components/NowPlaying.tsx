@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { usePlayer } from "../player/store";
+import { useTrackLyrics } from "../api/queries";
 import { useUi } from "../ui/store";
 import { ArtImage } from "./ArtImage";
 import { QueueList } from "./QueueList";
@@ -11,6 +12,7 @@ export function NowPlaying() {
   const cur = usePlayer((s) => s.queue[s.index] ?? null);
   const close = useUi((s) => s.setNowPlayingOpen);
   const [tab, setTab] = useState<"queue" | "lyrics">("queue");
+  const { data: lyrics, isPending: lyricsLoading } = useTrackLyrics(tab === "lyrics" ? cur?.id ?? null : null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(false); };
     window.addEventListener("keydown", onKey);
@@ -34,7 +36,7 @@ export function NowPlaying() {
           <button className={tab === "lyrics" ? "on" : ""} onClick={() => setTab("lyrics")}>Lyrics</button>
         </div>
         <div className="np-panel">
-          {tab === "queue" ? <QueueList /> : cur.lyrics ? <pre className="lyrics">{cur.lyrics}</pre> : <div className="empty">No lyrics for this track.</div>}
+          {tab === "queue" ? <QueueList /> : lyrics ? <pre className="lyrics">{lyrics}</pre> : lyricsLoading ? null : <div className="empty">No lyrics for this track.</div>}
         </div>
       </div>
     </section>

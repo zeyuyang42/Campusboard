@@ -37,7 +37,8 @@ export interface PlayerState {
   /** Settings > Playback: crossfade between tracks of different albums, in seconds (0 = off). */
   crossfadeSec: number;
   current: () => QueueTrack | null;
-  playTracks: (tracks: Track[], start?: number) => void;
+  /** Returns how many tracks were queued (capped at MAX_QUEUE). */
+  playTracks: (tracks: Track[], start?: number) => number;
   play: () => void;
   pause: () => void;
   toggle: () => void;
@@ -51,8 +52,9 @@ export interface PlayerState {
   stepVolume: (delta: number) => void;
   /** Mute, or go back to the level from before the mute. */
   toggleMute: () => void;
-  enqueueNext: (tracks: Track[]) => void;
-  enqueueLast: (tracks: Track[]) => void;
+  /** Both return how many tracks were added (the queue stops at MAX_QUEUE). */
+  enqueueNext: (tracks: Track[]) => number;
+  enqueueLast: (tracks: Track[]) => number;
   removeAt: (i: number) => void;
   move: (from: number, to: number) => void;
   clearQueue: () => void;
@@ -65,7 +67,14 @@ export interface PlayerState {
   hydrate: (s: { queue: QueueTrack[]; index: number; position: number; volume: number; shuffle: boolean; repeat: RepeatMode }) => void;
 }
 
-export const toQueueTrack = (t: Track): QueueTrack => ({ ...t, album_title: t.album_title ?? "", artist_name: t.artist_name ?? "", art_id: t.art_id ?? null });
+/**
+ * The queue holds at most this many tracks. It is persisted as one JSON value, so a bulk
+ * action on a large library must not grow it without bound.
+ */
+export const MAX_QUEUE = 10_000;
+
+/** A queue entry. Lyrics are left out (the queue is persisted often); Now playing loads them. */
+export const toQueueTrack = (t: Track): QueueTrack => ({ ...t, lyrics: null, album_title: t.album_title ?? "", artist_name: t.artist_name ?? "", art_id: t.art_id ?? null });
 
 function shuffled<T>(arr: T[]): T[] {
   const a = arr.slice();
@@ -411,10 +420,14 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // Tracks that can't be streamed (a pre-order's unreleased ones) never enter the queue;
     // playback starts at the first streamable track from `start` on.
     const from = tracks.slice(start).find((t) => t.streamable) ?? tracks.find((t) => t.streamable);
-    const playable = tracks.filter((t) => t.streamable).map(toQueueTrack);
-    if (!playable.length || !from) return;
+    const all = tracks.filter((t) => t.streamable);
+    if (!all.length || !from) return 0;
+    // Over the cap, keep a window that starts at (or contains) the chosen track.
+    const at = Math.max(0, all.indexOf(from));
+    const lo = all.length <= MAX_QUEUE ? 0 : Math.min(at, all.length - MAX_QUEUE);
+    const playable = all.slice(lo, lo + MAX_QUEUE).map(toQueueTrack);
     let queue = playable;
-    let index = Math.max(0, playable.findIndex((t) => t.id === from.id));
+    let index = at - lo;
     if (get().shuffle) {
       const first = playable[index];
       queue = [first, ...shuffled(playable.filter((_, i) => i !== index))];
@@ -423,6 +436,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     }
     set({ queue, index, status: "loading", wantsPlay: true, position: 0, duration: 0, error: null });
     load(queue[index]);
+    return queue.length;
   },
 
   play: () => {
@@ -527,20 +541,21 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   },
 
   enqueueNext: (tracks) => {
-    tracks = tracks.filter((t) => t.streamable);
-    if (!tracks.length) return;
     const { queue, index } = get();
+    if (!queue.length) return get().playTracks(tracks);
+    tracks = tracks.filter((t) => t.streamable).slice(0, Math.max(0, MAX_QUEUE - queue.length));
+    if (!tracks.length) return 0;
     const add = tracks.map(toQueueTrack);
-    const q = queue.length ? [...queue.slice(0, index + 1), ...add, ...queue.slice(index + 1)] : add;
-    set({ queue: q });
-    if (!queue.length) get().playTracks(tracks);
+    set({ queue: [...queue.slice(0, index + 1), ...add, ...queue.slice(index + 1)] });
+    return add.length;
   },
   enqueueLast: (tracks) => {
-    tracks = tracks.filter((t) => t.streamable);
-    if (!tracks.length) return;
     const { queue } = get();
     if (!queue.length) return get().playTracks(tracks);
+    tracks = tracks.filter((t) => t.streamable).slice(0, Math.max(0, MAX_QUEUE - queue.length));
+    if (!tracks.length) return 0;
     set({ queue: [...queue, ...tracks.map(toQueueTrack)] });
+    return tracks.length;
   },
   removeAt: (i) => {
     const { queue, index } = get();
@@ -590,7 +605,8 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     active().volume = positionToGain(s.volume);
     // Ignore anything that isn't a full queue entry (e.g. state written by older versions or tools).
     const curId = s.queue[s.index]?.id;
-    const queue = s.queue.filter((t) => t && typeof t.id === "number" && typeof t.title === "string" && typeof t.album_id === "number");
+    // Older versions persisted lyrics and had no cap.
+    const queue = s.queue.filter((t) => t && typeof t.id === "number" && typeof t.title === "string" && typeof t.album_id === "number").slice(0, MAX_QUEUE).map(toQueueTrack);
     const index = Math.max(0, queue.findIndex((t) => t.id === curId));
     set({ queue, index, volume: s.volume, shuffle: s.shuffle, repeat: s.repeat, position: queue.length ? s.position : 0, status: queue.length ? "paused" : "idle", wantsPlay: false });
     const cur = queue[index];

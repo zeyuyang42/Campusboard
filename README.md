@@ -53,6 +53,9 @@ Requires macOS 13.3 or later. Your library lives in
 - **Playlists**: right-click any track or album, or select several tracks
   (click, Shift-click, Cmd-click) and use the bar that appears. Drag rows to
   reorder.
+- **Filtered library**: when the filter field or the **Show** menu narrows the
+  Library, a bar above the grid plays, shuffles, queues or adds to a playlist
+  every matching album in the current sort order (it asks first above 500 tracks).
 - **Now playing**: press `N` or click the artwork in the dock for a full view
   with queue and lyrics.
 - **Mini player**: Window → Mini Player (`⌘⇧M`) or the mini player button in

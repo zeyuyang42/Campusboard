@@ -70,6 +70,8 @@ export function createCore(deps: CoreDeps) {
     queue,
     // library
     albums: (sort: albums.AlbumSort = "added", filter: albums.AlbumFilter = "all", q = "") => albums.listAlbums(db, sort, filter, q),
+    /** All tracks of the albums `albums(sort, filter, q)` lists, in that order (for bulk actions). */
+    albumTracks: (sort: albums.AlbumSort = "added", filter: albums.AlbumFilter = "all", q = "") => albums.listAlbumTracks(db, sort, filter, q),
     album: (id: number) => albums.getAlbumWithTracks(db, id),
     deleteAlbum: (id: number) => albums.deleteAlbum(db, id),
     refreshAlbum: async (id: number) => {
@@ -151,6 +153,8 @@ export function createCore(deps: CoreDeps) {
     /** Forget all plays, and plays an imported library still has waiting (so they don't come back). */
     clearHistory: async () => { await importPending.clearPendingPlays(db); return plays.clearPlays(db); },
     savePlayState: (s: PlayState) => playState.setPlayState(db, s),
+    /** Save just the position (the queue as last saved stays). */
+    savePlayPosition: (currentTrackId: number | null, positionSec: number, queueIndex: number) => playState.setPlayPosition(db, currentTrackId, positionSec, queueIndex),
     // Bandcamp account (the identity cookie is write-only from the UI's side)
     account: () => getAccount(db),
     setAccountUsername: (username: string) => setUsername(db, username),
