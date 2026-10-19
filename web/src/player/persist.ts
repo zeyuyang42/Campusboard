@@ -2,7 +2,7 @@ import { loadPlayState, savePlayState } from "../api/queries";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { usePlayer } from "./store";
 import { audioEl } from "./audio";
-import type { PlayState } from "@bc/core";
+import { savedVolumeToPosition, VOLUME_CURVE_VERSION, type PlayState } from "@bc/core";
 
 function snapshot(): PlayState {
   const s = usePlayer.getState();
@@ -14,13 +14,18 @@ function snapshot(): PlayState {
     shuffle: s.shuffle,
     repeat: s.repeat,
     volume: s.volume,
+    volume_version: VOLUME_CURVE_VERSION,
   };
 }
 
 export async function initPersistence() {
   try {
     const st = await loadPlayState();
-    usePlayer.getState().hydrate({ queue: st.queue, index: st.queue_index, position: st.position_sec, volume: st.volume, shuffle: st.shuffle, repeat: st.repeat });
+    // A save from before the volume curve holds a linear gain: it becomes the slider position
+    // that plays at the same gain. Until the next save (which marks the version) the row
+    // keeps the gain, so this conversion is the same on every launch.
+    const volume = savedVolumeToPosition(st.volume, st.volume_version);
+    usePlayer.getState().hydrate({ queue: st.queue, index: st.queue_index, position: st.position_sec, volume, shuffle: st.shuffle, repeat: st.repeat });
   } catch (e) {
     console.warn("could not restore play state", e);
   }

@@ -1,5 +1,6 @@
 // Bridge from the native menu bar (src-tauri/src/menu.rs) to app actions.
 // Rust runs window.__bcMenu(<item id>) in the main webview (see initAppMenu).
+import { VOLUME_STEP } from "@bc/core";
 import { isTauri } from "./env";
 import { usePlayer } from "../player/store";
 import { useUi } from "../ui/store";
@@ -21,8 +22,8 @@ const actions: Record<string, () => void> = {
   "play-pause": () => usePlayer.getState().toggle(),
   "next": () => usePlayer.getState().next(),
   "previous": () => usePlayer.getState().prev(),
-  "volume-up": () => { const p = usePlayer.getState(); p.setVolume(p.volume + 0.05); },
-  "volume-down": () => { const p = usePlayer.getState(); p.setVolume(p.volume - 0.05); },
+  "volume-up": () => { const p = usePlayer.getState(); p.stepVolume(VOLUME_STEP); },
+  "volume-down": () => { const p = usePlayer.getState(); p.stepVolume(-VOLUME_STEP); },
   "shuffle": () => usePlayer.getState().toggleShuffle(),
   "repeat": () => usePlayer.getState().cycleRepeat(),
   "shortcuts": () => navigateTo("/settings#shortcuts"),

@@ -46,7 +46,7 @@ export function PlayerBar() {
       <div className="right">
         <div className="vol">
           <button className="icon-btn" onClick={() => s.setVolume(s.volume === 0 ? 0.8 : 0)} title="Mute"><VolumeIcon muted={s.volume === 0} /></button>
-          <input type="range" min={0} max={1} step={0.02} value={s.volume} onChange={(e) => s.setVolume(Number(e.target.value))} />
+          <input type="range" min={0} max={1} step={0.01} value={s.volume} aria-label="Volume" onChange={(e) => s.setVolume(Number(e.target.value))} />
         </div>
         <button className="icon-btn" title="Mini player (⌘⇧M)" onClick={() => void toggleMiniPlayer().catch(() => undefined)}><MiniPlayerIcon /></button>
         <button className={`icon-btn ${s.queueOpen ? "on" : ""}`} title="Queue (Q)" onClick={() => s.setQueueOpen(!s.queueOpen)}><QueueIcon /></button>

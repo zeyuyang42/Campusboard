@@ -123,7 +123,10 @@ export interface PlayState {
   queue_index: number;
   shuffle: boolean;
   repeat: RepeatMode;
+  /** The volume slider's position (version 1) or, in older saves, the linear gain (version 0). */
   volume: number;
+  /** How to read `volume`; see VOLUME_CURVE_VERSION in services/volume.ts. */
+  volume_version: number;
 }
 
 export type SearchResultType = "band" | "album" | "track";

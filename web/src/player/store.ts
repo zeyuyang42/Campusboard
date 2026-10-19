@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { PlayCounter, toggleAction, type CountedPlay, type QueueTrack, type RepeatMode, type Track } from "@bc/core";
+import { PlayCounter, positionToGain, stepVolume, toggleAction, type CountedPlay, type QueueTrack, type RepeatMode, type Track } from "@bc/core";
 import { audioEl } from "./audio";
 import { getCore, invalidateQueries } from "../api/core";
 import { friendlyError } from "../lib/errors";
@@ -19,6 +19,7 @@ export interface PlayerState {
   wantsPlay: boolean;
   position: number;
   duration: number;
+  /** The volume slider's position (0-1); the element's gain is positionToGain(volume). */
   volume: number;
   shuffle: boolean;
   repeat: RepeatMode;
@@ -35,6 +36,8 @@ export interface PlayerState {
   seek: (sec: number) => void;
   seekBy: (delta: number) => void;
   setVolume: (v: number) => void;
+  /** Move the volume slider by `delta` (the ↑/↓ keys, Volume Up/Down in the menu). */
+  stepVolume: (delta: number) => void;
   enqueueNext: (tracks: Track[]) => void;
   enqueueLast: (tracks: Track[]) => void;
   removeAt: (i: number) => void;
@@ -43,6 +46,7 @@ export interface PlayerState {
   toggleShuffle: () => void;
   cycleRepeat: () => void;
   setQueueOpen: (open: boolean) => void;
+  /** `volume` is a slider position (persist.ts converts older saves). */
   hydrate: (s: { queue: QueueTrack[]; index: number; position: number; volume: number; shuffle: boolean; repeat: RepeatMode }) => void;
 }
 
@@ -219,10 +223,11 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   },
   seekBy: (d) => get().seek(audioEl.currentTime + d),
   setVolume: (v) => {
-    const vol = Math.max(0, Math.min(1, v));
-    audioEl.volume = vol;
+    const vol = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
+    audioEl.volume = positionToGain(vol);
     set({ volume: vol });
   },
+  stepVolume: (delta) => get().setVolume(stepVolume(get().volume, delta)),
 
   enqueueNext: (tracks) => {
     tracks = tracks.filter((t) => t.streamable);
@@ -278,7 +283,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   setQueueOpen: (open) => set({ queueOpen: open }),
 
   hydrate: (s) => {
-    audioEl.volume = s.volume;
+    audioEl.volume = positionToGain(s.volume);
     // Ignore anything that isn't a full queue entry (e.g. state written by older versions or tools).
     const curId = s.queue[s.index]?.id;
     const queue = s.queue.filter((t) => t && typeof t.id === "number" && typeof t.title === "string" && typeof t.album_id === "number");
