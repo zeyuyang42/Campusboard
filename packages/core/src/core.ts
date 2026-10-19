@@ -17,6 +17,7 @@ import { parseMusicPage } from "./scrape/parseMusic.js";
 import { normalizeBandcampUrl } from "./scrape/url.js";
 import { getFreshStreamUrl, refreshAlbum } from "./services/streamService.js";
 import { RadioService } from "./services/radio.js";
+import { OfflineService, type OfflineFiles } from "./services/offline.js";
 import { vacuumOrphans } from "./services/importService.js";
 import { prunePageCache } from "./services/pageCache.js";
 import { ART_FETCH_TIMEOUT_MS, CHALLENGE_SETTING_KEY, RATE_LIMIT_MS } from "./config.js";
@@ -46,6 +47,8 @@ export interface CoreDeps {
   releaseCheck?: Omit<ReleaseCheckerOptions, "onChange">;
   /** Timing overrides for the background collection refresh (tests). */
   collectionRefresh?: Omit<CollectionRefreshOptions, "onChange">;
+  /** The offline folder (#2). Without it offline copies are unavailable and nothing is swept. */
+  files?: OfflineFiles | null;
 }
 
 /** Everything the UI needs, as plain async functions over one database. */
@@ -56,14 +59,17 @@ export function createCore(deps: CoreDeps) {
     save: (s) => settings.setSetting(db, CHALLENGE_SETTING_KEY, s),
   }, () => deps.onJobsChange?.());
   const queue = new FetchQueue(deps.fetch, RATE_LIMIT_MS, gate);
-  const runner = new JobRunner(db, queue, deps.onJobsChange);
+  const offline = new OfflineService(db, queue, deps.files ?? null);
+  const runner = new JobRunner(db, queue, deps.onJobsChange, offline);
+  /** After anything that may have removed tracks: their offline files go too (deletes last). */
+  const sweepOffline = () => offline.sweep().catch((e) => { console.error(`[offline] sweep: ${String(e)}`); return 0; });
   const checker = new ReleaseChecker(db, queue, {
     ...deps.releaseCheck, onChange: () => deps.onReleasesChange?.(), onAlbumRefreshed: () => deps.onLibraryChange?.(),
   });
   const radio = new RadioService(db, queue);
   const refresher = new CollectionRefresher(db, gate, runner, { ...deps.collectionRefresh, onChange: () => deps.onJobsChange?.() });
   void prunePageCache(db);
-  void vacuumOrphans(db);
+  void vacuumOrphans(db).then(sweepOffline, () => undefined);
   // Cheap, and repairs flags if the app quit between a sync's membership and flag writes.
   void recomputeOwned(db).catch(() => {});
 
@@ -75,10 +81,18 @@ export function createCore(deps: CoreDeps) {
     /** All tracks of the albums `albums(sort, filter, q)` lists, in that order (for bulk actions). */
     albumTracks: (sort: albums.AlbumSort = "added", filter: albums.AlbumFilter = "all", q = "") => albums.listAlbumTracks(db, sort, filter, q),
     album: (id: number) => albums.getAlbumWithTracks(db, id),
-    deleteAlbum: (id: number) => albums.deleteAlbum(db, id),
+    deleteAlbum: async (id: number) => {
+      const a = await albums.getAlbum(db, id);
+      if (a) await runner.cancelDownloads(a.url);
+      const r = await albums.deleteAlbum(db, id);
+      await sweepOffline();
+      return r;
+    },
     refreshAlbum: async (id: number) => {
       const a = await albums.getAlbum(db, id);
       if (a) await refreshAlbum(db, queue, id, a.url);
+      // A track Bandcamp dropped from the album is gone from the library, and so is its copy.
+      if (a) await sweepOffline();
       return albums.getAlbumWithTracks(db, id);
     },
     artists: () => artists.listArtists(db),
@@ -146,6 +160,33 @@ export function createCore(deps: CoreDeps) {
     // playback
     getFreshStreamUrl: (trackId: number, force = false) => getFreshStreamUrl(db, queue, trackId, force),
     playState: () => playState.getPlayState(db),
+    // offline copies (#2)
+    /** A URL for the track's offline copy, or null (then the player streams). Never fetches. */
+    localTrackUrl: (trackId: number) => offline.localUrl(trackId),
+    /** Queue offline copies of an album's tracks (or just `trackIds`) as a download job; null if all are saved. */
+    downloadAlbum: (albumId: number, trackIds?: number[]) => runner.enqueueDownload(albumId, trackIds),
+    /** Cancel the album's download if one is queued, and remove its offline copies. */
+    removeAlbumDownloads: async (albumId: number) => {
+      const a = await albums.getAlbum(db, albumId);
+      if (a) await runner.cancelDownloads(a.url);
+      return offline.removeAlbum(albumId);
+    },
+    removeTrackDownloads: (trackIds: number[]) => offline.remove(trackIds),
+    /** Which of these tracks have an offline copy (by the rows; one query, no file checks). */
+    downloadedTrackIds: async (trackIds: number[]): Promise<number[]> => {
+      const ids = trackIds.filter((id) => id > 0).slice(0, 10_000);
+      const out: number[] = [];
+      for (let i = 0; i < ids.length; i += 500) {
+        const chunk = ids.slice(i, i + 500);
+        out.push(...(await db.select<{ id: number }>(`SELECT id FROM tracks WHERE local_path IS NOT NULL AND id IN (${chunk.map(() => "?").join(",")})`, chunk)).map((r) => r.id));
+      }
+      return out;
+    },
+    /** Cancel every download and remove every offline copy. */
+    removeAllDownloads: async () => { await runner.cancelDownloads(); return offline.removeAll(); },
+    offlineStats: () => offline.stats(),
+    /** The size limit in MB, or null for none. */
+    setOfflineCap: (capMb: number | null) => offline.setCap(capMb),
     // Bandcamp Radio
     /** The latest radio episodes (bandcamp.com/radio, read at most once a day). */
     radioShows: () => radio.list(),
@@ -173,7 +214,7 @@ export function createCore(deps: CoreDeps) {
     // The account, cookie and sync status have their own functions above; the generic path refuses them.
     getSetting: async <T>(key: string) => { refusePrivate(key); return settings.getSetting<T>(db, key); },
     setSetting: async (key: string, value: unknown) => { refusePrivate(key); return settings.setSetting(db, key, value); },
-    vacuumOrphans: () => vacuumOrphans(db),
+    vacuumOrphans: async () => { await vacuumOrphans(db); await sweepOffline(); },
     // library file and backup
     /** The library as a JSON-ready object (no identity cookie, caches, stream URLs or palettes). */
     exportLibrary: (opts: { history?: boolean; appVersion?: string } = {}) => exportLibrary(db, opts),

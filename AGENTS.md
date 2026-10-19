@@ -30,7 +30,7 @@ packages/core/src/
   scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, fan (collection/wishlist), radio (Bandcamp Radio list + episode), schemas
   db/Db.ts                 async Db interface {select,get,run}; SQL uses "?" and toDollar() rewrites to $n for the Tauri plugin
   db/repos/                one module per table; booleans stored 0/1, converted at the repo boundary
-  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping), miniPlayer (mini window state/command protocol, throttle), transition (gapless/crossfade scheduling, fade curve, state machine), libraryTransfer (library export/import file, VACUUM INTO backup), radio (episodes, tracklists, stream URLs)
+  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping), miniPlayer (mini window state/command protocol, throttle), transition (gapless/crossfade scheduling, fade curve, state machine), libraryTransfer (library export/import file, VACUUM INTO backup), radio (episodes, tracklists, stream URLs), offline (offline copies: download, local URL, sweep)
   theme/                   schema (zod), presets, color math (OKLCH, contrast), apply (CSS variables)
   palette/                 quantize + pick + extract (canvas) + fitPalette + artUrl
   core.ts                  createCore({db, fetch, onJobsChange}) -> every function the UI calls
@@ -306,6 +306,47 @@ src-tauri/
   episode is a queue entry with `id = album_id = -showId` and a `radio` field;
   it is not counted in listening history (`plays` keys library tracks) and
   can't be added to a playlist.
+- Offline copies (#2, verified 2026-10-20 in the muted selftest `offline`): core's
+  `services/offline.ts` saves a library track's current stream (mp3-128, or
+  mp3-v0 for a purchase synced with the cookie) as `<Bandcamp track id>.mp3`
+  through an injected `OfflineFiles`; `tracks.local_path` holds that name and
+  `track_files` (0008) its size. Downloads are `download` jobs (one item per
+  track, `<album url>#track=<id>`) in the normal JobRunner: the album page
+  refresh and the mp3 both go through `FetchQueue` (`download()` takes a queue
+  slot for the request, then streams the body; plugin-fs `writeFile` with a
+  ReadableStream opens the file and writes each plugin-http chunk, so nothing is
+  buffered), honour the challenge cooldown, resume after a restart and cancel
+  between tracks; Remove download / Remove all also abort the track in flight
+  (its AbortSignal goes through `FetchQueue.download`), and its finalising step,
+  queued behind the removal on the same exclusive chain, discards the file.
+  `download()` has an idle timeout (`DOWNLOAD_IDLE_MS`, no data for 60 s) that
+  starts once the queue slot is ours, not a total one, and tells a failure
+  reading the body (`fetch_failed`, `network`) from one writing the file
+  (`disk_error`, `full` on ENOSPC). A CDN 4xx gets one forced album re-scrape per
+  job; after that a refused track fails alone, and a second refused track in a
+  row is `cdn_refused`, which fails the job's remaining tracks like
+  `storage_full` and a full disk. Without a Content-Length, an mp3-128 under
+  60% of duration × 16 kB/s counts as cut off. A file is written as `.part` and renamed when complete. The
+  folder is `<db stem>-offline/` next to the database (`library-offline`,
+  `library-dev-offline`, or beside a `BCP_DB_PATH`), in Application Support
+  rather than Caches (macOS may purge Caches). lib.rs creates it and adds it,
+  canonicalized, to the fs scope and the asset protocol scope at runtime; the
+  config's `assetProtocol.scope` is empty, and the CSP's `media-src` allows
+  `asset:`/`http://asset.localhost`. `<audio>` plays `convertFileSrc(path)`;
+  the asset protocol answers Range requests, so seeking works and the file is
+  never read into the webview. Each library sweeps its own folder (startup,
+  after deleting an album, refreshing one, `vacuumOrphans`): files no track
+  names go, rows whose file is gone are cleared. The player asks
+  `core.localTrackUrl` first (no request at all), streams otherwise, and after a
+  media error on a local file retries with the stream, and forgets the copy only
+  once that stream retry plays (never offline, where a transient error such as
+  sleep/wake must not cost a good copy).
+  During a challenge cooldown a failed load skips on (rather than stopping) when
+  another queue entry has a copy (`core.downloadedTrackIds`). A stream fetch that gets no answer
+  (`fetch_failed` with `detail.network`) marks the player offline for 30 s,
+  during which tracks without a copy fail at once and the #74 skip moves on to
+  the downloaded ones. Radio episodes always stream. The library export never
+  includes copies, names or sizes.
 
 ## Collection sync facts (verified 2026-10-17 with curl against a public profile)
 
@@ -345,7 +386,7 @@ src-tauri/
   in `src/lib.rs` (and an import in `web/src/api/browserDb.ts`); never edit an applied
   migration, not even a comment (`VersionMismatch`, see above). `albums.owned` mirrors the synced collection (`fan_items`), recomputed in
   one statement; `tracks.stream_quality` is `mp3-v0` or `mp3-128`; `tracks.local_path`
-  is reserved for a planned feature.
+  names a track's offline copy (`<Bandcamp track id>.mp3`, see Offline copies above).
 - The identity cookie lives only in `settings.key='bandcamp_identity'`. Read it only
   through `services/account.ts` (`identityHeaders`), which sends it only to https
   bandcamp.com and `*.bandcamp.com`, never to a custom domain. Never log it, put it in

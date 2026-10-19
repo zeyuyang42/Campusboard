@@ -2,6 +2,12 @@ export const RATE_LIMIT_MS = 1000;
 export const PAGE_CACHE_MS = 10 * 60 * 1000;
 export const STREAM_SAFETY_MS = 60 * 60 * 1000;
 export const FETCH_TIMEOUT_MS = 20_000;
+/** An offline download fails when no data arrives for this long (an idle timeout, not a total). */
+export const DOWNLOAD_IDLE_MS = 60_000;
+/** Without a Content-Length, an mp3-128 copy must hold at least this share of duration × 16 kB/s. */
+export const DOWNLOAD_MIN_SHARE = 0.6;
+/** settings key for offline copies: { cap_mb: number | null } (missing means no limit). */
+export const OFFLINE_SETTING_KEY = "offline";
 /** Art fetches for palette extraction bypass the queue, so they carry their own timeout. */
 export const ART_FETCH_TIMEOUT_MS = 15_000;
 /** page_cache rows older than this are pruned. */

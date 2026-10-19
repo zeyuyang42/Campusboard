@@ -30,11 +30,14 @@ export const ALBUM_SELECT = `
     (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
     (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id AND t.streamable = 1) AS streamable_count,
     ${PLAY_COUNT} AS play_count,
-    ${LAST_PLAYED} AS last_played_at
+    ${LAST_PLAYED} AS last_played_at,
+    (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id AND t.local_path IS NOT NULL) AS downloaded_count
   FROM albums al JOIN artists ar ON ar.id = al.artist_id`;
 
-export type AlbumFilter = "all" | "purchased" | "wishlist";
-const FILTERS: Record<AlbumFilter, string | null> = { all: null, purchased: "al.owned = 1", wishlist: WISHLISTED };
+export type AlbumFilter = "all" | "purchased" | "wishlist" | "downloaded";
+/** Albums with at least one offline copy (#2). */
+const DOWNLOADED = "EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND t.local_path IS NOT NULL)";
+const FILTERS: Record<AlbumFilter, string | null> = { all: null, purchased: "al.owned = 1", wishlist: WISHLISTED, downloaded: DOWNLOADED };
 
 // Bandcamp release dates are stored as sent ("01 Oct 2021 00:00:00 GMT"), which does not
 // sort as text. This turns them into YYYY + month position + DD; NULL stays NULL (last in DESC).
@@ -117,15 +120,16 @@ export async function getAlbum(db: Db, id: number): Promise<Album | null> {
 export async function getAlbumWithTracks(db: Db, id: number): Promise<AlbumWithTracks | null> {
   const album = await getAlbum(db, id);
   if (!album) return null;
-  const tracks = await db.select<Omit<Track, "streamable"> & { streamable: number }>(
+  const tracks = await db.select<Omit<Track, "streamable" | "downloaded"> & { streamable: number; downloaded: number }>(
     `SELECT id, track_id, album_id, title, track_num, duration, track_artist, streamable, lyrics,
-       (SELECT COUNT(*) FROM plays p WHERE p.track_id = tracks.id) AS play_count
+       (SELECT COUNT(*) FROM plays p WHERE p.track_id = tracks.id) AS play_count,
+       local_path IS NOT NULL AS downloaded
      FROM tracks WHERE album_id = ? ORDER BY track_num, id`,
     [id],
   );
   return {
     ...album,
-    tracks: tracks.map((t) => ({ ...t, streamable: !!t.streamable, album_title: album.title, artist_name: album.artist_name, art_id: album.art_id, album_url: album.url })),
+    tracks: tracks.map((t) => ({ ...t, streamable: !!t.streamable, downloaded: !!t.downloaded, album_title: album.title, artist_name: album.artist_name, art_id: album.art_id, album_url: album.url })),
   };
 }
 

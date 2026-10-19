@@ -86,6 +86,11 @@
     "fs:allow-copy-file",
     "fs:allow-mkdir",
     "fs:allow-exists",
-    "fs:allow-remove"
+    "fs:allow-remove",
+    "fs:allow-open",
+    "fs:allow-write",
+    "fs:allow-rename",
+    "fs:allow-read-dir",
+    "allow-offline-dir"
   ]
 }

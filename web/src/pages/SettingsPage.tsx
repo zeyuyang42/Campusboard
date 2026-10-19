@@ -8,8 +8,8 @@ import { isTauri } from "../lib/env";
 import { AccountSettings } from "../components/AccountSettings";
 import { LibrarySettings } from "../components/LibrarySettings";
 import { ConfirmButton } from "../components/ConfirmButton";
-import { useClearHistory, usePlayCount, useReleaseCheckStatus, useReleaseMutations } from "../api/queries";
-import { formatPlays } from "../lib/format";
+import { useClearHistory, useOfflineMutations, useOfflineStats, usePlayCount, useReleaseCheckStatus, useReleaseMutations } from "../api/queries";
+import { formatBytes, formatPlays } from "../lib/format";
 import { useMenuBar } from "../lib/menuBar";
 import { useTrackNotifications } from "../lib/notifications";
 
@@ -64,6 +64,8 @@ export function SettingsPage() {
       <BackgroundSettings />
 
       <ListeningHistory />
+
+      <StorageSettings />
 
       <LibrarySettings />
 
@@ -265,6 +267,42 @@ function ListeningHistory() {
         ) : <span className="muted">Nothing recorded yet.</span>}
       </div>
       {clear.error && <div className="notice error">Couldn't clear the history. {String((clear.error as Error).message ?? clear.error)}</div>}
+    </section>
+  );
+}
+
+const CAP_CHOICES_MB = [1000, 2000, 5000, 10_000, 20_000, 50_000];
+
+/** Settings > Storage: offline copies (#2), their size, a size limit and Remove all. */
+function StorageSettings() {
+  const { data: stats } = useOfflineStats();
+  const { removeAll, setCap } = useOfflineMutations();
+  if (!stats?.available) return null;
+  const cap = setCap.isPending ? setCap.variables : stats.cap_mb;
+  const choices = cap != null && !CAP_CHOICES_MB.includes(cap) ? [...CAP_CHOICES_MB, cap].sort((a, b) => a - b) : CAP_CHOICES_MB;
+  return (
+    <section id="storage">
+      <h2>Storage</h2>
+      <p className="muted">
+        Albums you make available offline keep a copy of the same stream the player uses, so they play without a
+        connection and after Bandcamp's links expire. They are for listening in this app only and are not purchases:
+        buy on Bandcamp to own a release. Downloads stay on this Mac and are left out of library exports.
+      </p>
+      <div className="row">
+        <span>{stats.tracks ? `${formatBytes(stats.bytes)} in ${stats.tracks} track${stats.tracks === 1 ? "" : "s"} from ${stats.albums} album${stats.albums === 1 ? "" : "s"}` : "Nothing downloaded yet."}</span>
+        {stats.tracks > 0 && (
+          <ConfirmButton label="Remove all downloads" confirmLabel="Remove all" question={`Remove ${formatBytes(stats.bytes)} of downloads?`} onConfirm={() => removeAll.mutateAsync().then(() => undefined)} />
+        )}
+      </div>
+      <div className="row">
+        <label className="muted" htmlFor="offline-cap">Limit downloads to</label>
+        <select id="offline-cap" value={cap ?? ""} onChange={(e) => setCap.mutate(e.target.value ? Number(e.target.value) : null)}>
+          <option value="">No limit</option>
+          {choices.map((mb) => <option key={mb} value={mb}>{formatBytes(mb * 1e6)}</option>)}
+        </select>
+      </div>
+      {cap != null && stats.bytes >= cap * 1e6 && <p className="muted">The limit is reached: new downloads stop until you remove some or raise it.</p>}
+      {(removeAll.error || setCap.error) && <div className="notice error">{friendlyError(removeAll.error ?? setCap.error)}</div>}
     </section>
   );
 }

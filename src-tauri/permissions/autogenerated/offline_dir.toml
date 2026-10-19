@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-offline-dir"
+description = "Enables the offline_dir command without any pre-configured scope."
+commands.allow = ["offline_dir"]
+
+[[permission]]
+identifier = "deny-offline-dir"
+description = "Denies the offline_dir command without any pre-configured scope."
+commands.deny = ["offline_dir"]

@@ -596,7 +596,8 @@ async function miniPlayerCheck(s: Step) {
       for (let t = 0; t < 3000 && !playingNow(); t += 100) await sleep(100);
     }
     const canCheck = wasPlaying && playingNow();
-    const c0 = miniBridgeInfo().commands;
+    const b0 = miniBridgeInfo();
+    const pressesBefore = b0.commands - b0.hellos - b0.byes;
     await ask({ do: "click", cmd: "toggle" }); await sleep(900);
     // The bridge records the state the press saw, what it decided (toggleAction) and the state
     // right after, so a failure says which it was: a wrong decision, a press that didn't act,
@@ -627,7 +628,10 @@ async function miniPlayerCheck(s: Step) {
     const mainShown = await win.isVisible();
     // Exactly the four sent (toggle, toggle, seek, showMain): a doubled listener in either
     // window doubles every press, and two toggles cancel out.
-    const commands = miniBridgeInfo().commands - c0;
+    // hello/bye are commands too, and a visibilitychange in the mini window can add a pair:
+    // only the presses count.
+    const presses = (i: ReturnType<typeof miniBridgeInfo>) => i.commands - i.hellos - i.byes;
+    const commands = presses(miniBridgeInfo()) - pressesBefore;
     const commandsExact = commands === 4;
     const perms = report?.setOnTop === "ok" && report?.drag === "ok" && report?.sqlDenied === true && report?.commandDenied === true;
     // Without playback (the stream didn't start, or muted media stayed paused while hidden)
@@ -701,6 +705,67 @@ async function miniPlayerCheck(s: Step) {
       if (!out.hiddenAfter) out.ok = false;
     }
   }
+  return out;
+}
+
+/**
+ * Offline copies (#2) through the real plugins: download ONE track (the album's shortest, one
+ * album page refresh at most plus one mp3 through the queue) into this run's offline folder
+ * (next to its database, so a BCP_DB_PATH run stays in its scratch folder), check the file
+ * and the asset URL, play it (muted) from the file, then remove it again.
+ */
+async function offlineCheck(core: Core, album: AlbumDetail, s: Step) {
+  if (!album) return { ok: false, error: "no album" };
+  const out: Record<string, unknown> = {};
+  const dir = await invoke<string>("offline_dir").catch((e) => { out.dirError = String(e); return null; });
+  out.dir = dir ? dir.split("/").slice(-2).join("/") : null;
+  if (!dir || !(await core.offlineStats()).available) return { ok: false, ...out };
+  const shortest = album.tracks.filter((t) => t.streamable && t.duration).sort((a, b) => a.duration! - b.duration!)[0];
+  if (!shortest) return { ok: false, ...out, error: "no streamable track" };
+  out.track = { title: shortest.title, duration: shortest.duration };
+  const name = `${shortest.track_id}.mp3`;
+  try {
+    s("download one track");
+    const job = await core.downloadAlbum(album.id, [shortest.id]);
+    if (!job) return { ok: false, ...out, error: "nothing queued" };
+    for (let i = 0; i < 90; i++) {
+      const j = await core.job(job.id);
+      if (j && ["done", "failed", "cancelled"].includes(j.status)) { out.job = { status: j.status, done: j.done, failed: j.failed, error: j.error ?? j.items?.find((x) => x.error)?.error ?? null }; break; }
+      await sleep(1000);
+    }
+    const stats = await core.offlineStats();
+    out.stats = { tracks: stats.tracks, bytes: stats.bytes };
+    out.fileExists = await exists(`${dir}/${name}`);
+    const url = await core.localTrackUrl(shortest.id);
+    out.url = url?.slice(0, 40) ?? null;
+    out.marked = (await core.album(album.id))?.tracks.find((t) => t.id === shortest.id)?.downloaded ?? null;
+    if (!url) return { ok: false, ...out };
+
+    s("play from the file");
+    usePlayer.getState().playTracks([shortest], 0);
+    await sleep(4000);
+    const el = activeAudio();
+    out.playback = { fromFile: el.src === url, currentTime: el.currentTime, paused: el.paused, error: el.error?.code ?? null, storeError: usePlayer.getState().error };
+    s("seek within the file");
+    // A seek ahead of what has played: the asset protocol must answer Range requests.
+    const target = Math.min(30, (shortest.duration ?? 60) / 2);
+    usePlayer.getState().seek(target);
+    await sleep(1500);
+    out.afterSeek = { target, currentTime: el.currentTime, error: el.error?.code ?? null };
+    usePlayer.getState().pause();
+  } finally {
+    s("remove the copy");
+    usePlayer.getState().clearQueue();
+    await core.removeTrackDownloads([shortest.id]).catch((e) => { out.removeError = String(e); });
+    out.fileAfterRemove = await exists(`${dir}/${name}`).catch((e) => String(e));
+    out.tracksAfterRemove = (await core.offlineStats()).tracks;
+  }
+  const pb = out.playback as { fromFile: boolean; currentTime: number; error: number | null };
+  const seek = out.afterSeek as { target: number; currentTime: number; error: number | null };
+  const seekOk = seek.currentTime >= seek.target - 0.5 && seek.error == null;
+  out.ok = (out.job as { status?: string })?.status === "done" && out.fileExists === true && out.marked === true
+    && pb.fromFile && pb.currentTime > 1 && pb.error == null && seekOk
+    && out.fileAfterRemove === false && out.tracksAfterRemove === 0;
   return out;
 }
 
@@ -798,6 +863,7 @@ export async function runSelfTest() {
     }, 20_000);
     out.hiddenPlayback = await block("hiddenPlayback", (s) => hiddenPlaybackCheck(s), 60_000);
     out.transitions = await block("transitions", (s) => transitionCheck(playable, s), 150_000);
+    out.offline = await block("offline", (s) => offlineCheck(core, album, s), 120_000);
     // Nothing below needs playback; stopping here keeps the track from reaching a counted play.
     usePlayer.getState().pause();
     out.playlist = await block("playlist", async () => {
@@ -934,7 +1000,7 @@ export async function runSelfTest() {
     // Overall ok needs every block that reports its own `ok` to pass (a timed-out or thrown
     // block reports ok: false). The listed blocks must be present as objects: one caught and
     // stored as a string threw.
-    const required = ["import", "libraryFilter", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "syncGuards", "newReleases", "preorder", "libraryFile", "window", "appearance"];
+    const required = ["import", "libraryFilter", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "offline", "syncGuards", "newReleases", "preorder", "libraryFile", "window", "appearance"];
     const failed = Object.entries(out)
       .filter(([k, v]) => required.includes(k) || hasOk(v))
       .filter(([, v]) => (v as { ok?: unknown } | null)?.ok !== true)

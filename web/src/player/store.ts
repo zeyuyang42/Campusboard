@@ -139,10 +139,38 @@ function recordPlay(p: CountedPlay) {
     .catch(() => undefined); // history is best-effort; playback never depends on it
 }
 
-/** A fresh stream URL for a queue entry: a library track's, or a radio episode's (#44). */
+/**
+ * Set when a stream URL couldn't be fetched because the network is down (no answer at all):
+ * until then, tracks without an offline copy fail at once instead of each waiting out the
+ * queue's retries, and the #74 skip moves through them to the downloaded ones.
+ */
+let offlineUntil = 0;
+const OFFLINE_HOLD_MS = 30_000;
+const isNetworkError = (e: unknown) => (e as { code?: unknown; detail?: { network?: unknown } } | null)?.code === "fetch_failed"
+  && (e as { detail?: { network?: unknown } }).detail?.network === true;
+
+/**
+ * What the element plays for a queue entry: a library track's offline copy when it has one
+ * (#2; no request at all), else a fresh stream URL; a radio episode always streams (#44, no
+ * offline copies of radio). `force` (the retry after a media error) skips the copy, so a
+ * damaged file falls back to the stream.
+ */
 async function streamUrlFor(track: QueueTrack, force = false): Promise<{ url: string; expires_at: number }> {
   const core = await getCore();
-  return track.radio ? core.radioStreamUrl(track.radio.show_id, force) : core.getFreshStreamUrl(track.id, force);
+  if (track.radio) return core.radioStreamUrl(track.radio.show_id, force);
+  if (!force) {
+    const local = await core.localTrackUrl(track.id).catch(() => null);
+    if (local) return { url: local, expires_at: Number.MAX_SAFE_INTEGER };
+  }
+  if (Date.now() < offlineUntil) throw Object.assign(new Error("Offline, and this track isn't downloaded"), { code: "offline" });
+  try {
+    const r = await core.getFreshStreamUrl(track.id, force);
+    offlineUntil = 0;
+    return r;
+  } catch (e) {
+    if (isNetworkError(e)) offlineUntil = Date.now() + OFFLINE_HOLD_MS;
+    throw e;
+  }
 }
 
 /** Resolve a fresh CDN URL for the track and point the active audio element at it. */
@@ -153,6 +181,7 @@ function load(track: QueueTrack, force = false) {
   const seq = ++loadSeq;
   loading = true;
   retriedFor = force ? track.id : null;
+  if (!force || suspectCopy !== track.id) suspectCopy = null;
   if (pendingSeek && pendingSeek.trackId !== track.id) pendingSeek = null;
   // A load the listener asked for starts counting failures afresh and wins over a pending skip.
   if (!force && !skippingError) { failStreak = 0; cancelPendingSkip(); }
@@ -185,12 +214,40 @@ function load(track: QueueTrack, force = false) {
       const el = active();
       el.pause();
       if (el.hasAttribute("src")) { el.removeAttribute("src"); el.load(); }
-      // During a Bandcamp cooldown every stale track would fail the same way: stop here
-      // with the "try again after" message instead of skipping through the whole queue.
-      if ((e as { code?: unknown } | null)?.code === "challenge_cooldown") return;
+      // During a Bandcamp cooldown every stale track would fail the same way: stop here with
+      // the "try again after" message instead of skipping through the whole queue, unless the
+      // queue has downloaded tracks (#2), which need no request: then skip on towards them.
+      if ((e as { code?: unknown } | null)?.code === "challenge_cooldown") {
+        if (wanted) void skipIfDownloadedAhead(seq);
+        return;
+      }
       if (wanted) skipAfterError(true);
     }
   })();
+}
+
+/** A cooldown stopped a load: skip on if another queue entry has an offline copy (#2). */
+async function skipIfDownloadedAhead(seq: number) {
+  const { queue, index } = usePlayer.getState();
+  const others = queue.filter((t, i) => i !== index && t.id > 0).map((t) => t.id);
+  const saved = others.length ? await getCore().then((c) => c.downloadedTrackIds(others)).catch(() => []) : [];
+  if (seq !== loadSeq || !saved.length) return; // something else loaded meanwhile, or nothing to reach
+  skipAfterError(true);
+}
+
+/**
+ * A track whose offline copy failed in the element, until its stream retry plays (then the copy
+ * is forgotten) or something else loads. A failure while offline, during a cooldown or of the
+ * stream too never gets that far, so a good copy isn't lost to a transient error.
+ */
+let suspectCopy: number | null = null;
+/** A local file the element couldn't play is forgotten (#2): later plays stream. */
+const isLocalSrc = (src: string) => /^(asset:|https?:\/\/asset\.localhost\/|blob:)/.test(src);
+function forgetLocalCopy(trackId: number) {
+  void getCore()
+    .then((c) => c.removeTrackDownloads([trackId]))
+    .then(() => invalidateQueries(["album", "albums", "tracks", "playlist", "offline"]))
+    .catch(() => undefined);
 }
 
 /**
@@ -715,6 +772,13 @@ const onAudioEvent = (type: AudioEventType) => {
   if (type === "pause") swapping = swappingAfter(swapping, { type: "pause" });
   if (type === "playing") swapping = swappingAfter(swapping, { type: "playing", paused: el.paused });
   if (type === "playing") failStreak = 0;
+  if (type === "playing" && suspectCopy != null) {
+    // The stream retry plays where the local file failed: the file is the problem, so it goes.
+    // Not while offline (that retry can't have streamed), and only for the same track.
+    const cur = usePlayer.getState().current();
+    if (cur?.id === suspectCopy && !isLocalSrc(el.src) && Date.now() >= offlineUntil) forgetLocalCopy(cur.id);
+    suspectCopy = null;
+  }
   // A pause from outside (the system) mid-crossfade stops the fading track too.
   if (type === "pause" && el.paused && tx.phase === "fading") {
     other().pause();
@@ -764,6 +828,8 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
     const cur = usePlayer.getState().current();
     if (!cur) return;
     if (retriedFor !== cur.id) {
+      // The copy is only suspect: it is forgotten once the stream retry plays (see "playing").
+      suspectCopy = cur.id > 0 && isLocalSrc(el.src) ? cur.id : null;
       // Most likely an expired stream URL: ask the server to re-scrape and try once more. A
       // paused player (the listener, or the system) stays paused after the retry.
       if (usePlayer.getState().status === "paused") usePlayer.setState({ wantsPlay: false });

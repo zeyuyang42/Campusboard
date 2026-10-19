@@ -399,6 +399,12 @@ details.about-wrap summary { cursor: pointer; color: var(--text-muted); margin-t
 .album-head .preorder-note { font-size: 13px; color: var(--text); margin: -6px 0 12px; }
 .card .sub .preorder { color: var(--text); }
 .album-head .owned-note { font-size: 13px; color: var(--accent); margin: -6px 0 12px; }
+/* Offline copies (#2): quiet, never louder than the Buy link. */
+.album-head .offline-note { font-size: 13px; color: var(--text-muted); margin: -6px 0 12px; }
+.album-head .offline-progress { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.album-head .offline-why { font-size: 12.5px; flex-basis: 100%; }
+.tracks td.title .saved { display: inline-flex; vertical-align: -1px; margin-left: 6px; color: var(--text-muted); opacity: .7; }
+.tracks tr.playing td.title .saved { color: inherit; }
 .library-filter { width: 280px; max-width: 100%; }
 
 /* ---------- radio (#44) ---------- */

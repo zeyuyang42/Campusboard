@@ -1,4 +1,5 @@
 import type { Db } from "../db/Db.js";
+import { now } from "../db/Db.js";
 import * as jobs from "../db/repos/jobs.js";
 import { albumUrlsInLibrary } from "../db/repos/albums.js";
 import type { FetchQueue } from "../scrape/http.js";
@@ -14,7 +15,8 @@ import * as fan from "../db/repos/fanItems.js";
 import { settleRelease } from "../db/repos/releases.js";
 import { resolvePending } from "../db/repos/importPending.js";
 import { getSetting, setSettingWhileJobRuns } from "../db/repos/settings.js";
-import type { CookieStatus, Job, SyncSummary } from "../types.js";
+import type { CookieStatus, Job, JobItem, SyncSummary } from "../types.js";
+import { downloadItemTrack, downloadItemUrl, type DownloadBudget, type OfflineService } from "./offline.js";
 
 /** Thrown inside a job when it was cancelled while waiting; process() swallows it. */
 class JobCancelled extends Error {}
@@ -62,12 +64,14 @@ export class JobRunner {
   private forceFlags = new Map<number, boolean>();
   /** Collection syncs started by the background refresh (this session; a resumed one counts as manual). */
   private autoSyncs = new Set<number>();
+  /** Per download job: the one forced album re-scrape its tracks may spend on CDN refusals. */
+  private downloadBudgets = new Map<number, DownloadBudget>();
   private reset: Promise<void>;
   private resetFailed = false;
   private resetRetried = false;
   private ready: Promise<void>;
 
-  constructor(private db: Db, private queue: FetchQueue, private onChange: () => void = () => {}) {
+  constructor(private db: Db, private queue: FetchQueue, private onChange: () => void = () => {}, private offline: OfflineService | null = null) {
     // The stale-job reset settles "pending" jobs, so it must finish before any job is
     // created: every enqueue waits for it. Not for the first kick, which may run for minutes;
     // the "pending" status keeps a half-created job away from that kick instead.
@@ -138,6 +142,39 @@ export class JobRunner {
     return (await jobs.getJob(this.db, job.id))!;
   }
 
+  /**
+   * Save offline copies of an album's streamable tracks that don't have one yet (#2), as one
+   * "download" job with an item per track, processed one track at a time like any import
+   * (rate-limited queue, challenge cooldown, resumed after a restart, cancellable between
+   * tracks). Returns the album's download already queued or running if there is one, or null
+   * when every track is saved already. `trackIds` limits it to those library tracks.
+   */
+  async enqueueDownload(albumId: number, trackIds?: number[]): Promise<Job | null> {
+    if (!this.offline?.available) throw new ScrapeError("offline_unavailable", "Offline copies aren't available here");
+    const album = await this.db.get<{ url: string }>("SELECT url FROM albums WHERE id = ?", [albumId]);
+    if (!album) throw new ScrapeError("not_found", `Album ${albumId} is not in the library`);
+    await this.afterReset();
+    const active = await this.db.get<{ id: number }>("SELECT id FROM jobs WHERE kind = 'download' AND input_url = ? AND status IN ('pending','queued','running') ORDER BY id LIMIT 1", [album.url]);
+    if (active) return (await jobs.getJob(this.db, active.id))!;
+    const only = trackIds ? new Set(trackIds) : null;
+    const rows = (await this.db.select<{ id: number; track_id: number }>(
+      "SELECT id, track_id FROM tracks WHERE album_id = ? AND streamable = 1 AND local_path IS NULL ORDER BY track_num, id", [albumId]))
+      .filter((r) => !only || only.has(r.id));
+    if (!rows.length) return null;
+    const job = await jobs.createJob(this.db, "download", album.url, rows.map((r) => downloadItemUrl(album.url, r.track_id)));
+    this.onChange();
+    void this.kick();
+    return (await jobs.getJob(this.db, job.id))!;
+  }
+
+  /** Cancel the queued or running download of one album (its URL), or every download. */
+  async cancelDownloads(albumUrl?: string): Promise<void> {
+    const changed = albumUrl
+      ? (await this.db.run("UPDATE jobs SET status = 'cancelled', updated_at = ? WHERE kind = 'download' AND input_url = ? AND status IN ('pending','queued','running')", [now(), albumUrl])).changes > 0
+      : await jobs.cancelJobsOfKind(this.db, "download");
+    if (changed) this.onChange();
+  }
+
   whenReady(): Promise<void> { return this.ready; }
 
   async kick(): Promise<void> {
@@ -187,9 +224,17 @@ export class JobRunner {
         }
       }
       let challenged = false;
+      let full: string | null = null;
       for (let item = await jobs.nextQueuedItem(this.db, job.id); item; item = await jobs.nextQueuedItem(this.db, job.id)) {
         if ((await jobs.jobStatus(this.db, job.id)) === "cancelled") return;
         try {
+          if (job.kind === "download") {
+            const albumId = await this.downloadItem(job.id, item);
+            if (albumId === null) return;
+            await jobs.setItemResult(this.db, item.id, job.id, true, albumId, null);
+            this.onChange();
+            continue;
+          }
           // An earlier item of this sync may have brought it in (a track with its album).
           const have = job.kind === "collection" ? await fan.libraryAlbumForFetchUrl(this.db, item.url) : null;
           if (have !== null) {
@@ -221,6 +266,14 @@ export class JobRunner {
             await jobs.failQueuedItems(this.db, job.id, `[client_challenge] Skipped: Bandcamp kept returning its bot check`);
             break;
           }
+          const fullDisk = e instanceof ScrapeError && e.code === "disk_error" && (e.detail as { full?: boolean } | undefined)?.full;
+          if (e instanceof ScrapeError && (e.code === "storage_full" || e.code === "cdn_refused" || fullDisk)) {
+            // The size limit, a full disk, or a CDN that refuses this album even after a fresh
+            // page: the rest would stop the same way, so they fail now with that reason.
+            full = `[${e.code}] ${e.message}`;
+            await jobs.failQueuedItems(this.db, job.id, full);
+            break;
+          }
         }
         this.onChange();
       }
@@ -231,13 +284,14 @@ export class JobRunner {
       if (final.status === "cancelled") return;
       // Items that landed after the loop found none queued: back to the queue (the kick
       // loop picks the job up again) rather than finishing with work left undone.
-      if (!challenged && (await jobs.nextQueuedItem(this.db, job.id))) {
+      if (!challenged && !full && (await jobs.nextQueuedItem(this.db, job.id))) {
         await jobs.transitionJob(this.db, job.id, ["running"], "queued");
         return;
       }
       const allFailed = final.total > 0 && final.failed === final.total;
       // Keep the clear challenge message when that is why the job stopped.
-      const why = challenged ? "[client_challenge] Bandcamp kept returning its bot check" : allFailed ? "Every item failed to import" : note;
+      const why = challenged ? "[client_challenge] Bandcamp kept returning its bot check"
+        : full ?? (allFailed ? (job.kind === "download" ? "Every track failed to download" : "Every item failed to import") : note);
       await jobs.transitionJob(this.db, job.id, ["running"], allFailed ? "failed" : "done", why);
     } catch (e) {
       if (e instanceof JobCancelled) return;
@@ -247,6 +301,7 @@ export class JobRunner {
     } finally {
       this.forceFlags.delete(job.id);
       this.autoSyncs.delete(job.id);
+      this.downloadBudgets.delete(job.id);
       this.onChange();
     }
   }
@@ -290,6 +345,35 @@ export class JobRunner {
       } catch (e) {
         if (!(e instanceof ScrapeError)) throw e;
         // Another request tripped the gate while this one waited in the queue: not an attempt.
+        if (e.code === "challenge_cooldown") continue;
+        if (e.code === "client_challenge" && challenges++ === 0) continue;
+        throw e;
+      }
+    }
+  }
+
+  /**
+   * One track of a download job (#2): its offline copy, with the same cooldown handling as
+   * fetchForJob (the album page refresh and the mp3 both go through the queue). Returns the
+   * track's album id, or null if the job was cancelled while paused.
+   */
+  private async downloadItem(jobId: number, item: JobItem): Promise<number | null> {
+    const offline = this.offline;
+    if (!offline?.available) throw new ScrapeError("offline_unavailable", "Offline copies aren't available here");
+    const bcid = downloadItemTrack(item.url);
+    const t = bcid == null ? null : await this.db.get<{ id: number; album_id: number }>("SELECT id, album_id FROM tracks WHERE track_id = ?", [bcid]);
+    if (!t) throw new ScrapeError("not_found", "The track is no longer in the library");
+    for (let challenges = 0; ;) {
+      if (!(await this.waitOutCooldown(jobId))) return null;
+      // Checked per track, so the limit stops a job part way (the last copy may pass it a little).
+      if (await offline.capReached()) throw new ScrapeError("storage_full", "Offline copies reached the size limit in Settings");
+      try {
+        let budget = this.downloadBudgets.get(jobId);
+        if (!budget) this.downloadBudgets.set(jobId, (budget = { rescrapes: 1 }));
+        await offline.download(t.id, budget);
+        return t.album_id;
+      } catch (e) {
+        if (!(e instanceof ScrapeError)) throw e;
         if (e.code === "challenge_cooldown") continue;
         if (e.code === "client_challenge" && challenges++ === 0) continue;
         throw e;

@@ -8,7 +8,7 @@ import { useRowDrag } from "../lib/useRowDrag";
 import { useTrackActions } from "../lib/useTrackActions";
 import { openMenuFromEvent } from "../ui/menu";
 import { SelectionBar } from "./SelectionBar";
-import { PlayIcon, MoreIcon } from "./Icons";
+import { PlayIcon, MoreIcon, SavedIcon } from "./Icons";
 
 export interface TrackListProps {
   tracks: Track[];
@@ -92,7 +92,10 @@ export function TrackList({ tracks, showAlbum = false, useTrackNum = false, reor
                   )}
                 </td>
                 <td className="title" title={t.streamable ? undefined : availableOn ? `Available on ${availableOn}` : availableOn === null ? "Not out yet" : "Can't be streamed from Bandcamp"}>
-                  <div>{t.title}{!t.streamable && availableOn === undefined && <span className="muted"> (not streamable)</span>}</div>
+                  <div>
+                    {t.title}{!t.streamable && availableOn === undefined && <span className="muted"> (not streamable)</span>}
+                    {t.downloaded && <span className="saved" title="Available offline" aria-label="Available offline"><SavedIcon /></span>}
+                  </div>
                   {showAlbum && (
                     <div className="sub meta">
                       <span>{t.track_artist ?? t.artist_name}</span><Link to={`/album/${t.album_id}`} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>{t.album_title}</Link>

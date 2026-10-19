@@ -38,6 +38,8 @@ export interface Album {
   play_count?: number;
   /** UTC `YYYY-MM-DD HH:MM:SS` of the latest play, or null if never played. */
   last_played_at?: string | null;
+  /** Tracks with an offline copy (#2). */
+  downloaded_count?: number;
 }
 
 export interface Track {
@@ -57,6 +59,8 @@ export interface Track {
   album_url?: string;
   /** Counted plays (listening history). */
   play_count?: number;
+  /** Has an offline copy (#2); the player plays it instead of streaming. */
+  downloaded?: boolean;
 }
 
 export interface AlbumWithTracks extends Album {
@@ -82,7 +86,8 @@ export interface PlaylistWithTracks extends Playlist {
   tracks: PlaylistTrack[];
 }
 
-export type JobKind = "album" | "track" | "discography" | "selection" | "collection" | "library";
+/** "download": offline copies of an album's tracks (#2), one job item per track. */
+export type JobKind = "album" | "track" | "discography" | "selection" | "collection" | "library" | "download";
 /** "pending": created, items not yet inserted; the runner and the job list ignore it. */
 export type JobStatus = "pending" | "queued" | "running" | "done" | "failed" | "cancelled";
 
@@ -283,6 +288,18 @@ export interface RadioShow extends RadioShowSummary {
   /** Length of the episode's single audio file, in seconds. */
   duration: number | null;
   tracks: RadioEntry[];
+}
+
+/** Offline copies (#2) as Settings > Storage shows them. */
+export interface OfflineStats {
+  tracks: number;
+  albums: number;
+  /** Total size of the saved files. */
+  bytes: number;
+  /** The size limit in MB (1 MB = 1,000,000 bytes), or null for none. */
+  cap_mb: number | null;
+  /** False where there is no offline folder (the app couldn't create it). */
+  available: boolean;
 }
 
 /** What a queue entry carries when it is a radio episode rather than a library track. */

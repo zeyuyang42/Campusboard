@@ -29,6 +29,7 @@ export const keys = {
   radioShows: ["radio", "list"] as const,
   // Under "albums" so an import refreshes which featured releases are in the library.
   radioShow: (id: number) => ["albums", "radio-show", id] as const,
+  offline: ["offline"] as const,
 };
 
 const core = getCore;
@@ -39,7 +40,7 @@ export const useAlbums = (sort: string, filter = "all", q = "") =>
 export type LibraryView = { sort: repos.AlbumSort; filter: repos.AlbumFilter };
 const LIBRARY_VIEW_KEY = "library_view";
 const DEFAULT_VIEW: LibraryView = { sort: "added", filter: "all" };
-const FILTERS: readonly string[] = ["all", "purchased", "wishlist"] satisfies repos.AlbumFilter[];
+const FILTERS: readonly string[] = ["all", "purchased", "wishlist", "downloaded"] satisfies repos.AlbumFilter[];
 
 function toLibraryView(v: unknown): LibraryView {
   const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
@@ -175,6 +176,22 @@ export function useReleaseMutations() {
     setEnabled: useMutation({ mutationFn: async (on: boolean) => (await core()).setReleaseChecksEnabled(on), onSuccess: inv }),
     checkNow: useMutation({ mutationFn: async () => (await core()).checkReleasesNow(), onMutate: () => { setTimeout(inv, 50); }, onSettled: inv }),
     setMuted: useMutation({ mutationFn: async ({ id, muted }: { id: number; muted: boolean }) => (await core()).setArtistReleasesMuted(id, muted), onSuccess: inv }),
+  };
+}
+
+/** Offline copies (#2): totals and the size limit for Settings > Storage. */
+export const useOfflineStats = () => useQuery({ queryKey: keys.offline, queryFn: async () => (await core()).offlineStats() });
+
+export function useOfflineMutations() {
+  const qc = useQueryClient();
+  const inv = () => {
+    for (const k of ["offline", "albums", "album", "tracks", "playlist", "jobs"]) void qc.invalidateQueries({ queryKey: [k] });
+  };
+  return {
+    downloadAlbum: useMutation({ mutationFn: async (id: number) => (await core()).downloadAlbum(id), onSuccess: inv }),
+    removeAlbum: useMutation({ mutationFn: async (id: number) => (await core()).removeAlbumDownloads(id), onSuccess: inv }),
+    removeAll: useMutation({ mutationFn: async () => (await core()).removeAllDownloads(), onSuccess: inv }),
+    setCap: useMutation({ mutationFn: async (mb: number | null) => (await core()).setOfflineCap(mb), onSuccess: inv }),
   };
 }
 

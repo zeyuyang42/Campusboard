@@ -12,7 +12,18 @@ export function makeFakeCore() {
     state: { current_track_id: null, position_sec: 0, queue: [], queue_index: 0, shuffle: false, repeat: "off", volume: 1 } as PlayState,
     /** Track ids whose stream URL fails. */
     failing: new Set<number>(),
+    /** Offline copies (#2): track id -> the URL localTrackUrl gives. */
+    local: new Map<number, string>(),
+    /** The network is down: stream URLs fail the way FetchQueue reports no answer. */
+    offline: false,
+    localTrackUrl: vi.fn(async (trackId: number) => core.local.get(trackId) ?? null),
+    downloadedTrackIds: vi.fn(async (ids: number[]) => ids.filter((id) => core.local.has(id))),
+    removeTrackDownloads: vi.fn(async (ids: number[]) => ids.filter((id) => core.local.delete(id)).length),
+    /** Stream URLs fail with a Bandcamp cooldown (FetchQueue's challenge_cooldown). */
+    cooldownUntil: 0,
     getFreshStreamUrl: vi.fn(async (trackId: number, force = false) => {
+      if (core.cooldownUntil) throw Object.assign(new Error("cooldown"), { code: "challenge_cooldown", detail: { until: core.cooldownUntil } });
+      if (core.offline) throw Object.assign(new Error("Failed to fetch: Load failed"), { code: "fetch_failed", detail: { network: true } });
       if (core.failing.has(trackId)) throw new Error("no stream");
       return { url: `https://t4.bcbits.test/stream/${trackId}${force ? "?force" : ""}`, expires_at: Date.now() + DAY_MS };
     }),
