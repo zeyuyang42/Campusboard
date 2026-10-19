@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-selftest-file"
+description = "Enables the selftest_file command without any pre-configured scope."
+commands.allow = ["selftest_file"]
+
+[[permission]]
+identifier = "deny-selftest-file"
+description = "Denies the selftest_file command without any pre-configured scope."
+commands.deny = ["selftest_file"]

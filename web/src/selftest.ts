@@ -9,10 +9,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { exit } from "@tauri-apps/api/app";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { BaseDirectory } from "@tauri-apps/api/path";
-import { exists, readTextFile, remove } from "@tauri-apps/plugin-fs";
+import { copyFile, exists, mkdir, readFile, readTextFile, remove, rename, writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
 import { resendMenuBar } from "./lib/menuBar";
-import { appDataDir, join } from "@tauri-apps/api/path";
+import { appConfigDir, appDataDir, join } from "@tauri-apps/api/path";
+import { storeBackgroundImage } from "./lib/files";
 import { backupLibraryDatabase, exportLibraryFile } from "./lib/libraryFile";
 import { miniBridgeInfo } from "./player/miniBridge";
 import { DEFAULT_THEME, MINI_EVENTS, positionToGain, toggleAction, type Track } from "@bc/core";
@@ -266,7 +267,8 @@ async function newReleasesCheck(core: Awaited<ReturnType<typeof getCore>>, album
 
 /**
  * Library export and database backup through the real fs and SQL plugins, without dialogs:
- * the dev-only path argument writes the export into $APPDATA. It is read back, validated and
+ * the dev-only name argument writes the export to the temp folder, with that one file added
+ * to the fs scope as the save dialog would (`selftest_file`). It is read back, validated and
  * previewed against this same library (which must find nothing new), then deleted. The
  * backup (VACUUM INTO through the SQL plugin, then the Rust backup command) goes to the temp
  * folder and must be an SQLite file; it is read and deleted by a debug-only command. The
@@ -277,18 +279,18 @@ async function libraryFileCheck(core: Awaited<ReturnType<typeof getCore>>) {
   const stamp = Date.now();
   const name = `selftest-library-${stamp}.json`;
   const backup = `selftest-backup-${stamp}.db`;
-  const AppData = BaseDirectory.AppData;
   try {
     await exportLibraryFile({ history: true }, name);
-    const text = await readTextFile(name, { baseDir: AppData });
+    const file = await invoke<string>("selftest_file", { action: "allow", name });
+    const text = await readTextFile(file);
     const parsed = core.parseLibraryFile(text);
     const cookie = await core.db.get<{ value: string }>("SELECT value FROM settings WHERE key = 'bandcamp_identity'");
     const cookieAbsent = !text.includes("bandcamp_identity") && (!cookie || !text.includes(JSON.parse(cookie.value) as string));
     const [albums, playlists, plays] = await Promise.all([core.albums(), core.playlists(), core.playCount()]);
     const preview = parsed.data ? await core.previewLibraryImport(parsed.data) : null;
     const counts = parsed.data ? { albums: parsed.data.albums.length, playlists: parsed.data.playlists.length, plays: parsed.data.history?.length ?? null } : null;
-    await remove(name, { baseDir: AppData });
-    const removed = !(await exists(name, { baseDir: AppData }));
+    await remove(file);
+    const removed = !(await exists(file));
     const path = await backupLibraryDatabase(backup);
     const head = path ? await invoke<string>("selftest_take_backup", { path }) : null;
     // The guard: a snapshot name that doesn't exist, so nothing is copied even if it failed open.
@@ -303,8 +305,79 @@ async function libraryFileCheck(core: Awaited<ReturnType<typeof getCore>>) {
       && preview?.albums.new === 0 && preview.playlists.new === 0 && head === "SQLite format 3" && guardOk;
     return { ok, error: parsed.error ?? null, bytes: text.length, counts, cookieAbsent, removed, preview: preview && { albums: preview.albums, playlists: preview.playlists.new }, backup: { written: !!path, head, refused } };
   } finally {
-    await remove(name, { baseDir: AppData }).catch(() => undefined);
+    await invoke("selftest_file", { action: "drop", name }).catch(() => undefined);
   }
+}
+
+/** A 1x1 PNG for the theme background check. */
+const PNG_1PX = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+
+/**
+ * The webview's fs scope (#78). A theme background goes the way the Settings page sends it
+ * (a file the open dialog allowed, here one `selftest_file` allowed in the temp folder, copied
+ * into $APPDATA/backgrounds, then painted from there), and the stored copy is deleted from
+ * Rust afterwards. Then every write-like command aimed at a probe file next to the live
+ * database (`<db stem>.probe`, also spelled relative to $APPDATA, and as the target of a
+ * rename out of the offline folder or a copy out of backgrounds) must be refused with the
+ * scope error before it touches anything, and so must a read-only `exists` of the database
+ * itself. The probe names never exist; nothing in the library changes.
+ */
+async function fsScopeCheck() {
+  const out: Record<string, unknown> = {};
+  const stamp = Date.now();
+  const bg = `selftest-bg-${stamp}.png`;
+  const { useTheme } = await import("./theme/store");
+  const saved = useTheme.getState();
+  try {
+    const src = await invoke<string>("selftest_file", { action: "allow", name: bg });
+    await writeFile(src, PNG_1PX);
+    const stored = await storeBackgroundImage(src);
+    const bytes = await readFile(`backgrounds/${stored}`, { baseDir: BaseDirectory.AppData });
+    useTheme.getState().load({ ...saved.theme, background: { source: "file", value: stored, blur: 0, dim: 0 } }, saved.basePreset);
+    let painted = "";
+    for (let i = 0; i < 30 && !painted.startsWith('url("blob:'); i++) {
+      await sleep(100);
+      painted = document.documentElement.style.getPropertyValue("--bg-image");
+    }
+    out.background = { stored: /^\d+-selftest-bg-\d+\.png$/.test(stored), bytes: bytes.length === PNG_1PX.length, painted: painted.startsWith('url("blob:') };
+  } catch (e) {
+    out.background = { error: String(e) };
+  } finally {
+    useTheme.getState().load(saved.theme, saved.basePreset);
+    await invoke("selftest_file", { action: "drop", name: bg }).catch(() => undefined);
+  }
+
+  const url = await invoke<string>("library_db_url");
+  const dbFile = url.replace(/^sqlite:/, "");
+  const db = dbFile.startsWith("/") ? dbFile : await join(await appConfigDir(), dbFile);
+  const stem = (db.split("/").pop() ?? "library.db").replace(/\.db$/, "");
+  const probe = await join(db.replace(/\/[^/]+$/, ""), `${stem}.probe`);
+  const AppData = { baseDir: BaseDirectory.AppData };
+  const offline = await invoke<string>("offline_dir").catch(() => null);
+  const attempts: Record<string, () => Promise<unknown>> = {
+    writeText: () => writeTextFile(probe, "probe"),
+    writeBytes: () => writeFile(probe, PNG_1PX),
+    writeTextAppData: () => writeTextFile(`${stem}.probe`, "probe", AppData),
+    rename: () => rename(probe, `${probe}2`),
+    renameOutOfOffline: () => (offline ? rename(`${offline}/0.mp3.part`, probe) : Promise.reject(new Error("no offline folder"))),
+    remove: () => remove(probe),
+    removeAppData: () => remove(`${stem}.probe`, AppData),
+    copyOutOfBackgrounds: () => copyFile(`backgrounds/selftest-none-${stamp}.png`, probe, { fromPathBaseDir: BaseDirectory.AppData }),
+    mkdir: () => mkdir(probe),
+    existsDb: () => exists(db),
+  };
+  const refused: Record<string, string> = {};
+  for (const [label, attempt] of Object.entries(attempts)) {
+    refused[label] = await attempt().then((r) => `allowed: ${String(r)}`, (e) => String(e));
+  }
+  // A refusal that failed open (it wrote the probe): take it away again, if the scope lets us.
+  if (Object.values(refused).some((r) => r.startsWith("allowed"))) await remove(probe).catch(() => undefined);
+  const scoped = Object.values(refused).every((r) => r.includes("forbidden path"));
+  out.probe = probe.split("/").slice(-2).join("/");
+  out.refused = Object.fromEntries(Object.entries(refused).map(([k, v]) => [k, v.includes("forbidden path") ? "forbidden path" : v]));
+  const b = out.background as { stored?: boolean; bytes?: boolean; painted?: boolean };
+  out.ok = !!(b.stored && b.bytes && b.painted) && scoped;
+  return out;
 }
 
 /**
@@ -633,7 +706,7 @@ async function miniPlayerCheck(s: Step) {
     const presses = (i: ReturnType<typeof miniBridgeInfo>) => i.commands - i.hellos - i.byes;
     const commands = presses(miniBridgeInfo()) - pressesBefore;
     const commandsExact = commands === 4;
-    const perms = report?.setOnTop === "ok" && report?.drag === "ok" && report?.sqlDenied === true && report?.commandDenied === true;
+    const perms = report?.setOnTop === "ok" && report?.drag === "ok" && report?.sqlDenied === true && report?.commandDenied === true && report?.fsDenied === true;
     // Without playback (the stream didn't start, or muted media stayed paused while hidden)
     // only the command path and the first press's decision are checked.
     // The pause/resume pair is only checked when the first press paused a playing track.
@@ -951,6 +1024,7 @@ export async function runSelfTest() {
     }, 30_000);
     out.syncGuards = await block("syncGuards", () => checkSyncGuards(core));
     out.libraryFile = await block("libraryFile", () => libraryFileCheck(core));
+    out.fsScope = await block("fsScope", () => fsScopeCheck());
     out.collection = SELFTEST_FAN ? await block("collection", async () => {
       const page = parseFanPage(await core.queue.fetchText(fanPageUrl(SELFTEST_FAN)));
       // POST to bandcamp.com/api/... through the http scope, two items only.
@@ -1000,7 +1074,7 @@ export async function runSelfTest() {
     // Overall ok needs every block that reports its own `ok` to pass (a timed-out or thrown
     // block reports ok: false). The listed blocks must be present as objects: one caught and
     // stored as a string threw.
-    const required = ["import", "libraryFilter", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "offline", "syncGuards", "newReleases", "preorder", "libraryFile", "window", "appearance"];
+    const required = ["import", "libraryFilter", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "offline", "syncGuards", "newReleases", "preorder", "libraryFile", "fsScope", "window", "appearance"];
     const failed = Object.entries(out)
       .filter(([k, v]) => required.includes(k) || hasOk(v))
       .filter(([, v]) => (v as { ok?: unknown } | null)?.ok !== true)
