@@ -5,6 +5,8 @@ import { repos, type Job, type PlayState } from "@bc/core";
 export const keys = {
   albums: (sort: string, filter = "all", q = "") => ["albums", sort, filter, q] as const,
   album: (id: number) => ["album", id] as const,
+  // Under "album" so a refresh or an imported library (which invalidate "album") reload it.
+  albumNote: (id: number) => ["album", id, "note"] as const,
   artists: ["artists"] as const,
   artist: (id: number) => ["artist", id] as const,
   tracks: (q: string) => ["tracks", q] as const,
@@ -40,7 +42,7 @@ export const useAlbums = (sort: string, filter = "all", q = "") =>
 export type LibraryView = { sort: repos.AlbumSort; filter: repos.AlbumFilter };
 const LIBRARY_VIEW_KEY = "library_view";
 const DEFAULT_VIEW: LibraryView = { sort: "added", filter: "all" };
-const FILTERS: readonly string[] = ["all", "purchased", "wishlist", "downloaded"] satisfies repos.AlbumFilter[];
+const FILTERS: readonly string[] = ["all", "purchased", "wishlist", "downloaded", "rated"] satisfies repos.AlbumFilter[];
 
 function toLibraryView(v: unknown): LibraryView {
   const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
@@ -148,6 +150,22 @@ export function usePlaylistMutations() {
     addTracks: useMutation({ mutationFn: async ({ id, trackIds }: { id: number; trackIds: number[] }) => (await core()).addToPlaylist(id, trackIds), onSuccess: (_d, v) => inv(v.id) }),
     reorder: useMutation({ mutationFn: async ({ id, ids }: { id: number; ids: number[] }) => (await core()).reorderPlaylist(id, ids), onSuccess: (_d, v) => inv(v.id) }),
     removeTrack: useMutation({ mutationFn: async ({ id, ptid }: { id: number; ptid: number }) => (await core()).removeFromPlaylist(id, ptid), onSuccess: (_d, v) => inv(v.id) }),
+  };
+}
+
+/** Your note and rating for an album (#73). */
+export const useAlbumNote = (id: number) => useQuery({ queryKey: keys.albumNote(id), queryFn: async () => (await core()).albumNote(id), enabled: id > 0 });
+
+/** Save a rating or a note; the Library's rating sort and Rated filter follow. */
+export function useAlbumNoteMutations(id: number) {
+  const qc = useQueryClient();
+  const done = () => {
+    void qc.invalidateQueries({ queryKey: keys.albumNote(id) });
+    void qc.invalidateQueries({ queryKey: ["albums"] });
+  };
+  return {
+    setRating: useMutation({ mutationFn: async (rating: number) => (await core()).setAlbumRating(id, rating), onSuccess: done }),
+    setNote: useMutation({ mutationFn: async (note: string) => (await core()).setAlbumNote(id, note), onSuccess: () => { void qc.invalidateQueries({ queryKey: keys.albumNote(id) }); } }),
   };
 }
 

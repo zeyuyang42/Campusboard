@@ -30,11 +30,15 @@ const FILTER_EMPTY: Record<string, string> = {
   purchased: "No purchases here yet. Add your Bandcamp username in Settings and sync your collection.",
   wishlist: "Nothing from your wishlist here yet. Add your Bandcamp username in Settings and sync your collection.",
   downloaded: "Nothing is available offline yet. Open an album and choose Make available offline.",
+  rated: "No rated albums yet. Open an album and give it some stars.",
 };
-const FILTER_NAME: Record<string, string> = { purchased: "your purchases", wishlist: "your wishlist", downloaded: "your downloads" };
+const FILTER_NAME: Record<string, string> = { purchased: "your purchases", wishlist: "your wishlist", downloaded: "your downloads", rated: "your rated albums" };
 
 // Offered in ALBUM_SORTS order; a new sort in core needs a label here.
-const SORT_LABELS: Record<repos.AlbumSort, string> = { added: "Date added", played: "Recently played", plays: "Most played", artist: "Artist", title: "Album title", release: "Release date" };
+const SORT_LABELS: Record<repos.AlbumSort, string> = { added: "Date added", played: "Recently played", plays: "Most played", artist: "Artist", title: "Album title", release: "Release date", rating: "Rating" };
+
+/** A rating as quiet text under a card, e.g. "★★★★"; nothing when unrated. */
+const starsText = (r = 0) => (r > 0 ? "★".repeat(r) : "");
 
 /** `value`, but only after it has stopped changing for `ms`. */
 function useDebounced<T>(value: T, ms: number): T {
@@ -97,6 +101,7 @@ function AlbumGrid({ sort: savedSort, filter, set }: LibraryView & { set: (p: Pa
           <option value="purchased">Purchased</option>
           <option value="wishlist">Wishlist</option>
           <option value="downloaded">Downloaded</option>
+          <option value="rated">Rated</option>
         </select>
         <label className="muted" htmlFor="album-sort">Sort</label>
         <select id="album-sort" value={sort} onChange={(e) => { setTempSort(null); set({ sort: e.target.value as repos.AlbumSort }); }}>
@@ -105,7 +110,7 @@ function AlbumGrid({ sort: savedSort, filter, set }: LibraryView & { set: (p: Pa
       </div>
       {bulk && <BulkBar albums={data!} sort={sort} filter={filter} q={term} />}
       {shelf && <RecentlyPlayed libraryCount={n} onShowAll={() => setTempSort("played")} />}
-      {n ? <div className="grid">{data!.map((a) => <AlbumCard key={a.id} album={a} detail={sort === "plays" ? (a.play_count ? formatPlays(a.play_count) : "") : undefined} />)}</div>
+      {n ? <div className="grid">{data!.map((a) => <AlbumCard key={a.id} album={a} detail={sort === "plays" ? (a.play_count ? formatPlays(a.play_count) : "") : sort === "rating" ? starsText(a.rating) : undefined} />)}</div>
         : term ? (
           <div className="empty">
             Nothing in {FILTER_NAME[filter] ?? "your library"} matches <span className="selectable">“{term}”</span>.<br />
@@ -113,7 +118,7 @@ function AlbumGrid({ sort: savedSort, filter, set }: LibraryView & { set: (p: Pa
             {filter !== "all" && <> <button className="btn" onClick={() => set({ filter: "all" })}>Search all albums</button></>}
           </div>
         )
-        : <div className="empty">{FILTER_EMPTY[filter]}{filter !== "downloaded" && <><br /><Link className="btn" to="/settings#account">Open Settings</Link></>}</div>}
+        : <div className="empty">{FILTER_EMPTY[filter]}{filter !== "downloaded" && filter !== "rated" && <><br /><Link className="btn" to="/settings#account">Open Settings</Link></>}</div>}
     </>
   );
 }

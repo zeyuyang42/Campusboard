@@ -168,7 +168,7 @@ describe("library import", () => {
     const zoe = (await dst.get<{ artist_id: number }>("SELECT artist_id FROM albums WHERE url = ?", [CUSTOM_ALBUM]))!;
     expect(await isMuted(dst, zoe.artist_id)).toBe(true);
     expect(await dst.get("SELECT status FROM artist_releases WHERE url = 'https://illuminatihotties.bandcamp.com/album/old-one'")).toEqual({ status: "dismissed" });
-    expect(await countPending(dst)).toEqual({ tracks: 0, plays: 0, other: 0 });
+    expect(await countPending(dst)).toEqual({ tracks: 0, plays: 0, other: 0, notes: 0 });
     expect(await dst.get("SELECT 1 AS x FROM settings WHERE key = 'bandcamp_identity'")).toBeNull();
   });
 
@@ -419,14 +419,14 @@ describe("waiting entries", () => {
     const job = await waitJob(dst, r.job!.id);
     expect(job).toMatchObject({ status: "done", done: 1, failed: 1 });
     // Mix keeps its custom-album entry waiting, and the custom album's play waits too.
-    expect(await countPending(dst)).toEqual({ tracks: 1, plays: 1, other: 1 });
+    expect(await countPending(dst)).toEqual({ tracks: 1, plays: 1, other: 1, notes: 0 });
     const mix = (await listPlaylists(dst)).find((p) => p.name === "Mix")!;
     expect((await getPlaylist(dst, mix.id))!.tracks).toHaveLength(2);
     // Importing the file again once the album is reachable fills the gap in place.
     const again = await importLibrary(dst, runnerFor(dst), data);
     await waitJob(dst, again.job!.id);
     expect((await getPlaylist(dst, mix.id))!.tracks.map((t) => t.track_id)).toEqual(data.playlists[0].tracks.map((t) => t.track_id));
-    expect(await countPending(dst)).toEqual({ tracks: 0, plays: 0, other: 0 });
+    expect(await countPending(dst)).toEqual({ tracks: 0, plays: 0, other: 0, notes: 0 });
   });
 
   it("Stop waiting forgets everything still pending", async () => {
@@ -436,7 +436,7 @@ describe("waiting entries", () => {
     const before = await countPending(dst);
     expect(before.tracks + before.plays + before.other).toBeGreaterThan(0);
     expect(await clearPending(dst)).toBe(before.tracks + before.plays + before.other);
-    expect(await countPending(dst)).toEqual({ tracks: 0, plays: 0, other: 0 });
+    expect(await countPending(dst)).toEqual({ tracks: 0, plays: 0, other: 0, notes: 0 });
   });
 
   it("deleting an imported playlist drops its waiting entries and its link", async () => {

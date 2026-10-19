@@ -10,6 +10,7 @@ import * as jobs from "./db/repos/jobs.js";
 import * as settings from "./db/repos/settings.js";
 import * as palettes from "./db/repos/palettes.js";
 import * as plays from "./db/repos/plays.js";
+import * as albumNotes from "./db/repos/albumNotes.js";
 import { artUrl, extractPalette, type ArtPalette } from "./palette/index.js";
 import { JobRunner, type ImportRequest, type ImportSelectionRequest } from "./services/jobRunner.js";
 import { cachedFetchText } from "./services/pageCache.js";
@@ -81,6 +82,10 @@ export function createCore(deps: CoreDeps) {
     /** All tracks of the albums `albums(sort, filter, q)` lists, in that order (for bulk actions). */
     albumTracks: (sort: albums.AlbumSort = "added", filter: albums.AlbumFilter = "all", q = "") => albums.listAlbumTracks(db, sort, filter, q),
     album: (id: number) => albums.getAlbumWithTracks(db, id),
+    /** Your note and rating for an album (#73), or null when there are none. */
+    albumNote: (id: number) => albumNotes.getAlbumNote(db, id),
+    setAlbumRating: (id: number, rating: number) => albumNotes.setAlbumRating(db, id, rating),
+    setAlbumNote: (id: number, note: string) => albumNotes.setAlbumNote(db, id, note),
     deleteAlbum: async (id: number) => {
       const a = await albums.getAlbum(db, id);
       if (a) await runner.cancelDownloads(a.url);

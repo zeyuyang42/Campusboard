@@ -65,14 +65,14 @@ export function LibrarySettings() {
     if (path) setStatus({ kind: "ok", text: `Backed up to ${path.split("/").pop()}.` });
   });
 
-  const stuck = waiting ? waiting.tracks + waiting.plays + waiting.other : 0;
+  const stuck = waiting ? waiting.tracks + waiting.plays + waiting.other + waiting.notes : 0;
 
   return (
     <section id="library">
       <h2>Library</h2>
       <p className="muted">
         Move your library to another Mac, or keep a copy. The export lists albums by their Bandcamp address with your
-        playlists, listening history, theme and settings. It never contains your identity cookie. Importing fetches the
+        playlists, listening history, album notes and ratings, theme and settings. It never contains your identity cookie. Importing fetches the
         albums you don't have yet from Bandcamp at the usual polite pace.
       </p>
       <label className="check-row">
@@ -100,6 +100,7 @@ export function LibrarySettings() {
               {plural(pending.preview.playlists.total, "playlist", "playlists")}: {pending.preview.playlists.new} new, {pending.preview.playlists.present} already here.
               {pending.preview.playlists.renamed.map((r) => ` "${r.from}" is added as "${r.to}" because that name is taken.`).join("")}
             </li>
+            {pending.preview.notes > 0 && <li>{plural(pending.preview.notes, "album note or rating", "album notes and ratings")}, merged where yours are older.</li>}
             {pending.preview.account.username && (
               <li>
                 {pending.preview.account.applies
@@ -137,7 +138,7 @@ export function LibrarySettings() {
       {stuck > 0 && (
         <div className="row">
           <span className="muted">
-            {[waiting!.tracks ? plural(waiting!.tracks, "playlist track", "playlist tracks") : null, waiting!.plays ? plural(waiting!.plays, "play", "plays") : null, waiting!.other ? plural(waiting!.other, "release setting", "release settings") : null]
+            {[waiting!.tracks ? plural(waiting!.tracks, "playlist track", "playlist tracks") : null, waiting!.plays ? plural(waiting!.plays, "play", "plays") : null, waiting!.other ? plural(waiting!.other, "release setting", "release settings") : null, waiting!.notes ? plural(waiting!.notes, "album note", "album notes") : null]
               .filter(Boolean).join(", ")} from an imported library {stuck === 1 ? "is" : "are"} waiting for {stuck === 1 ? "its album" : "their albums"}.
           </span>
           <ConfirmButton label="Stop waiting" confirmLabel="Forget them" question="Forget what's still waiting?"

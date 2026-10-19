@@ -103,6 +103,32 @@ async function libraryFilterCheck(core: Awaited<ReturnType<typeof getCore>>, alb
 }
 
 /**
+ * Album notes and ratings (#73) through the real SQL plugin and migration 0009: write a rating
+ * and a note on the selftest album, read them back (also through the Rating sort and the Rated
+ * filter), then put back what was there before.
+ */
+async function albumNotesCheck(core: Awaited<ReturnType<typeof getCore>>, albumId: number | undefined) {
+  if (!albumId) return { ok: false, error: "no album" };
+  const before = await core.albumNote(albumId);
+  const note = "selftest note: “quotes”, emoji 🎧";
+  try {
+    await core.setAlbumRating(albumId, 4);
+    await core.setAlbumNote(albumId, note);
+    const read = await core.albumNote(albumId);
+    const rated = (await core.albums("rating", "rated")).find((a) => a.id === albumId);
+    const migrated = !!(await core.db.get("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'album_notes_pending'"));
+    const ok = read?.rating === 4 && read.note === note && rated?.rating === 4 && migrated;
+    return { ok, rating: read?.rating ?? null, noteOk: read?.note === note, inRatedSort: rated?.rating ?? null, migrated };
+  } finally {
+    if (before) {
+      await core.db.run("UPDATE album_notes SET rating = ?, note = ?, updated_at = ? WHERE album_id = ?", [before.rating, before.note, before.updated_at, albumId]);
+    } else {
+      await core.db.run("DELETE FROM album_notes WHERE album_id = ?", [albumId]);
+    }
+  }
+}
+
+/**
  * The collection sync's job-guarded statements (INSERT ... SELECT FROM (VALUES) WHERE EXISTS
  * ... ON CONFLICT, a guarded DELETE, a guarded settings upsert) through the real SQL plugin:
  * each must write while its job runs and do nothing once it is cancelled. No network. The
@@ -925,6 +951,7 @@ export async function runSelfTest() {
       return { ok: !!album && playable.length > 0 };
     }, 120_000);
     out.libraryFilter = await block("libraryFilter", () => libraryFilterCheck(core, album));
+    out.albumNotes = await block("albumNotes", () => albumNotesCheck(core, album?.id));
     out.history = await block("history", () => historyCheck(core, album));
     out.audio = await block("audio", async (s) => {
       usePlayer.getState().playTracks(playable, 0);
@@ -1080,7 +1107,7 @@ export async function runSelfTest() {
     // Overall ok needs every block that reports its own `ok` to pass (a timed-out or thrown
     // block reports ok: false). The listed blocks must be present as objects: one caught and
     // stored as a string threw.
-    const required = ["import", "libraryFilter", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "offline", "syncGuards", "newReleases", "preorder", "libraryFile", "fsScope", "window", "appearance"];
+    const required = ["import", "libraryFilter", "albumNotes", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "offline", "syncGuards", "newReleases", "preorder", "libraryFile", "fsScope", "window", "appearance"];
     const failed = Object.entries(out)
       .filter(([k, v]) => required.includes(k) || hasOk(v))
       .filter(([, v]) => (v as { ok?: unknown } | null)?.ok !== true)

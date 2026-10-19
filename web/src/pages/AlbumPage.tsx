@@ -6,6 +6,7 @@ import { TrackList, PlayPauseAll } from "../components/TrackList";
 import { ExternalIcon, MoreIcon } from "../components/Icons";
 import { ExternalLink } from "../components/ExternalLink";
 import { ConfirmButton } from "../components/ConfirmButton";
+import { AlbumNotes } from "../components/AlbumNotes";
 import { formatReleaseDate, formatTotal } from "../lib/format";
 import { friendlyError } from "../lib/errors";
 import { useTrackActions } from "../lib/useTrackActions";
@@ -91,6 +92,7 @@ export function AlbumPage() {
           {album.owned && <div className="owned-note">Purchased</div>}
           <OfflineNote album={album} />
           <div>{album.tags.map((t) => <span className="tag" key={t}>{t}</span>)}</div>
+          <AlbumNotes key={album.id} albumId={album.id} />
           <div className="actions">
             <PlayPauseAll tracks={album.tracks} />
             <button className="icon-btn" title="More" aria-label="More actions" onClick={(e) => openMenuFromEvent(e, actions(album.tracks, { onAlbumPage: true }))}><MoreIcon /></button>

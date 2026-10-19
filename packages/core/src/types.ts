@@ -40,6 +40,8 @@ export interface Album {
   last_played_at?: string | null;
   /** Tracks with an offline copy (#2). */
   downloaded_count?: number;
+  /** Your 0-5 star rating (#73), 0 when unrated. */
+  rating?: number;
 }
 
 export interface Track {
