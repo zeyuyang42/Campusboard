@@ -110,6 +110,8 @@ describe("the star rating (#73)", () => {
     act(() => stars[3].click());
     act(() => stars[1].click());
     expect(onChange.mock.calls).toEqual([[4], [0]]);
+    // Rated and unrated stars differ by shape, not only by colour.
+    expect(Array.from(stars).map((x) => x.textContent).join("")).toBe("★★☆☆☆");
   });
 });
 
@@ -157,19 +159,53 @@ describe("the album page's notes with the query cache (#81 review)", () => {
     expect(t.rows.get(1)?.note).toBe("typed note, and more");
   });
 
-  it("takes fresher data while not being edited, never while focused", async () => {
+  const refetch = (t: Awaited<ReturnType<typeof setup>>) => act(async () => { await t.qc.invalidateQueries({ queryKey: ["album", 1, "note"] }); });
+
+  it("takes fresher data when nothing typed is unsaved, never over unsaved edits", async () => {
     const t = await setup();
     t.show(1); await t.settle();
     t.rows.set(1, { rating: 3, note: "from an import", updated_at: "y" });
-    await act(async () => { await t.qc.invalidateQueries({ queryKey: ["album", 1, "note"] }); });
-    await t.settle();
+    await refetch(t); await t.settle();
     expect(area().value).toBe("from an import");
     expect(host.querySelector("[role=slider]")!.getAttribute("aria-valuenow")).toBe("3");
-    act(() => area().dispatchEvent(new FocusEvent("focusin", { bubbles: true })));
+    type("mine, not saved yet");
     t.rows.set(1, { rating: 3, note: "another", updated_at: "z" });
-    await act(async () => { await t.qc.invalidateQueries({ queryKey: ["album", 1, "note"] }); });
+    await refetch(t); await t.settle();
+    expect(area().value).toBe("mine, not saved yet");
+    act(() => vi.advanceTimersByTime(NOTE_SAVE_DELAY_MS));
     await t.settle();
-    expect(area().value).toBe("from an import");
+    expect(t.rows.get(1)?.note).toBe("mine, not saved yet");
+  });
+
+  it("focused but unedited: newer data is adopted, so the next keystroke builds on it", async () => {
+    const t = await setup();
+    t.rows.set(1, { rating: 0, note: "stale", updated_at: "x" });
+    t.show(1); await t.settle();
+    area().focus();
+    act(() => area().dispatchEvent(new FocusEvent("focusin", { bubbles: true })));
+    t.rows.set(1, { rating: 0, note: "newer", updated_at: "y" });
+    await refetch(t); await t.settle();
+    expect(area().value).toBe("newer");
+    type(area().value + "!");
+    act(() => vi.advanceTimersByTime(NOTE_SAVE_DELAY_MS));
+    await t.settle();
+    expect(t.rows.get(1)?.note).toBe("newer!");
+  });
+
+  it("data that lands while a save is on its way waits for that save", async () => {
+    const t = await setup();
+    t.rows.set(1, { rating: 0, note: "a", updated_at: "x" });
+    t.show(1); await t.settle();
+    const open = t.hold();
+    type("ab");
+    act(() => area().dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+    // A refetch begun before the write lands answers with the old note: not taken.
+    await refetch(t); await t.settle();
+    expect(area().value).toBe("ab");
+    open();
+    await t.settle();
+    expect(area().value).toBe("ab");
+    expect(t.rows.get(1)?.note).toBe("ab");
   });
 
   it("writes of one album run one after another, in order", async () => {

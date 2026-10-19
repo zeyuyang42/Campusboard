@@ -9,7 +9,7 @@ export const NOTE_SAVE_DELAY_MS = 800;
 /**
  * Your 0-5 star rating (#73). One focusable slider: arrow keys step it, 1-5 set it, 0,
  * Backspace or Delete clear it. A click on a star sets it, and a click on the current
- * rating clears it.
+ * rating clears it. Filled and outline stars, so the rating shows by shape, not only by colour.
  */
 export function StarRating({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   const [hover, setHover] = useState<number | null>(null);
@@ -35,7 +35,7 @@ export function StarRating({ value, onChange }: { value: number; onChange: (v: n
       onKeyDown={onKeyDown} onMouseLeave={() => setHover(null)}
     >
       {Array.from({ length: repos.RATING_MAX }, (_, i) => i + 1).map((n) => (
-        <span key={n} className={n <= shown ? "star on" : "star"} aria-hidden="true" onMouseEnter={() => setHover(n)} onClick={() => onChange(n === value ? 0 : n)}>★</span>
+        <span key={n} className={n <= shown ? "star on" : "star"} aria-hidden="true" onMouseEnter={() => setHover(n)} onClick={() => onChange(n === value ? 0 : n)}>{n <= shown ? "★" : "☆"}</span>
       ))}
     </div>
   );
@@ -51,23 +51,34 @@ export function NoteEditor({ initial, onSave }: { initial: string; onSave: (note
   const saved = useRef<string | null>(initial); // null after a failed save, so the next one retries
   const latest = useRef(initial);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The newest note the database (or the cache) gave, and how many of our saves are in flight. */
+  const incoming = useRef(initial);
+  const inFlight = useRef(0);
+  /**
+   * Take the newest note when nothing typed here is unsaved and no save of ours is on its way
+   * (a refetch made before that save lands would be older). Focused or not: with no unsaved
+   * edits, keeping the old text would only let the next keystroke save it over the newer note.
+   */
+  const adopt = () => {
+    if (inFlight.current || latest.current !== saved.current || incoming.current === latest.current) return;
+    setText(incoming.current);
+    latest.current = saved.current = incoming.current;
+  };
   const save = () => {
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
     const note = latest.current;
     if (note === saved.current) return;
     saved.current = note;
-    onSave(note).then(() => setError(null), (e: unknown) => { saved.current = null; setError(e); });
+    inFlight.current++;
+    onSave(note)
+      .then(() => setError(null), (e: unknown) => { saved.current = null; setError(e); })
+      .finally(() => { inFlight.current--; adopt(); });
   };
   const saveRef = useRef(save);
   saveRef.current = save;
   useEffect(() => () => saveRef.current(), []); // leaving the page saves what was typed
-  // Fresher data (a refetch, an imported library) replaces the text, unless you are editing it.
-  const focused = useRef(false);
-  useEffect(() => {
-    if (focused.current || latest.current !== saved.current || initial === latest.current) return;
-    setText(initial);
-    latest.current = saved.current = initial;
-  }, [initial]);
+  // Fresher data (a refetch, an imported library) replaces the text when that loses nothing.
+  useEffect(() => { incoming.current = initial; adopt(); }, [initial]);
   const left = repos.NOTE_MAX - text.length;
   return (
     <div className="album-note">
@@ -79,8 +90,7 @@ export function NoteEditor({ initial, onSave }: { initial: string; onSave: (note
           if (timer.current) clearTimeout(timer.current);
           timer.current = setTimeout(() => saveRef.current(), NOTE_SAVE_DELAY_MS);
         }}
-        onFocus={() => { focused.current = true; }}
-        onBlur={() => { focused.current = false; save(); }}
+        onBlur={() => save()}
       />
       {left < 200 && <span className="muted note-count">{left} characters left</span>}
       {error != null && <span className="notice error">Couldn't save your note. {friendlyError(error)}</span>}
