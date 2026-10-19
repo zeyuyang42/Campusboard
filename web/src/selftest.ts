@@ -731,6 +731,12 @@ async function miniPlayerCheck(s: Step) {
     const controlActed = usePlayer.getState().status !== st0;
     const controlKeptHidden = (await win.isVisible()) === false;
     await invoke("selftest_menu", { id: "play-pause" }); await sleep(1500);
+    // Controls > Sleep Timer (#70): set and cancelled from the native menu, window still hidden.
+    s("menu sleep timer");
+    await invoke("selftest_menu", { id: "sleep:30" }); await sleep(400);
+    const sleepSet = usePlayer.getState().sleep?.kind === "minutes";
+    await invoke("selftest_menu", { id: "sleep:off" }); await sleep(400);
+    const sleepMenuOk = sleepSet && usePlayer.getState().sleep === null && (await win.isVisible()) === false;
     await mainWindow.show(); await sleep(300);
     s("close and reshow the mini window");
     // Close Window with the mini window focused hides it (and nothing else), and the bridge
@@ -756,13 +762,13 @@ async function miniPlayerCheck(s: Step) {
     await invoke("selftest_menu", { id: "close-window", focused: "main" }); await sleep(800);
     const mainCloseHides = (await win.isVisible()) === false;
     out.guardShows = await mainWindow.show(); await sleep(300);
-    const menuOk = forgedMenuIgnored && menuDispatched && controlActed && controlKeptHidden;
+    const menuOk = forgedMenuIgnored && menuDispatched && controlActed && controlKeptHidden && sleepMenuOk;
     const closeOk = liveBeforeClose && miniClosed && mainUntouched && !liveAfterClose && quietWhileHidden && mainCloseHides && liveAfterReshow && reshowTitleOk;
     Object.assign(out, {
       opened, titleOk, wasPlaying, canCheck, firstOk,
       ...(canCheck ? { paused, shownPaused, resumed, seeked } : { paused: "skipped (muted)", shownPaused: "skipped (muted)", resumed: "skipped (muted)", seeked: "skipped (muted)" }),
       rejectsBad, mainShown, commands, commandsExact, perms,
-      forgedMenuIgnored, menuDispatched, controlActed, controlKeptHidden,
+      forgedMenuIgnored, menuDispatched, controlActed, controlKeptHidden, sleepMenuOk,
       liveBeforeClose, miniClosed, mainUntouched, liveAfterClose, playingWhileHidden, quietWhileHidden, liveAfterReshow, reshowTitleOk, mainCloseHides,
       info: miniBridgeInfo(),
     });

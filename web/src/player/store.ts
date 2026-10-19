@@ -3,6 +3,7 @@ import {
   audioEventPatch, PlayCounter, swappingAfter, positionToGain, stepVolume, toggleAction, toggleMute,
   crossfadeGains, elementRole, fadeProgress, fadeSeconds, gaplessDelayMs, parsePlaybackSettings, preloadDue, preloadStale, routeElementEvent,
   standbyUsable, transitionAfter, isQueueRadio, transitionKind, transitionPoint, upcomingIndex,
+  sleepGain, sleepScale, sleepSecondsLeft, sleepStopsAtEnd, sleepTimerFor, type SleepChoice, type SleepTimer,
   CROSSFADE_MIN_SEC, DEFAULT_PLAYBACK, GAPLESS_ARM_SEC, GAPLESS_START_LEAD_MS, PLAYBACK_SETTING_KEY, STANDBY_PRIME_MS, TRANSITION_IDLE,
   type AudioEventType, type CountedPlay, type ElementEventType, type PlaybackSettings, type QueueTrack, type RepeatMode, type Track,
   type TransitionEvent, type TransitionKind, type TransitionState,
@@ -36,6 +37,12 @@ export interface PlayerState {
   gapless: boolean;
   /** Settings > Playback: crossfade between tracks of different albums, in seconds (0 = off). */
   crossfadeSec: number;
+  /** The sleep timer (#70), or null when off. Not persisted. */
+  sleep: SleepTimer | null;
+  /** Whole seconds left on a minutes timer, for the player bar (null otherwise). */
+  sleepLeft: number | null;
+  /** Set the sleep timer, or turn it off ("off"), which restores the volume at once. */
+  setSleep: (choice: SleepChoice) => void;
   current: () => QueueTrack | null;
   /** Returns how many tracks were queued (capped at MAX_QUEUE). */
   playTracks: (tracks: Track[], start?: number) => number;
@@ -93,6 +100,12 @@ function shuffled<T>(arr: T[]): T[] {
 let activeIdx = 0;
 const active = () => audioEls[activeIdx];
 const other = () => audioEls[1 - activeIdx];
+/**
+ * The sleep timer's fade (#70): the share of the slider position the elements play at, 1
+ * except in its last SLEEP_FADE_SEC. Every gain the store sets goes through it.
+ */
+let sleepFade = 1;
+const currentGain = () => sleepGain(usePlayer.getState().volume, sleepFade);
 
 let retriedFor: number | null = null;
 /**
@@ -176,6 +189,8 @@ async function streamUrlFor(track: QueueTrack, force = false): Promise<{ url: st
 /** Resolve a fresh CDN URL for the track and point the active audio element at it. */
 /** Plays when it is ready if `wantsPlay` is still set then; skips on to the next track on failure only if so. */
 function load(track: QueueTrack, force = false) {
+  // Another track: an end-of-track fade belonged to the one before (a minutes fade carries on).
+  if (usePlayer.getState().sleep?.kind !== "minutes") sleepFade = 1;
   // A new source for the active element: a preload or a fade in progress is moot.
   cancelTransition();
   const seq = ++loadSeq;
@@ -341,7 +356,7 @@ function cancelTransition() {
   dispatch({ type: "invalidate" });
   preloadUrl = null;
   release(other());
-  active().volume = positionToGain(usePlayer.getState().volume);
+  active().volume = currentGain();
 }
 
 /** The fade (or the gapless tail) is over: the previous element goes, the new one plays at full gain. */
@@ -351,7 +366,7 @@ function finishFade() {
   dispatch({ type: "fadeDone" });
   const prev = other();
   prev.pause();
-  active().volume = positionToGain(usePlayer.getState().volume);
+  active().volume = currentGain();
   // Released a moment later: tearing a player down in the same instant the next one starts
   // delayed that start by ~100 ms in WebKit. Paused, it is not Now Playing meanwhile. Skipped
   // if it was given a new source (the next preload) or took over again by then.
@@ -366,7 +381,7 @@ function fadeTick() {
   if (prev.ended) return finishFade();
   if (tx.fadeSec <= 0) return; // a gapless tail plays its last milliseconds at full gain
   const p = fadeProgress(prev.currentTime, tx.fadeStart, tx.fadeSec);
-  const g = crossfadeGains(p, usePlayer.getState().volume);
+  const g = crossfadeGains(p, usePlayer.getState().volume * sleepFade);
   prev.volume = g.out;
   active().volume = g.in;
   if (p >= 1) finishFade();
@@ -385,6 +400,8 @@ function plan() {
   const up = upcoming();
   const duration = active().duration;
   if (!cur || !up || !finitePositive(duration)) return null;
+  // The sleep timer stops at this track's end, or is fading out: nothing starts after it.
+  if (s.sleep && (sleepFade < 1 || sleepStopsAtEnd(s.sleep, cur, up.track))) return null;
   const settings = settingsOf(s);
   const kind = transitionKind(cur, up.track, settings, duration);
   const fadeSec = kind === "crossfade" ? fadeSeconds(settings, duration, up.track.duration) : 0;
@@ -507,7 +524,7 @@ function start(up: { index: number; track: QueueTrack }, fadeSec: number, kind: 
   swapping = false;
   retriedFor = null;
   pendingSeek = null;
-  next.volume = fadeSec > 0 ? 0 : positionToGain(s.volume);
+  next.volume = fadeSec > 0 ? 0 : sleepGain(s.volume, sleepFade);
   next.muted = baseMuted[audioEls.indexOf(next)]; // muted since priming; audible from here
   // From here the play counter, the queue index, the position and Now Playing follow `next`.
   plays.start(up.track.id, finitePositive(next.duration) ? next.duration : up.track.duration);
@@ -521,6 +538,62 @@ function start(up: { index: number; track: QueueTrack }, fadeSec: number, kind: 
   else if (fadeSec > 0) fadeTimer = setInterval(fadeTick, FADE_TICK_MS);
   // A gapless tail ends on its own within the lead; this only guards against one that stalls.
   else tailTimer = setTimeout(finishFade, Math.max(0, startLeadMs ?? 0) + 1500);
+}
+
+// ---- the sleep timer (#70; the rules are in core's sleepTimer.ts) ----
+// Checked on the active element's timeupdate and on an interval: WebKit may hold a hidden
+// page's timers (#67) but keeps reporting the progress of audio that plays, and a paused
+// player only needs the interval to turn a minutes timer off at its time.
+let sleepTicker: ReturnType<typeof setInterval> | null = null;
+const SLEEP_TICK_MS = 250;
+
+/** The current track's end is where the timer stops (end of track, or the album's last). */
+function sleepStopsHere() {
+  const s = usePlayer.getState();
+  return sleepStopsAtEnd(s.sleep, s.current(), upcoming()?.track ?? null);
+}
+
+function applySleepFade(scale: number) {
+  if (scale === sleepFade) return;
+  sleepFade = scale;
+  if (tx.phase === "fading" && tx.fadeSec > 0) fadeTick(); // both crossfade gains follow
+  else active().volume = currentGain();
+}
+
+function sleepStep() {
+  const s = usePlayer.getState();
+  const t = s.sleep;
+  if (!t) return;
+  const left = sleepSecondsLeft(t, Date.now(), sleepStopsHere(), active());
+  if (t.kind === "minutes" && left <= 0) { stopForSleep(false); return; }
+  applySleepFade(sleepScale(left));
+  const shown = t.kind === "minutes" ? Math.ceil(left) : null;
+  if (shown !== s.sleepLeft) usePlayer.setState({ sleepLeft: shown });
+}
+
+function clearSleep() {
+  if (sleepTicker) { clearInterval(sleepTicker); sleepTicker = null; }
+  if (usePlayer.getState().sleep) usePlayer.setState({ sleep: null, sleepLeft: null });
+  applySleepFade(1);
+}
+
+/**
+ * The timer is up: pause (the fade has brought the gain to 0), then give the volume back for
+ * the next play. At a track's end the queue moves on to the track that would have followed,
+ * loaded but paused, so Play continues from there instead of replaying the last one.
+ */
+function stopForSleep(atEnd: boolean) {
+  const s = usePlayer.getState();
+  if (s.current()) {
+    s.pause();
+    usePlayer.setState({ status: "paused", wantsPlay: false });
+    const up = atEnd ? upcoming() : null;
+    if (up && up.index !== s.index) {
+      usePlayer.setState({ index: up.index, position: 0, duration: 0 });
+      load(up.track);
+    }
+  }
+  clearSleep();
 }
 
 export const usePlayer = create<PlayerState>((set, get) => ({
@@ -538,6 +611,16 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   queueOpen: false,
   gapless: DEFAULT_PLAYBACK.gapless,
   crossfadeSec: DEFAULT_PLAYBACK.crossfadeSec,
+  sleep: null,
+  sleepLeft: null,
+
+  setSleep: (choice) => {
+    const t = sleepTimerFor(choice, Date.now());
+    if (!t) { clearSleep(); return; }
+    set({ sleep: t, sleepLeft: null });
+    if (!sleepTicker) sleepTicker = setInterval(sleepStep, SLEEP_TICK_MS);
+    sleepStep();
+  },
 
   current: () => get().queue[get().index] ?? null,
 
@@ -658,7 +741,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     set({ volume: vol });
     // Mid-crossfade both gains follow the new level at once; otherwise only the active one plays.
     if (tx.phase === "fading" && tx.fadeSec > 0) fadeTick();
-    else active().volume = positionToGain(vol);
+    else active().volume = sleepGain(vol, sleepFade);
   },
   stepVolume: (delta) => get().setVolume(stepVolume(get().volume, delta)),
   toggleMute: () => {
@@ -792,6 +875,7 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
     // Every report feeds listening history; only the store update below is throttled.
     const counted = plays.progress(el.currentTime, performance.now(), el.playbackRate);
     if (counted) recordPlay(counted);
+    sleepStep(); // first: it can hold the transition below
     stepTransition();
     if (el !== active()) return; // it just handed over: the new track's position is 0
     const now = performance.now();
@@ -822,7 +906,11 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
   pause: () => onAudioEvent("pause"),
   waiting: () => onAudioEvent("waiting"),
   // Gapless: the standby starts here if the early start didn't happen; otherwise the plain way.
-  ended: () => { if (!stepTransition(true)) usePlayer.getState().next(true); },
+  // The sleep timer stops here (its track's end, or any end during its fade) before anything follows.
+  ended: () => {
+    if (usePlayer.getState().sleep && (sleepFade < 1 || sleepStopsHere())) return stopForSleep(true);
+    if (!stepTransition(true)) usePlayer.getState().next(true);
+  },
   error: (el) => {
     swapping = swappingAfter(swapping, { type: "error" });
     const cur = usePlayer.getState().current();
