@@ -104,6 +104,106 @@ describe("skipping a track that fails (#67)", () => {
     expect(h.state().index).toBe(1);
   });
 
+  describe("guards on the skip (#74 review)", () => {
+    it("a queue edit mid-streak starts the count afresh, so the rest of the queue is still tried", async () => {
+      const list = tracks(4);
+      list.slice(0, 3).forEach((t) => h.core.failing.add(t.id));
+      h.state().playTracks(list);
+      await flush(); // A fails
+      vi.advanceTimersByTime(800);
+      await flush(); // B fails
+      h.state().removeAt(0); // [B, C, D], at B
+      vi.advanceTimersByTime(800);
+      await flush(); // C fails
+      vi.advanceTimersByTime(800);
+      await flush();
+      expect(h.state()).toMatchObject({ index: 2, wantsPlay: true });
+      expect(h.active().src).toContain(`/stream/${list[3].id}`);
+    });
+
+    it("a shuffle toggle mid-streak starts the count afresh", async () => {
+      const list = tracks(4);
+      h.core.failing.add(list[0].id).add(list[1].id);
+      h.state().playTracks(list);
+      await flush(); // A fails
+      vi.advanceTimersByTime(800);
+      await flush(); // B fails: streak 2
+      h.state().toggleShuffle(); // [B, p, q, r]
+      const q = h.state().queue;
+      h.core.failing.clear();
+      q.slice(0, 3).forEach((t) => h.core.failing.add(t.id));
+      for (let i = 0; i < 3; i++) { vi.advanceTimersByTime(800); await flush(); }
+      expect(h.state()).toMatchObject({ index: 3, wantsPlay: true });
+      expect(h.active().src).toContain(`/stream/${q[3].id}`);
+    });
+
+    it("Pause pressed while the error shows cancels the skip", async () => {
+      const list = tracks(3);
+      h.core.failing.add(list[0].id);
+      h.state().playTracks(list);
+      await flush();
+      h.state().pause();
+      vi.advanceTimersByTime(800);
+      await flush();
+      expect(h.state()).toMatchObject({ index: 0, wantsPlay: false, status: "paused" });
+    });
+
+    it("a track picked while the error shows is not skipped", async () => {
+      const list = tracks(3);
+      h.core.failing.add(list[0].id);
+      h.state().playTracks(list);
+      await flush();
+      h.state().jumpTo(2);
+      await flush();
+      vi.advanceTimersByTime(800);
+      await flush();
+      expect(h.state()).toMatchObject({ index: 2, wantsPlay: true });
+    });
+
+    it("Play pressed while the error shows retries that track, not the previous source", async () => {
+      const list = tracks(3);
+      const el = await h.startPlaying(list);
+      h.core.failing.add(list[1].id);
+      h.state().next();
+      await flush(); // B fails; the element still holds A
+      h.core.failing.clear();
+      h.state().play();
+      await flush();
+      vi.advanceTimersByTime(800);
+      await flush();
+      expect(h.state()).toMatchObject({ index: 1, wantsPlay: true });
+      expect(el.src).toContain(`/stream/${list[1].id}`);
+    });
+
+    it("a media error while paused moves to the next track without playing it", async () => {
+      setVisibility("hidden");
+      const list = tracks(3);
+      const el = await h.startPlaying(list);
+      h.state().pause();
+      el.emit("pause");
+      el.emit("error"); // retried, still paused
+      await flush();
+      const plays = el.calls.play;
+      el.emit("error");
+      await flush();
+      expect(h.state()).toMatchObject({ index: 1, wantsPlay: false, status: "paused" });
+      expect(h.active().src).toContain(`/stream/${list[1].id}`);
+      expect(h.active().calls.play).toBe(plays);
+    });
+
+    it("a Bandcamp cooldown stops instead of skipping through the queue", async () => {
+      const list = tracks(3);
+      h.core.getFreshStreamUrl.mockImplementationOnce(async () => { throw Object.assign(new Error("cooldown"), { code: "challenge_cooldown" }); });
+      h.state().playTracks(list);
+      await flush();
+      expect(vi.getTimerCount()).toBe(0);
+      vi.advanceTimersByTime(800);
+      await flush();
+      expect(h.state()).toMatchObject({ index: 0, wantsPlay: false, status: "paused" });
+      expect(h.core.getFreshStreamUrl).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("with repeat (#69)", () => {
     beforeEach(() => setVisibility("hidden"));
 
