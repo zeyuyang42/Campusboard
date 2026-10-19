@@ -60,6 +60,8 @@ export interface ImportSelectionRequest {
 export class JobRunner {
   private running = false;
   private forceFlags = new Map<number, boolean>();
+  /** Collection syncs started by the background refresh (this session; a resumed one counts as manual). */
+  private autoSyncs = new Set<number>();
   private reset: Promise<void>;
   private resetFailed = false;
   private resetRetried = false;
@@ -119,15 +121,18 @@ export class JobRunner {
 
   /**
    * Sync the purchased collection and wishlist of the username in Settings, as one job.
-   * Returns the sync already queued or running, if there is one.
+   * Returns the sync already queued or running, if there is one. `auto` marks the background
+   * refresh: the same sync, except that it doesn't re-send a cookie the last sync found
+   * rejected (see syncLists).
    */
-  async enqueueSync(): Promise<Job> {
+  async enqueueSync(opts: { auto?: boolean } = {}): Promise<Job> {
     const username = (await getSetting<{ username?: string }>(this.db, ACCOUNT_KEY))?.username;
     if (!username) throw new ScrapeError("no_account", "Add your Bandcamp username in Settings first");
     await this.afterReset();
     const active = await this.db.get<{ id: number }>("SELECT id FROM jobs WHERE kind = 'collection' AND status IN ('pending','queued','running') ORDER BY id LIMIT 1");
     if (active) return (await jobs.getJob(this.db, active.id))!;
     const job = await jobs.createJob(this.db, "collection", fanPageUrl(username), []);
+    if (opts.auto) this.autoSyncs.add(job.id);
     this.onChange();
     void this.kick();
     return (await jobs.getJob(this.db, job.id))!;
@@ -241,6 +246,7 @@ export class JobRunner {
       await jobs.transitionJob(this.db, job.id, ["running", "queued"], "failed", msg);
     } finally {
       this.forceFlags.delete(job.id);
+      this.autoSyncs.delete(job.id);
       this.onChange();
     }
   }
@@ -332,13 +338,17 @@ export class JobRunner {
       return r;
     };
     const pageUrl = fanPageUrl(username);
-    // The fan page always gets a stored cookie, even one the last sync found rejected,
-    // so a cookie that only looked signed-out once can come back on its own.
-    const headers = await identityHeaders(this.db, pageUrl, { revalidate: true });
-    const page = parseFanPage(await fetch(pageUrl, { headers }));
     const prev = await getSetting<SyncSummary>(this.db, SYNC_KEY);
+    // On a manual sync the fan page always gets a stored cookie, even one the last sync found
+    // rejected, so a cookie that only looked signed-out once can come back on its own. The
+    // background refresh doesn't keep offering Bandcamp a cookie it turned down: it reads the
+    // public lists, and the cookie's status stays as the last sync left it.
+    const auto = this.autoSyncs.has(job.id);
+    const headers = await identityHeaders(this.db, pageUrl, { revalidate: !auto });
+    const withheld = auto && !headers.Cookie && (prev?.cookie === "rejected" || prev?.cookie === "other_account");
+    const page = parseFanPage(await fetch(pageUrl, { headers }));
     // Recognised as this fan: the cookie is used for the API too (private collections).
-    const cookie: CookieStatus = !headers.Cookie ? "none" : page.own_page ? "ok" : page.logged_in ? "other_account" : "rejected";
+    const cookie: CookieStatus = withheld ? prev!.cookie : !headers.Cookie ? "none" : page.own_page ? "ok" : page.logged_in ? "other_account" : "rejected";
     const apiHeaders = cookie === "ok" ? headers : {};
     // Once a sync saw the lists signed in, a signed-out read may show less (a private
     // collection looks empty), so only another signed-in read may remove items.

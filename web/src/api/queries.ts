@@ -15,6 +15,8 @@ export const keys = {
   challenge: ["jobs", "challenge"] as const,
   search: (q: string) => ["search", q] as const,
   account: ["account"] as const,
+  // Under "account" so a sync (any job update) refreshes it.
+  collectionRefresh: ["account", "refresh"] as const,
   libraryView: ["settings", "library_view"] as const,
   recentlyPlayed: ["history", "recent"] as const,
   playCount: ["history", "count"] as const,
@@ -115,6 +117,13 @@ export function useAccountMutations() {
     clear: useMutation({ mutationFn: async () => (await core()).clearAccount(), onSuccess: () => { done(); inv(); void qc.invalidateQueries({ queryKey: keys.jobs }); } }),
     sync: useMutation({ mutationFn: async () => (await core()).syncCollection(), onSuccess: () => { void qc.invalidateQueries({ queryKey: keys.jobs }); } }),
   };
+}
+
+/** The background collection refresh: its setting and the last automatic run. */
+export const useCollectionRefresh = () => useQuery({ queryKey: keys.collectionRefresh, queryFn: async () => (await core()).collectionRefreshStatus() });
+export function useCollectionRefreshMutation() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (on: boolean) => (await core()).setCollectionRefreshEnabled(on), onSuccess: () => { void qc.invalidateQueries({ queryKey: keys.collectionRefresh }); } });
 }
 
 export function useImport() {

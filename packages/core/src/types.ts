@@ -230,3 +230,10 @@ export interface ArtistCheckResult {
   found: number;
   error?: string;
 }
+
+/** The background collection refresh as Settings shows it. */
+export interface CollectionRefreshStatus {
+  enabled: boolean;
+  /** ms timestamp of the most recent automatic refresh, or null if none yet. */
+  last_auto_at: number | null;
+}

@@ -50,9 +50,12 @@ export function getCore(): Promise<Core> {
         // A pre-order that came out: its tracks became playable.
         onLibraryChange: () => { for (const k of ["albums", "album", "artist", "tracks", "playlist", "history"]) void qc?.invalidateQueries({ queryKey: [k] }); },
       });
-      // Background new-release checks: the first one a few minutes after launch. The selftest
-      // runs its own single check instead, so its requests stay predictable.
-      if (!SELFTEST) core.startReleaseChecks();
+      // Background new-release checks and collection refresh: the first look a few minutes after
+      // launch. The selftest runs its own single checks instead, so its requests stay predictable.
+      if (!SELFTEST) {
+        core.startReleaseChecks();
+        core.startCollectionRefresh();
+      }
       return core;
     })();
   }

@@ -25,6 +25,7 @@ import { recomputeOwned } from "./db/repos/fanItems.js";
 import * as releases from "./db/repos/releases.js";
 import { ReleaseChecker, type ReleaseCheckerOptions } from "./services/releaseWatch.js";
 import * as importPending from "./db/repos/importPending.js";
+import { CollectionRefresher, type CollectionRefreshOptions } from "./services/collectionRefresh.js";
 import {
   backupDatabase, exportLibrary, importLibrary, parseLibraryExport, previewLibraryImport,
   type LibraryExport, type LibraryImportOptions,
@@ -42,6 +43,8 @@ export interface CoreDeps {
   onLibraryChange?: () => void;
   /** Timing overrides for the new-releases checker (tests). */
   releaseCheck?: Omit<ReleaseCheckerOptions, "onChange">;
+  /** Timing overrides for the background collection refresh (tests). */
+  collectionRefresh?: Omit<CollectionRefreshOptions, "onChange">;
 }
 
 /** Everything the UI needs, as plain async functions over one database. */
@@ -56,6 +59,7 @@ export function createCore(deps: CoreDeps) {
   const checker = new ReleaseChecker(db, queue, {
     ...deps.releaseCheck, onChange: () => deps.onReleasesChange?.(), onAlbumRefreshed: () => deps.onLibraryChange?.(),
   });
+  const refresher = new CollectionRefresher(db, gate, runner, { ...deps.collectionRefresh, onChange: () => deps.onJobsChange?.() });
   void prunePageCache(db);
   void vacuumOrphans(db);
   // Cheap, and repairs flags if the app quit between a sync's membership and flag writes.
@@ -92,6 +96,13 @@ export function createCore(deps: CoreDeps) {
     },
     /** Sync the purchased collection and wishlist of the Bandcamp account in Settings. */
     syncCollection: () => runner.enqueueSync(),
+    /** Start the background collection refresh (first look a few minutes later). Not started by createCore. */
+    startCollectionRefresh: () => refresher.start(),
+    stopCollectionRefresh: () => refresher.stop(),
+    collectionRefreshStatus: () => refresher.status(),
+    setCollectionRefreshEnabled: (on: boolean) => refresher.setEnabled(on),
+    /** One refresh look now, with the same checks as the timer's (selftest and browser checks). */
+    collectionRefreshTick: () => refresher.tick(),
     jobs: () => jobs.listJobs(db),
     job: (id: number) => jobs.getJob(db, id),
     cancelJob: (id: number) => runner.cancel(id),

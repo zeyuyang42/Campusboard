@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { CookieStatus } from "@bc/core";
-import { useAccount, useAccountMutations, useJobs } from "../api/queries";
+import { useAccount, useAccountMutations, useCollectionRefresh, useCollectionRefreshMutation, useJobs } from "../api/queries";
 import { friendlyError } from "../lib/errors";
 import { ConfirmButton } from "./ConfirmButton";
 import { JobProgress } from "./JobProgress";
@@ -84,6 +84,27 @@ export function AccountSettings() {
       )}
       {cookieLine && <p className={cookieLine.error ? "error" : "muted"}>{cookieLine.text}</p>}
       {job && <JobProgress job={job} compact />}
+      <AutoRefresh />
     </section>
+  );
+}
+
+/** The background refresh toggle and when it last ran. */
+function AutoRefresh() {
+  const { data: status } = useCollectionRefresh();
+  const setEnabled = useCollectionRefreshMutation();
+  const on = setEnabled.isPending ? setEnabled.variables : (status?.enabled ?? true);
+  const last = status?.last_auto_at ? new Date(status.last_auto_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : null;
+  return (
+    <>
+      <label className="check-row">
+        <input type="checkbox" checked={on} disabled={!status || setEnabled.isPending} onChange={(e) => setEnabled.mutate(e.target.checked)} />
+        Sync automatically once a day
+      </label>
+      <p className="muted">
+        While the app is open and no import is running, a few minutes after launch at the earliest.
+        {" "}{last ? `Last automatic sync ${last}.` : "No automatic sync yet."}
+      </p>
+    </>
   );
 }

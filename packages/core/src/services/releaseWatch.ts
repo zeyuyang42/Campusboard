@@ -6,6 +6,7 @@ import { ScrapeError } from "../scrape/errors.js";
 import { cachedFetchText } from "./pageCache.js";
 import { albumUrlsInLibrary, getAlbum, nextDuePreorder, type PreorderAlbum } from "../db/repos/albums.js";
 import { refreshAlbum } from "./streamService.js";
+import { idleBlock } from "./idle.js";
 import { getSetting, setSetting } from "../db/repos/settings.js";
 import * as releases from "../db/repos/releases.js";
 import {
@@ -121,10 +122,7 @@ export class ReleaseChecker {
    */
   async blocked(): Promise<Exclude<SkipReason, "none_due" | "busy"> | null> {
     if (!(await this.enabled())) return "off";
-    await this.queue.gate.ready();
-    if (this.queue.gate.until()) return "cooldown";
-    if (await this.db.get("SELECT 1 FROM jobs WHERE status IN ('pending','queued','running') LIMIT 1")) return "job";
-    return null;
+    return idleBlock(this.db, this.queue.gate);
   }
 
   /**
