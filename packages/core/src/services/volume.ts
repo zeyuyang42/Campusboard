@@ -4,21 +4,23 @@
  * Loudness is perceived roughly logarithmically, so a linear slider puts most of the audible
  * change in its bottom fifth. The curve is a cube, gain = p^3: it hits 0 and 1 exactly (a
  * dB curve needs a special case for silence at the bottom), has an exact inverse (the cube
- * root, used to convert saved volumes), and spans about 60 dB over the slider, which is
- * close to a dB curve over the range people actually use: half way is -18 dB, and one 5%
- * step near the top is about 1.3 dB.
+ * root) and spans about 60 dB over the slider, close to a dB curve over the range people
+ * actually use: half way is -18 dB, and one 5% step near the top is about 1.3 dB.
  *
- * The player stores and saves the position; only web/src/player/store.ts turns it into gain.
+ * The saved play state keeps the GAIN (`play_state.volume`, as every build before the curve
+ * did): the player derives the slider position from it on load and saves position^3. So a
+ * library plays at the same loudness in any build, older or newer, with no migration.
  */
 
-/** Saved play states before this curve stored the linear gain in `volume` (version 0). */
-export const VOLUME_CURVE_VERSION = 1;
 /** One ↑/↓ key press or Volume Up/Down menu item, in slider position. */
 export const VOLUME_STEP = 0.05;
 
+/** Where unmuting goes when there is no level from before the mute: the old default gain 0.8 (about -1.9 dB). */
+export const UNMUTE_GAIN = 0.8;
+
 const clamp01 = (x: number) => (Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : 0);
 
-/** Slider position -> gain for `audio.volume`. */
+/** Slider position -> gain for `audio.volume` and the saved play state. */
 export function positionToGain(position: number): number {
   return clamp01(position) ** 3;
 }
@@ -34,10 +36,10 @@ export function stepVolume(position: number, delta: number): number {
 }
 
 /**
- * The slider position for a saved `volume`: a version-0 save holds a linear gain, which
- * becomes the position that plays at the same gain, so nobody's volume jumps on update.
+ * The Mute button: from a level, mute and remember it; from silence, go back to the level
+ * from before the mute, or to UNMUTE_GAIN's position when there is none.
  */
-export function savedVolumeToPosition(volume: number, version: number | null | undefined): number {
-  const v = Number.isFinite(volume) ? volume : 1;
-  return (version ?? 0) >= 1 ? clamp01(v) : gainToPosition(v);
+export function toggleMute(position: number, beforeMute: number | null): { position: number; beforeMute: number | null } {
+  if (clamp01(position) > 0) return { position: 0, beforeMute: clamp01(position) };
+  return { position: beforeMute && beforeMute > 0 ? clamp01(beforeMute) : gainToPosition(UNMUTE_GAIN), beforeMute: null };
 }

@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { gainToPosition, positionToGain, savedVolumeToPosition, stepVolume, VOLUME_CURVE_VERSION, VOLUME_STEP } from "../src/services/volume.js";
-import { getPlayState, setPlayState, VOLUME_VERSION_KEY } from "../src/db/repos/playState.js";
-import { getSetting } from "../src/db/repos/settings.js";
+import { gainToPosition, positionToGain, stepVolume, toggleMute, UNMUTE_GAIN, VOLUME_STEP } from "../src/services/volume.js";
+import { getPlayState, setPlayState } from "../src/db/repos/playState.js";
 import { NodeDb } from "./helpers/nodeDb.js";
 
 const grid = Array.from({ length: 101 }, (_, i) => i / 100);
@@ -38,32 +37,38 @@ describe("volume curve (#36)", () => {
     expect(stepVolume(0.02, -VOLUME_STEP)).toBe(0);
     expect(stepVolume(0.5, -VOLUME_STEP)).toBe(0.45);
   });
-  it("converts a saved linear gain once, to the position with the same gain", () => {
-    for (const g of [0, 0.1, 0.35, 0.8, 1]) {
-      const p = savedVolumeToPosition(g, 0);
-      expect(positionToGain(p)).toBeCloseTo(g, 9);
-    }
-    expect(savedVolumeToPosition(0.5, undefined)).toBeCloseTo(Math.cbrt(0.5), 9);
-    expect(savedVolumeToPosition(0.5, VOLUME_CURVE_VERSION)).toBe(0.5);
+});
+
+describe("mute", () => {
+  it("remembers the level and goes back to it", () => {
+    const muted = toggleMute(0.6, null);
+    expect(muted).toEqual({ position: 0, beforeMute: 0.6 });
+    expect(toggleMute(muted.position, muted.beforeMute)).toEqual({ position: 0.6, beforeMute: null });
+  });
+  it("unmutes to the old default gain (about -1.9 dB) when there is no level to go back to", () => {
+    const r = toggleMute(0, null);
+    expect(positionToGain(r.position)).toBeCloseTo(UNMUTE_GAIN, 9);
+    expect(20 * Math.log10(positionToGain(r.position))).toBeCloseTo(-1.94, 2);
   });
 });
 
-describe("play_state volume version", () => {
-  const state = (volume: number) => ({ current_track_id: null, position_sec: 0, queue: [], queue_index: 0, shuffle: false, repeat: "off" as const, volume, volume_version: VOLUME_CURVE_VERSION });
-
-  it("reads a library saved before the curve as version 0 and marks it on the next save", async () => {
+describe("saved volume stays a gain", () => {
+  // play_state.volume is what every build reads as audio.volume; the player saves position^3
+  // and derives the position on load, so neither an upgrade nor a downgrade changes loudness.
+  it("round-trips a slider position through the saved gain", async () => {
+    const db = new NodeDb();
+    for (const position of [0, 0.3, 0.5, 0.93, 1]) {
+      const s = await getPlayState(db);
+      await setPlayState(db, { ...s, volume: positionToGain(position) });
+      const saved = (await getPlayState(db)).volume;
+      expect(saved).toBeCloseTo(positionToGain(position), 12); // an older build plays exactly this gain
+      expect(gainToPosition(saved)).toBeCloseTo(position, 9);
+    }
+  });
+  it("reads a library saved before the curve at the same loudness", async () => {
     const db = new NodeDb();
     await db.run("UPDATE play_state SET volume = 0.3 WHERE id = 1"); // an older build's save
-    const before = await getPlayState(db);
-    expect(before.volume_version).toBe(0);
-    const position = savedVolumeToPosition(before.volume, before.volume_version);
+    const position = gainToPosition((await getPlayState(db)).volume);
     expect(positionToGain(position)).toBeCloseTo(0.3, 9);
-
-    await setPlayState(db, state(position));
-    const after = await getPlayState(db);
-    expect(after.volume_version).toBe(VOLUME_CURVE_VERSION);
-    expect(await getSetting(db, VOLUME_VERSION_KEY)).toBe(VOLUME_CURVE_VERSION);
-    // Read back once more: the position is kept, not converted a second time.
-    expect(savedVolumeToPosition(after.volume, after.volume_version)).toBeCloseTo(position, 9);
   });
 });

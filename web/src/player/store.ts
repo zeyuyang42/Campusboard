@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { PlayCounter, positionToGain, stepVolume, toggleAction, type CountedPlay, type QueueTrack, type RepeatMode, type Track } from "@bc/core";
+import { PlayCounter, positionToGain, stepVolume, toggleAction, toggleMute, type CountedPlay, type QueueTrack, type RepeatMode, type Track } from "@bc/core";
 import { audioEl } from "./audio";
 import { getCore, invalidateQueries } from "../api/core";
 import { friendlyError } from "../lib/errors";
@@ -38,6 +38,8 @@ export interface PlayerState {
   setVolume: (v: number) => void;
   /** Move the volume slider by `delta` (the ↑/↓ keys, Volume Up/Down in the menu). */
   stepVolume: (delta: number) => void;
+  /** Mute, or go back to the level from before the mute. */
+  toggleMute: () => void;
   enqueueNext: (tracks: Track[]) => void;
   enqueueLast: (tracks: Track[]) => void;
   removeAt: (i: number) => void;
@@ -46,7 +48,7 @@ export interface PlayerState {
   toggleShuffle: () => void;
   cycleRepeat: () => void;
   setQueueOpen: (open: boolean) => void;
-  /** `volume` is a slider position (persist.ts converts older saves). */
+  /** `volume` is a slider position (persist.ts derives it from the saved gain). */
   hydrate: (s: { queue: QueueTrack[]; index: number; position: number; volume: number; shuffle: boolean; repeat: RepeatMode }) => void;
 }
 
@@ -64,6 +66,8 @@ function shuffled<T>(arr: T[]): T[] {
 let retriedFor: number | null = null;
 let pendingSeek: number | null = null;
 let loadSeq = 0;
+/** The slider position before the Mute button silenced it, for unmuting. */
+let beforeMute: number | null = null;
 /** A load() is resolving its stream URL: the element still holds the previous track. */
 let loading = false;
 
@@ -228,6 +232,11 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     set({ volume: vol });
   },
   stepVolume: (delta) => get().setVolume(stepVolume(get().volume, delta)),
+  toggleMute: () => {
+    const r = toggleMute(get().volume, beforeMute);
+    get().setVolume(r.position);
+    beforeMute = r.beforeMute;
+  },
 
   enqueueNext: (tracks) => {
     tracks = tracks.filter((t) => t.streamable);

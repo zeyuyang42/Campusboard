@@ -14,7 +14,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { backupLibraryDatabase, exportLibraryFile } from "./lib/libraryFile";
 import { miniBridgeInfo } from "./player/miniBridge";
-import { MINI_EVENTS, positionToGain, toggleAction, VOLUME_CURVE_VERSION } from "@bc/core";
+import { MINI_EVENTS, positionToGain, toggleAction } from "@bc/core";
 import { FAN_ITEMS_ENDPOINT, fanPageUrl, parseFanItemsResponse, parseFanPage, repos, type FanItem } from "@bc/core";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -561,12 +561,13 @@ export async function runSelfTest() {
     await core.deletePlaylist(pl.id);
     await sleep(1500);
     out.playState = await core.playState().then((s) => ({ queue: s.queue.length, index: s.queue_index, pos: s.position_sec }));
-    // The volume curve (#36): the saved state carries the slider position and its version
-    // through the SQL plugin, and the element's gain is the curve of that position.
+    // The volume curve (#36): the saved state keeps the gain (what older builds read), and
+    // the element's gain is the curve of the slider position.
     out.volume = await core.playState().then((s) => {
       const position = usePlayer.getState().volume;
-      const ok = s.volume_version === VOLUME_CURVE_VERSION && Math.abs(s.volume - position) < 1e-9 && Math.abs(audioEl.volume - positionToGain(position)) < 1e-6;
-      return { ok, version: s.volume_version, saved: s.volume, position, gain: audioEl.volume };
+      const gain = positionToGain(position);
+      const ok = Math.abs(s.volume - gain) < 1e-9 && Math.abs(audioEl.volume - gain) < 1e-6;
+      return { ok, saved: s.volume, position, gain: audioEl.volume };
     }, (e) => ({ ok: false, error: String(e) }));
     const results = await core.search("illuminati hotties");
     out.search = { count: results.length, inLibrary: results.filter((r) => r.in_library).length };
