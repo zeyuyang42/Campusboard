@@ -596,7 +596,8 @@ async function miniPlayerCheck(s: Step) {
       for (let t = 0; t < 3000 && !playingNow(); t += 100) await sleep(100);
     }
     const canCheck = wasPlaying && playingNow();
-    const c0 = miniBridgeInfo().commands;
+    const b0 = miniBridgeInfo();
+    const pressesBefore = b0.commands - b0.hellos - b0.byes;
     await ask({ do: "click", cmd: "toggle" }); await sleep(900);
     // The bridge records the state the press saw, what it decided (toggleAction) and the state
     // right after, so a failure says which it was: a wrong decision, a press that didn't act,
@@ -627,7 +628,10 @@ async function miniPlayerCheck(s: Step) {
     const mainShown = await win.isVisible();
     // Exactly the four sent (toggle, toggle, seek, showMain): a doubled listener in either
     // window doubles every press, and two toggles cancel out.
-    const commands = miniBridgeInfo().commands - c0;
+    // hello/bye are commands too, and a visibilitychange in the mini window can add a pair:
+    // only the presses count.
+    const presses = (i: ReturnType<typeof miniBridgeInfo>) => i.commands - i.hellos - i.byes;
+    const commands = presses(miniBridgeInfo()) - pressesBefore;
     const commandsExact = commands === 4;
     const perms = report?.setOnTop === "ok" && report?.drag === "ok" && report?.sqlDenied === true && report?.commandDenied === true;
     // Without playback (the stream didn't start, or muted media stayed paused while hidden)

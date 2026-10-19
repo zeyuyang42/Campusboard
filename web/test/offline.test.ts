@@ -35,11 +35,33 @@ describe("offline copies in the player (#2)", () => {
     await flush();
     expect(h.core.getFreshStreamUrl).toHaveBeenCalledWith(t.id, true);
     expect(el.src).toContain(`/stream/${t.id}?force`);
+    // Kept until the stream actually plays: then the file was the problem.
+    expect(h.core.removeTrackDownloads).not.toHaveBeenCalled();
+    el.emit("playing");
+    await flush();
     expect(h.core.removeTrackDownloads).toHaveBeenCalledWith([t.id]);
     // The next play streams straight away.
     h.state().playTracks([t]);
     await flush();
     expect(h.core.getFreshStreamUrl).toHaveBeenLastCalledWith(t.id, false);
+  });
+
+  it("offline, a media error on a good copy keeps it (the stream retry can't play)", async () => {
+    const [a, b] = tracks(2);
+    h.core.local.set(a.id, localUrl(a.id));
+    h.core.local.set(b.id, localUrl(b.id));
+    const el = await h.startPlaying([a, b]);
+    h.core.offline = true;
+    el.emit("error"); // e.g. after sleep/wake
+    await flush();
+    expect(h.core.getFreshStreamUrl).toHaveBeenCalledWith(a.id, true);
+    vi.advanceTimersByTime(800);
+    await flush(); // skipped on to b, which plays from its copy
+    h.active().emit("playing");
+    await flush();
+    expect(h.core.removeTrackDownloads).not.toHaveBeenCalled();
+    expect(h.core.local.has(a.id)).toBe(true);
+    expect(h.state().index).toBe(1);
   });
 
   it("a media error on a stream never touches offline copies", async () => {

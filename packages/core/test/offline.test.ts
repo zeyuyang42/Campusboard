@@ -52,7 +52,8 @@ function fakeBandcamp(cdn: (n: number, url: string) => Response | null = () => n
       if (r) return r;
       return new Response(new Uint8Array(MP3_BYTES).fill(7), { status: 200, headers: { "content-type": "audio/mpeg", "content-length": String(MP3_BYTES) } });
     }
-    if (url === ALBUM) return new Response(fixture("album"), { status: 200 });
+    // As Bandcamp would serve it now: stream links valid for a day (the fixture's have expired).
+    if (url === ALBUM) return new Response(fixture("album").replace(/ts=\d+/g, `ts=${Math.floor(Date.now() / 1000) + 86_400}`), { status: 200 });
     return new Response("missing", { status: 404 });
   };
   return { fetch, calls, cdnCount: () => cdnCalls };
@@ -202,10 +203,27 @@ describe("offline copies (#2)", () => {
     await waitFor(settled(db, job.id));
     const j = (await jobs.getJob(db, job.id))!;
     expect(bc.calls.filter((u) => u === ALBUM)).toHaveLength(1);
-    expect(bc.cdnCount()).toBe(2); // the first track, then once more with the fresh link
+    // The first track twice (the second time with the fresh link), then the second track: two in a row.
+    expect(bc.cdnCount()).toBe(3);
     expect(j.status).toBe("failed");
     expect(j.error).toMatch(/^\[cdn_refused\]/);
-    expect(j.items!.filter((i) => /cdn_refused/.test(i.error ?? ""))).toHaveLength(want.length);
+    expect(j.items![0].error).toMatch(/fetch_failed/);
+    expect(j.items!.slice(1).every((i) => /cdn_refused/.test(i.error ?? ""))).toBe(true);
+    expect(j.items).toHaveLength(want.length);
+  });
+
+  it("a single refused track fails alone; the job goes on", async () => {
+    const refuse = new Set([0, 1, 3]); // track 1 (and its forced retry), then track 3
+    const { bc, files, runner } = setup((n) => (refuse.has(n) ? new Response("forbidden", { status: 403, headers: { "content-type": "text/plain" } }) : null));
+    const want = await streamable();
+    await db.run("UPDATE tracks SET stream_expires_at = ?", [Date.now() + 10 * 3600_000]);
+    const job = (await runner.enqueueDownload(albumId))!;
+    await waitFor(settled(db, job.id));
+    const j = (await jobs.getJob(db, job.id))!;
+    expect(j).toMatchObject({ status: "done", failed: 2, done: want.length - 2 });
+    expect(j.items!.some((i) => /cdn_refused/.test(i.error ?? ""))).toBe(false);
+    expect(files.files.size).toBe(want.length - 2);
+    expect(bc.calls.filter((u) => u === ALBUM)).toHaveLength(1);
   });
 
   it("the sweep leaves a download in progress alone", async () => {

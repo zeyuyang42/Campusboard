@@ -50,7 +50,11 @@ const MB = 1_000_000;
 export interface OfflineSettings { cap_mb: number | null }
 
 /** How many forced album re-scrapes downloads may still spend on CDN refusals (one per job). */
-export interface DownloadBudget { rescrapes: number }
+export interface DownloadBudget {
+  rescrapes: number;
+  /** Tracks refused (4xx) in a row once no re-scrape is left; two end the job (`cdn_refused`). */
+  refusedInRow?: number;
+}
 
 export class OfflineService {
   /** Names being written or finalised right now; the sweep leaves them alone. */
@@ -125,8 +129,9 @@ export class OfflineService {
    * getFreshStreamUrl (an album page refresh through the queue when it's stale), the mp3
    * through FetchQueue.download. A CDN that refuses the URL (4xx) gets a retry with a freshly
    * scraped URL while `budget` allows one (a download job shares one budget across its
-   * tracks, so a CDN that refuses a whole album costs one page fetch, not one per track); a
-   * refusal after that is `cdn_refused`. The file is written as `<name>.part` and renamed when
+   * tracks, so a CDN that refuses a whole album costs one page fetch, not one per track). After
+   * that a refused track just fails, and a second refused track in a row is `cdn_refused`,
+   * which ends the job. The file is written as `<name>.part` and renamed when
    * complete, so a cut-off download never looks like a copy. remove() while it runs stops it
    * and discards whatever it wrote.
    */
@@ -154,9 +159,13 @@ export class OfflineService {
           const status = e instanceof ScrapeError ? (e.detail as { status?: number } | undefined)?.status : undefined;
           if (status == null || status < 400 || status >= 500) throw e;
           if (!forced && budget.rescrapes > 0) { budget.rescrapes--; forced = true; continue; }
-          throw new ScrapeError("cdn_refused", `Bandcamp's audio server refused "${row.title}" (HTTP ${status}) even with a fresh link`, { status });
+          // One refused track fails alone; a second in a row means the CDN refuses the album.
+          budget.refusedInRow = (budget.refusedInRow ?? 0) + 1;
+          if (budget.refusedInRow >= 2) throw new ScrapeError("cdn_refused", `Bandcamp's audio server refused "${row.title}" (HTTP ${status}) and the track before it, even with a fresh link`, { status });
+          throw e;
         }
       }
+      budget.refusedInRow = 0;
       const { bytes, expected } = got;
       const quality = (await this.db.get<{ q: string }>("SELECT stream_quality AS q FROM tracks WHERE id = ?", [trackId]))?.q ?? "mp3-128";
       // No Content-Length to check against: an mp3-128 much shorter than its duration was cut off.

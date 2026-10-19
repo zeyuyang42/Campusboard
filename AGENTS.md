@@ -323,8 +323,9 @@ src-tauri/
   starts once the queue slot is ours, not a total one, and tells a failure
   reading the body (`fetch_failed`, `network`) from one writing the file
   (`disk_error`, `full` on ENOSPC). A CDN 4xx gets one forced album re-scrape per
-  job; a 4xx after that is `cdn_refused` and fails the job's remaining tracks,
-  like `storage_full` and a full disk. Without a Content-Length, an mp3-128 under
+  job; after that a refused track fails alone, and a second refused track in a
+  row is `cdn_refused`, which fails the job's remaining tracks like
+  `storage_full` and a full disk. Without a Content-Length, an mp3-128 under
   60% of duration × 16 kB/s counts as cut off. A file is written as `.part` and renamed when complete. The
   folder is `<db stem>-offline/` next to the database (`library-offline`,
   `library-dev-offline`, or beside a `BCP_DB_PATH`), in Application Support
@@ -337,7 +338,9 @@ src-tauri/
   after deleting an album, refreshing one, `vacuumOrphans`): files no track
   names go, rows whose file is gone are cleared. The player asks
   `core.localTrackUrl` first (no request at all), streams otherwise, and after a
-  media error on a local file forgets that copy and retries with the stream.
+  media error on a local file retries with the stream, and forgets the copy only
+  once that stream retry plays (never offline, where a transient error such as
+  sleep/wake must not cost a good copy).
   During a challenge cooldown a failed load skips on (rather than stopping) when
   another queue entry has a copy (`core.downloadedTrackIds`). A stream fetch that gets no answer
   (`fetch_failed` with `detail.network`) marks the player offline for 30 s,

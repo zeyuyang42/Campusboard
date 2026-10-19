@@ -181,6 +181,7 @@ function load(track: QueueTrack, force = false) {
   const seq = ++loadSeq;
   loading = true;
   retriedFor = force ? track.id : null;
+  if (!force || suspectCopy !== track.id) suspectCopy = null;
   if (pendingSeek && pendingSeek.trackId !== track.id) pendingSeek = null;
   // A load the listener asked for starts counting failures afresh and wins over a pending skip.
   if (!force && !skippingError) { failStreak = 0; cancelPendingSkip(); }
@@ -234,7 +235,13 @@ async function skipIfDownloadedAhead(seq: number) {
   skipAfterError(true);
 }
 
-/** A local file the element couldn't play is forgotten (#2): the retry and later plays stream. */
+/**
+ * A track whose offline copy failed in the element, until its stream retry plays (then the copy
+ * is forgotten) or something else loads. A failure while offline, during a cooldown or of the
+ * stream too never gets that far, so a good copy isn't lost to a transient error.
+ */
+let suspectCopy: number | null = null;
+/** A local file the element couldn't play is forgotten (#2): later plays stream. */
 const isLocalSrc = (src: string) => /^(asset:|https?:\/\/asset\.localhost\/|blob:)/.test(src);
 function forgetLocalCopy(trackId: number) {
   void getCore()
@@ -765,6 +772,13 @@ const onAudioEvent = (type: AudioEventType) => {
   if (type === "pause") swapping = swappingAfter(swapping, { type: "pause" });
   if (type === "playing") swapping = swappingAfter(swapping, { type: "playing", paused: el.paused });
   if (type === "playing") failStreak = 0;
+  if (type === "playing" && suspectCopy != null) {
+    // The stream retry plays where the local file failed: the file is the problem, so it goes.
+    // Not while offline (that retry can't have streamed), and only for the same track.
+    const cur = usePlayer.getState().current();
+    if (cur?.id === suspectCopy && !isLocalSrc(el.src) && Date.now() >= offlineUntil) forgetLocalCopy(cur.id);
+    suspectCopy = null;
+  }
   // A pause from outside (the system) mid-crossfade stops the fading track too.
   if (type === "pause" && el.paused && tx.phase === "fading") {
     other().pause();
@@ -814,7 +828,8 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
     const cur = usePlayer.getState().current();
     if (!cur) return;
     if (retriedFor !== cur.id) {
-      if (cur.id > 0 && isLocalSrc(el.src)) forgetLocalCopy(cur.id);
+      // The copy is only suspect: it is forgotten once the stream retry plays (see "playing").
+      suspectCopy = cur.id > 0 && isLocalSrc(el.src) ? cur.id : null;
       // Most likely an expired stream URL: ask the server to re-scrape and try once more. A
       // paused player (the listener, or the system) stays paused after the retry.
       if (usePlayer.getState().status === "paused") usePlayer.setState({ wantsPlay: false });
