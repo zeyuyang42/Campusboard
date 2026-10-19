@@ -61,20 +61,42 @@ export class JobRunner {
   private running = false;
   private forceFlags = new Map<number, boolean>();
   private reset: Promise<void>;
+  private resetFailed = false;
+  private resetRetried = false;
   private ready: Promise<void>;
 
   constructor(private db: Db, private queue: FetchQueue, private onChange: () => void = () => {}) {
     // The stale-job reset settles "pending" jobs, so it must finish before any job is
     // created: every enqueue waits for it. Not for the first kick, which may run for minutes;
     // the "pending" status keeps a half-created job away from that kick instead.
-    this.reset = jobs.resetStaleJobs(db).catch((e) => console.error(`[jobs] resetting stale jobs: ${String(e)}`));
+    this.reset = this.runReset();
     this.ready = this.reset.then(() => this.kick());
+  }
+
+  private runReset(): Promise<void> {
+    return jobs.resetStaleJobs(this.db).then(
+      () => { this.resetFailed = false; },
+      (e) => { this.resetFailed = true; console.error(`[jobs] resetting stale jobs: ${String(e)}`); },
+    );
+  }
+
+  /**
+   * Wait for the startup reset. If it failed, the first enqueue after that retries it once, so
+   * a job left pending by a crash doesn't stay pending (and count as busy) all session.
+   */
+  private async afterReset(): Promise<void> {
+    await this.reset;
+    if (this.resetFailed && !this.resetRetried) {
+      this.resetRetried = true;
+      this.reset = this.runReset();
+    }
+    await this.reset;
   }
 
   /** Validate the URL, create a job and start processing in the background. */
   async enqueue(req: ImportRequest): Promise<Job> {
     const n = normalizeBandcampUrl(req.url);
-    await this.reset;
+    await this.afterReset();
     const job = n.kind === "artist"
       ? await jobs.createJob(this.db, "discography", n.url, [])
       : await jobs.createJob(this.db, n.kind, n.url, [n.url]);
@@ -88,7 +110,7 @@ export class JobRunner {
   async enqueueSelection(req: ImportSelectionRequest): Promise<Job> {
     const urls = [...new Set(req.urls.map((u) => normalizeBandcampUrl(u)).filter((n) => n.kind !== "artist").map((n) => n.url))];
     if (!urls.length) throw new ScrapeError("invalid_url", "Nothing selected to import");
-    await this.reset;
+    await this.afterReset();
     const job = await jobs.createJob(this.db, req.kind ?? "selection", req.label, urls);
     this.onChange();
     void this.kick();
@@ -102,7 +124,7 @@ export class JobRunner {
   async enqueueSync(): Promise<Job> {
     const username = (await getSetting<{ username?: string }>(this.db, ACCOUNT_KEY))?.username;
     if (!username) throw new ScrapeError("no_account", "Add your Bandcamp username in Settings first");
-    await this.reset;
+    await this.afterReset();
     const active = await this.db.get<{ id: number }>("SELECT id FROM jobs WHERE kind = 'collection' AND status IN ('pending','queued','running') ORDER BY id LIMIT 1");
     if (active) return (await jobs.getJob(this.db, active.id))!;
     const job = await jobs.createJob(this.db, "collection", fanPageUrl(username), []);
@@ -198,6 +220,8 @@ export class JobRunner {
         this.onChange();
       }
       await this.resolveImports();
+      // Decide from the items, not from counters a crash could have left one short.
+      await jobs.recountJob(this.db, job.id);
       const final = (await jobs.getJob(this.db, job.id, false))!;
       if (final.status === "cancelled") return;
       // Items that landed after the loop found none queued: back to the queue (the kick

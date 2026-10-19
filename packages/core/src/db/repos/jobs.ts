@@ -55,6 +55,21 @@ export async function transitionJob(db: Db, id: number, from: JobStatus[], to: J
   return !!r;
 }
 
+/**
+ * Recount a job's total, done and failed from its items, in one statement. The counters are
+ * bumped per item in a second statement, so a crash between the two can leave them one short;
+ * the items are the record.
+ */
+export async function recountJob(db: Db, jobId: number): Promise<void> {
+  await db.run(
+    `UPDATE jobs SET total = (SELECT COUNT(*) FROM job_items WHERE job_id = ?),
+       done = (SELECT COUNT(*) FROM job_items WHERE job_id = ? AND status = 'done'),
+       failed = (SELECT COUNT(*) FROM job_items WHERE job_id = ? AND status = 'failed'),
+       updated_at = ? WHERE id = ?`,
+    [jobId, jobId, jobId, now(), jobId],
+  );
+}
+
 /** Fail every item still queued with one reason, then recount. Each step is idempotent. */
 export async function failQueuedItems(db: Db, jobId: number, error: string): Promise<void> {
   await db.run("UPDATE job_items SET status = 'failed', error = ? WHERE job_id = ? AND status = 'queued'", [error, jobId]);

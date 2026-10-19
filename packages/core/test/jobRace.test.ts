@@ -141,7 +141,41 @@ describe("crash between the job insert and its items", () => {
   });
 });
 
+describe("startup reset", () => {
+  it("is retried once by the next enqueue when it failed at startup", async () => {
+    const raw = new NodeDb();
+    const stale = (await raw.get<{ id: number }>("INSERT INTO jobs (kind, input_url, total, status) VALUES ('album', ?, 1, 'pending') RETURNING id", [ALBUM_A]))!.id;
+    let resets = 0;
+    const db = new HookedDb(raw, /^UPDATE jobs SET status = 'queued' WHERE status = 'running'/, () => {
+      if (++resets === 1) throw new Error("database is locked");
+    });
+    const runner = new JobRunner(db, new FetchQueue(albumFetch, 0));
+    await runner.whenReady();
+    expect(await statusOf(raw, stale)).toBe("pending");
+    const job = await runner.enqueue({ url: ALBUM_B });
+    expect(resets).toBe(2);
+    // Removed (the new job may reuse its rowid): nothing is left pending.
+    expect(await raw.get("SELECT id FROM jobs WHERE status = 'pending'")).toBeNull();
+    expect(job.input_url).toBe(ALBUM_B);
+    await until(async () => (await statusOf(raw, job.id)) === "done");
+    await runner.enqueue({ url: ALBUM_A });
+    expect(resets).toBe(2); // once only
+  });
+});
+
 describe("job outcome", () => {
+  it("is decided from the items, not from counters a crash left short", async () => {
+    const db = new NodeDb();
+    // A crash after the item was marked failed but before the job's counter was bumped.
+    const id = (await db.get<{ id: number }>("INSERT INTO jobs (kind, input_url, total) VALUES ('album', ?, 1) RETURNING id", [BAD]))!.id;
+    await db.run("INSERT INTO job_items (job_id, url, status, error) VALUES (?, ?, 'failed', 'boom')", [id, BAD]);
+    const runner = new JobRunner(db, new FetchQueue(albumFetch, 0));
+    await runner.whenReady();
+    const j = (await jobs.getJob(db, id))!;
+    expect(j.status).toBe("failed");
+    expect([j.done, j.failed, j.total]).toEqual([0, 1, 1]);
+  });
+
   const run = async (urls: string[]) => {
     const db = new NodeDb();
     const runner = new JobRunner(db, new FetchQueue(albumFetch, 0));

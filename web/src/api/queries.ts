@@ -85,7 +85,7 @@ export const usePlaylists = () => useQuery({ queryKey: keys.playlists, queryFn: 
 export const usePlaylist = (id: number) => useQuery({ queryKey: keys.playlist(id), queryFn: async () => (await core()).playlist(id), enabled: id > 0 });
 export const useSearch = (q: string) => useQuery({ queryKey: keys.search(q), queryFn: async () => (await core()).search(q), enabled: q.trim().length >= 2, staleTime: 60_000 });
 
-const isActive = (j?: Job | null) => !!j && (j.status === "queued" || j.status === "running");
+const isActive = (j?: Job | null) => !!j && (j.status === "pending" || j.status === "queued" || j.status === "running");
 export const useJobs = () =>
   useQuery({ queryKey: keys.jobs, queryFn: async () => (await core()).jobs(), refetchInterval: (q) => (q.state.data?.some(isActive) ? 1000 : false) });
 export const useJob = (id: number | null) =>

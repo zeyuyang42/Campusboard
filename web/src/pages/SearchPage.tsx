@@ -75,7 +75,7 @@ function Result({ r }: { r: SearchResult }) {
         ) : r.in_library ? (
           <Link className="btn sm" to="/library">In library</Link>
         ) : (
-          <button className="btn sm primary" onClick={add} disabled={imp.isPending || (!!job && (job.status === "queued" || job.status === "running"))}>{label}</button>
+          <button className="btn sm primary" onClick={add} disabled={imp.isPending || (!!job && (job.status === "pending" || job.status === "queued" || job.status === "running"))}>{label}</button>
         )}
       </div>
       {job && <JobProgress job={job} compact />}
