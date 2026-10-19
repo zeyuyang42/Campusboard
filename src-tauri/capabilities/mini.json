@@ -12,6 +12,7 @@
     "core:window:allow-start-dragging",
     "core:window:allow-hide",
     "core:window:allow-set-always-on-top",
-    "core:window:allow-set-size"
+    "core:window:allow-set-size",
+    "notification:allow-is-permission-granted"
   ]
 }

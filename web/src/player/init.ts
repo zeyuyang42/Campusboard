@@ -6,6 +6,7 @@ import { loadPlaybackSettings } from "./store";
 import { initAppMenu } from "../lib/appMenu";
 import { initMiniBridge } from "./miniBridge";
 import { initMenuBar } from "../lib/menuBar";
+import { initTrackNotifications } from "../lib/notifications";
 
 let done = false;
 export function initPlayer(_qc: QueryClient) {
@@ -18,4 +19,5 @@ export function initPlayer(_qc: QueryClient) {
   void initAppMenu();
   void initMiniBridge();
   void initMenuBar();
+  void initTrackNotifications();
 }
