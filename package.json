@@ -14,7 +14,7 @@
     "tauri": "tauri",
     "web:dev": "npm run dev -w web",
     "web:build": "npm run build -w web",
-    "test": "npm run test -w packages/core",
+    "test": "npm run test -w packages/core && npm run test -w web",
     "typecheck": "npm run typecheck -w packages/core && npm run typecheck -w web",
     "scrape": "npx tsx packages/core/scripts/scrape.ts",
     "fixtures:save": "npx tsx packages/core/scripts/saveFixture.ts",
