@@ -141,6 +141,23 @@ describe("library export and import of notes (#27, #73)", () => {
     expect((await countPending(dst)).notes).toBe(0);
   });
 
+  it("caps a file's future updated_at at the export time, so it can't beat later local edits", async () => {
+    await setAlbumNote(db, a, "from the file");
+    const data = parseLibraryExport(JSON.stringify(await exportLibrary(db))).data!;
+    data.exported_at = "2026-10-01T10:00:00.000Z";
+    data.notes![0].updated_at = "2099-01-01 00:00:00"; // a clock far ahead
+    const dst = new NodeDb();
+    const da = await upsertTralbum(dst, parseTralbumPage(fixture("album"), 0));
+    await setAlbumNote(dst, da, "edited here later");
+    await setUpdated(dst, da, "2026-10-02 10:00:00");
+    await importLibrary(dst, runnerFor(dst), { ...data, albums: data.albums.filter((x) => x.url === ALBUM) });
+    expect((await getAlbumNote(dst, da))!.note).toBe("edited here later");
+    // Older than the export: the file's edit is the newer one and is taken, with its time capped.
+    await setUpdated(dst, da, "2026-09-01 10:00:00");
+    await importLibrary(dst, runnerFor(dst), { ...data, albums: data.albums.filter((x) => x.url === ALBUM) });
+    expect(await getAlbumNote(dst, da)).toMatchObject({ note: "from the file", updated_at: "2026-10-01 10:00:00" });
+  });
+
   it("Stop waiting forgets notes whose albums never came", async () => {
     await setAlbumNote(db, a, "x");
     const data = parseLibraryExport(JSON.stringify(await exportLibrary(db))).data!;

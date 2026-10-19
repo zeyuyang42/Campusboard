@@ -77,6 +77,8 @@ export async function vacuumOrphans(db: Db): Promise<void> {
   await db.run("DELETE FROM release_watch WHERE artist_id NOT IN (SELECT id FROM artists)");
   await db.run("DELETE FROM artist_releases WHERE artist_id NOT IN (SELECT id FROM artists)");
   await db.run("DELETE FROM imported_playlists WHERE playlist_id NOT IN (SELECT id FROM playlists)");
+  // A pseudo-album removed above takes its note and rating with it, like any deleted album
+  // (rare: a single rated before its album was imported).
   await db.run("DELETE FROM album_notes WHERE album_id NOT IN (SELECT id FROM albums)");
   await db.run("DELETE FROM import_pending WHERE playlist_id IS NOT NULL AND playlist_id NOT IN (SELECT id FROM playlists)");
 }

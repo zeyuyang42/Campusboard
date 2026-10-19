@@ -59,6 +59,10 @@ export async function addPendingNotes(db: Db, rows: ({ album_url: string } & Alb
 }
 
 /**
+ * Rating and note share one updated_at, so the newer annotation wins as a whole, not field by
+ * field: a newer note from a file also brings that file's rating. For a personal library edited
+ * on one Mac at a time that is the simple, predictable rule.
+ *
  * Write waiting notes whose albums are here (only `albumId`'s when given), never over a local
  * edit that is as new or newer, then forget them. Safe to repeat.
  */

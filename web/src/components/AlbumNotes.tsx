@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { repos } from "@bc/core";
-import { useAlbumNote, useAlbumNoteMutations } from "../api/queries";
+import { useAlbumNote, useAlbumNoteWriter } from "../api/queries";
 import { friendlyError } from "../lib/errors";
 
 /** How long typing pauses before the note is saved (it is also saved on blur). */
@@ -61,6 +61,13 @@ export function NoteEditor({ initial, onSave }: { initial: string; onSave: (note
   const saveRef = useRef(save);
   saveRef.current = save;
   useEffect(() => () => saveRef.current(), []); // leaving the page saves what was typed
+  // Fresher data (a refetch, an imported library) replaces the text, unless you are editing it.
+  const focused = useRef(false);
+  useEffect(() => {
+    if (focused.current || latest.current !== saved.current || initial === latest.current) return;
+    setText(initial);
+    latest.current = saved.current = initial;
+  }, [initial]);
   const left = repos.NOTE_MAX - text.length;
   return (
     <div className="album-note">
@@ -72,7 +79,8 @@ export function NoteEditor({ initial, onSave }: { initial: string; onSave: (note
           if (timer.current) clearTimeout(timer.current);
           timer.current = setTimeout(() => saveRef.current(), NOTE_SAVE_DELAY_MS);
         }}
-        onBlur={() => save()}
+        onFocus={() => { focused.current = true; }}
+        onBlur={() => { focused.current = false; save(); }}
       />
       {left < 200 && <span className="muted note-count">{left} characters left</span>}
       {error != null && <span className="notice error">Couldn't save your note. {friendlyError(error)}</span>}
@@ -83,13 +91,15 @@ export function NoteEditor({ initial, onSave }: { initial: string; onSave: (note
 /** The album page's rating and note (#73). */
 export function AlbumNotes({ albumId }: { albumId: number }) {
   const { data, isSuccess } = useAlbumNote(albumId);
-  const { setRating, setNote } = useAlbumNoteMutations(albumId);
-  const [rating, setRatingShown] = useState<number | null>(null);
+  const { setRating, setNote } = useAlbumNoteWriter(albumId);
+  const [ratingError, setRatingError] = useState<unknown>(null);
   if (!isSuccess) return null;
+  // The stars show the cache, which a save updates at once and a failed one puts back.
   return (
     <div className="album-notes">
-      <StarRating value={rating ?? data?.rating ?? 0} onChange={(r) => { setRatingShown(r); setRating.mutate(r); }} />
-      <NoteEditor key={albumId} initial={data?.note ?? ""} onSave={(note) => setNote.mutateAsync(note)} />
+      <StarRating value={data?.rating ?? 0} onChange={(r) => { setRatingError(null); setRating(r).catch(setRatingError); }} />
+      {ratingError != null && <span className="muted rating-error" role="alert">Couldn't save the rating. {friendlyError(ratingError)}</span>}
+      <NoteEditor key={albumId} initial={data?.note ?? ""} onSave={setNote} />
     </div>
   );
 }

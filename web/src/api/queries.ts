@@ -156,16 +156,32 @@ export function usePlaylistMutations() {
 /** Your note and rating for an album (#73). */
 export const useAlbumNote = (id: number) => useQuery({ queryKey: keys.albumNote(id), queryFn: async () => (await core()).albumNote(id), enabled: id > 0 });
 
-/** Save a rating or a note; the Library's rating sort and Rated filter follow. */
-export function useAlbumNoteMutations(id: number) {
+// Rating and note writes of one album run one after another: the SQL plugin pools
+// connections, so two quick upserts could otherwise commit out of order.
+const noteWrites = new Map<number, Promise<unknown>>();
+function serialWrite<T>(albumId: number, fn: () => Promise<T>): Promise<T> {
+  const run = (noteWrites.get(albumId) ?? Promise.resolve()).then(fn, fn);
+  const tail = run.catch(() => undefined);
+  noteWrites.set(albumId, tail);
+  void tail.then(() => { if (noteWrites.get(albumId) === tail) noteWrites.delete(albumId); });
+  return run;
+}
+
+/**
+ * Save a rating or a note. The cache takes the new value at once (also for the save made as
+ * the page goes away), so the album page shows it on return before any refetch; it is read
+ * back from the database once the write is done, or failed. The Library's Rating sort and
+ * Rated filter follow a rating.
+ */
+export function useAlbumNoteWriter(id: number) {
   const qc = useQueryClient();
-  const done = () => {
-    void qc.invalidateQueries({ queryKey: keys.albumNote(id) });
-    void qc.invalidateQueries({ queryKey: ["albums"] });
+  const write = (patch: Partial<repos.AlbumNote>, fn: (c: Awaited<ReturnType<typeof core>>) => Promise<unknown>) => {
+    qc.setQueryData<repos.AlbumNote | null>(keys.albumNote(id), (old) => ({ rating: 0, note: "", updated_at: "", ...(old ?? {}), ...patch }));
+    return serialWrite(id, async () => fn(await core())).finally(() => { void qc.invalidateQueries({ queryKey: keys.albumNote(id) }); });
   };
   return {
-    setRating: useMutation({ mutationFn: async (rating: number) => (await core()).setAlbumRating(id, rating), onSuccess: done }),
-    setNote: useMutation({ mutationFn: async (note: string) => (await core()).setAlbumNote(id, note), onSuccess: () => { void qc.invalidateQueries({ queryKey: keys.albumNote(id) }); } }),
+    setRating: (rating: number) => write({ rating }, (c) => c.setAlbumRating(id, rating)).then(() => { void qc.invalidateQueries({ queryKey: ["albums"] }); }),
+    setNote: (note: string) => write({ note }, (c) => c.setAlbumNote(id, note)),
   };
 }
 

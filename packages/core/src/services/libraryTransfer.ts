@@ -477,8 +477,12 @@ export async function importLibrary(db: Db, runner: JobRunner, data: LibraryExpo
   // Notes and ratings wait by album URL and merge as their albums arrive: a local edit that
   // is as new or newer is kept (#73). Only addresses an album here could have.
   if (data.notes?.length) {
-    // Matched by the address as exported (al.url), like playlist entries and plays.
-    await addPendingNotes(db, data.notes.filter((n) => safeReleaseUrl(n.album_url)));
+    // Matched by the address as exported (al.url), like playlist entries and plays. A time
+    // after the export or after now (a clock ahead, a hand-edited file) is capped, so it
+    // can't win over every later local edit.
+    const exported = new Date(data.exported_at);
+    const cap = [now(), ...(Number.isNaN(exported.getTime()) ? [] : [exported.toISOString().replace("T", " ").slice(0, 19)])].sort()[0];
+    await addPendingNotes(db, data.notes.filter((n) => safeReleaseUrl(n.album_url)).map((n) => (n.updated_at > cap ? { ...n, updated_at: cap } : n)));
   }
 
   const resolved = await resolvePending(db);

@@ -112,3 +112,90 @@ describe("the star rating (#73)", () => {
     expect(onChange.mock.calls).toEqual([[4], [0]]);
   });
 });
+
+describe("the album page's notes with the query cache (#81 review)", () => {
+  type Note = { rating: number; note: string; updated_at: string };
+  async function setup() {
+    const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+    const { AlbumNotes } = await import("../src/components/AlbumNotes");
+    const rows = new Map<number, Note>();
+    const log: string[] = [];
+    let gate: Promise<void> | null = null;
+    const write = async (id: number, p: Partial<Note>, what: string) => {
+      log.push(`start ${what}`);
+      if (gate) await gate;
+      rows.set(id, { rating: 0, note: "", updated_at: "x", ...rows.get(id), ...p });
+      log.push(`end ${what}`);
+    };
+    const core = {
+      albumNote: vi.fn(async (id: number) => rows.get(id) ?? null),
+      setAlbumNote: vi.fn((id: number, note: string) => write(id, { note }, `note ${note}`)),
+      setAlbumRating: vi.fn((id: number, rating: number) => write(id, { rating }, `rating ${rating}`)),
+    };
+    Object.assign(globalThis, { __fakeCore: core });
+    // The app's defaults (main.tsx): a cached note is served at once on return.
+    const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 10_000, retry: 1, refetchOnWindowFocus: false } } });
+    const show = (albumId: number) => render(createElement(QueryClientProvider, { client: qc }, createElement(AlbumNotes, { key: albumId, albumId })));
+    const settle = () => act(async () => { for (let i = 0; i < 30; i++) { await Promise.resolve(); if (i % 3 === 0) vi.advanceTimersByTime(1); } });
+    const hold = () => { let open!: () => void; gate = new Promise((r) => { open = r; }); return () => { gate = null; open(); }; };
+    return { rows, core, log, show, settle, qc, hold };
+  }
+
+  it("a note typed just before switching albums is there on return, and the next edit builds on it", async () => {
+    const t = await setup();
+    t.rows.set(1, { rating: 0, note: "old", updated_at: "x" });
+    t.show(1); await t.settle();
+    expect(area().value).toBe("old");
+    type("typed note");
+    t.show(2); await t.settle(); // leaving album 1 saves it
+    expect(t.rows.get(1)?.note).toBe("typed note");
+    t.show(1); await t.settle();
+    expect(area().value).toBe("typed note");
+    type("typed note, and more");
+    act(() => vi.advanceTimersByTime(NOTE_SAVE_DELAY_MS));
+    await t.settle();
+    expect(t.rows.get(1)?.note).toBe("typed note, and more");
+  });
+
+  it("takes fresher data while not being edited, never while focused", async () => {
+    const t = await setup();
+    t.show(1); await t.settle();
+    t.rows.set(1, { rating: 3, note: "from an import", updated_at: "y" });
+    await act(async () => { await t.qc.invalidateQueries({ queryKey: ["album", 1, "note"] }); });
+    await t.settle();
+    expect(area().value).toBe("from an import");
+    expect(host.querySelector("[role=slider]")!.getAttribute("aria-valuenow")).toBe("3");
+    act(() => area().dispatchEvent(new FocusEvent("focusin", { bubbles: true })));
+    t.rows.set(1, { rating: 3, note: "another", updated_at: "z" });
+    await act(async () => { await t.qc.invalidateQueries({ queryKey: ["album", 1, "note"] }); });
+    await t.settle();
+    expect(area().value).toBe("from an import");
+  });
+
+  it("writes of one album run one after another, in order", async () => {
+    const t = await setup();
+    t.show(1); await t.settle();
+    const open = t.hold();
+    const s = host.querySelector<HTMLElement>("[role=slider]")!;
+    const key = (k: string) => act(() => { s.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true })); });
+    key("ArrowRight"); key("ArrowRight"); key("ArrowRight");
+    expect(s.getAttribute("aria-valuenow")).toBe("3"); // shown at once from the cache
+    await t.settle();
+    expect(t.log).toEqual(["start rating 1"]);
+    open();
+    await t.settle();
+    expect(t.log).toEqual(["start rating 1", "end rating 1", "start rating 2", "end rating 2", "start rating 3", "end rating 3"]);
+    expect(t.rows.get(1)?.rating).toBe(3);
+  });
+
+  it("a failed rating save puts the stars back and says so", async () => {
+    const t = await setup();
+    t.rows.set(1, { rating: 2, note: "", updated_at: "x" });
+    t.core.setAlbumRating.mockImplementation(async () => { throw new Error("database is locked"); });
+    t.show(1); await t.settle();
+    act(() => host.querySelectorAll<HTMLElement>(".star")[4].click());
+    await t.settle();
+    expect(host.querySelector("[role=slider]")!.getAttribute("aria-valuenow")).toBe("2");
+    expect(host.textContent).toContain("Couldn't save the rating");
+  });
+});
