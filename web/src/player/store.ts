@@ -161,9 +161,20 @@ function load(track: QueueTrack, force = false) {
       // with the "try again after" message instead of skipping through the whole queue.
       if ((e as { code?: unknown } | null)?.code === "challenge_cooldown") return;
       const { queue, index } = usePlayer.getState();
-      if (wanted && index < queue.length - 1) setTimeout(() => usePlayer.getState().next(true), 800);
+      if (wanted && index < queue.length - 1) skipAfterError();
     }
   })();
+}
+
+/**
+ * After a track fails, move on to the next one. With the window visible the error shows for a
+ * moment first. With it hidden (closed) nothing is audible after the failure, and WebKit may
+ * then hold a hidden page's timers indefinitely (#67), so it moves on right away.
+ */
+function skipAfterError() {
+  const next = () => usePlayer.getState().next(true);
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") next();
+  else setTimeout(next, 800);
 }
 
 // ---- gapless and crossfade (#35; the rules are in core's transition.ts) ----
@@ -691,7 +702,7 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
     }
     usePlayer.setState({ error: `Couldn't play "${cur.title}"`, status: "paused", wantsPlay: false });
     const { queue, index } = usePlayer.getState();
-    if (index < queue.length - 1) setTimeout(() => usePlayer.getState().next(true), 800);
+    if (index < queue.length - 1) skipAfterError();
   },
 };
 

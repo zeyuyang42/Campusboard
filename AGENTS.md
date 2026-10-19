@@ -353,6 +353,14 @@ src-tauri/
    `~/Library/Application Support/com.bandcampplayer.app/library-dev.db` (debug
    builds never open `library.db`). It starts empty; `npm run dev:copy-library`
    seeds it from the real library when a test needs real data. Extend `web/src/selftest.ts` when adding features that touch Tauri plugins.
+   Every block runs through `block()` with its own timeout; while it runs,
+   `settings.key='selftest_progress'` names the block and step. If that row stops
+   moving, the run is stuck there. A timed-out block reports `{status: "timeout", step}`
+   and the run moves on. Hide the main window with `mainWindow.hide()` (the Rust side
+   shows it again if the page never does), never with a bare `win.hide()` + `sleep`.
+   Verified 2026-10-19: with the display asleep or locked, WebKit treats even a shown
+   window as hidden. With only muted media, it then stops running the page: no timers,
+   no IPC replies. The run starts with `selftest_window("keep-awake")` to turn that off.
    The selftest plays muted, so `hiddenPlayback` is skipped. Changes to the player,
    background playback or listening history need one
    `VITE_SELFTEST=1 VITE_SELFTEST_AUDIBLE=1 npm run dev` run as well: it is audible

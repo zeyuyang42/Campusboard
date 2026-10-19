@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-selftest-sleep"
+description = "Enables the selftest_sleep command without any pre-configured scope."
+commands.allow = ["selftest_sleep"]
+
+[[permission]]
+identifier = "deny-selftest-sleep"
+description = "Denies the selftest_sleep command without any pre-configured scope."
+commands.deny = ["selftest_sleep"]

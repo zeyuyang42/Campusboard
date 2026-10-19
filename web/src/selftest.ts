@@ -18,7 +18,54 @@ import { miniBridgeInfo } from "./player/miniBridge";
 import { MINI_EVENTS, positionToGain, toggleAction, type Track } from "@bc/core";
 import { FAN_ITEMS_ENDPOINT, fanPageUrl, parseFanItemsResponse, parseFanPage, repos, type FanItem } from "@bc/core";
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/**
+ * A page timer raced with one timed in Rust, for a page whose timers WebKit throttles (hidden
+ * or covered, muted media). When WebKit stops the page outright (#67) neither resolves, which
+ * is what `keep-awake` at the start of the run is for.
+ */
+const sleep = (ms: number) => Promise.race([
+  new Promise<void>((r) => setTimeout(r, ms)),
+  invoke<void>("selftest_sleep", { ms }).catch(() => new Promise<void>((r) => setTimeout(r, ms))),
+]);
+
+/**
+ * Marks progress inside a block (written to settings.key='selftest_progress'). Throws once the
+ * block has timed out, so a block left running in the background stops at its next step
+ * instead of hiding the window or changing the player under the blocks after it.
+ */
+type Step = (label: string) => void;
+class Abandoned extends Error {}
+
+/**
+ * The main window hidden (or minimized) from Rust, with a guard there that shows it again
+ * after `guardMs` if the page never does: WebKit may stop a hidden, silent page's timers
+ * altogether (#67), and then a `sleep` before `show()` never returns. A guard that fired
+ * leaves the step's checks failing, not the run hanging.
+ */
+interface WindowReply { guardShows: number; awake: Record<string, boolean> | null }
+const selftestWindow = (action: string, ms?: number) => invoke<WindowReply>("selftest_window", { action, ms });
+const mainWindow = {
+  hide: (s: Step, guardMs: number) => { s("hide main window"); return selftestWindow("hide", guardMs); },
+  /** Arm the guard only, before something else hides or minimizes the window. */
+  arm: (guardMs: number) => selftestWindow("arm", guardMs),
+  /** Disarm the guard, show and focus. Resolves to how many times a guard has fired. */
+  show: () => selftestWindow("show").then((r) => r.guardShows),
+  /** Ask WebKit not to throttle or suspend the page while hidden or covered; says what applied. */
+  keepAwake: () => selftestWindow("keep-awake").then((r) => r.awake),
+};
+
+/** console.error/warn and uncaught errors of the main webview during the run. */
+const consoleLog: string[] = [];
+function captureConsole() {
+  const push = (line: string) => { if (consoleLog.length < 60) consoleLog.push(line.slice(0, 600)); };
+  const fmt = (a: unknown) => (a instanceof Error ? `${a.name}: ${a.message}` : typeof a === "string" ? a : (() => { try { return JSON.stringify(a); } catch { return String(a); } })());
+  for (const level of ["error", "warn"] as const) {
+    const orig = console[level].bind(console);
+    console[level] = (...args: unknown[]) => { push(`${level}: ${args.map(fmt).join(" ")}`); orig(...args); };
+  }
+  window.addEventListener("error", (e) => push(`uncaught: ${e.message} (${e.filename}:${e.lineno})`));
+  window.addEventListener("unhandledrejection", (e) => push(`unhandled rejection: ${fmt(e.reason)}`));
+}
 const ALBUM = "https://illuminatihotties.bandcamp.com/album/let-me-do-one-more";
 const CUSTOM_ARTIST = "https://music.zoekeating.com";
 const CUSTOM_ALBUM = `${CUSTOM_ARTIST}/album/snowmelt-ep`;
@@ -265,7 +312,7 @@ async function libraryFileCheck(core: Awaited<ReturnType<typeof getCore>>) {
  * throw is recorded with diagnostics (which window methods exist, what was thrown) instead
  * of aborting the run, and the window is always shown again at the end.
  */
-async function windowCheck() {
+async function windowCheck(s: Step) {
   const win = getCurrentWindow();
   const errors: Record<string, unknown> = {};
   const step = async <T>(name: string, fn: () => Promise<T>): Promise<T | null> => {
@@ -283,12 +330,19 @@ async function windowCheck() {
   await step("toggleMaximize", () => win.toggleMaximize()); await sleep(400);
   const maximized = await step("isMaximized", () => win.isMaximized());
   await step("toggleMaximizeBack", () => win.toggleMaximize()); await sleep(400);
+  // The window's own permissions are what this checks, so the page minimizes, hides and shows
+  // it; the Rust guard only brings it back if the page's timers stop meanwhile.
+  s("minimize");
+  await mainWindow.arm(10000);
   await step("minimize", () => win.minimize()); await sleep(400);
   const minimized = await step("isMinimized", () => win.isMinimized());
   await step("unminimize", () => win.unminimize()); await sleep(400);
+  s("hide");
+  await mainWindow.arm(10000);
   await step("hide", () => win.hide()); await sleep(300);
   const visibleWhileHidden = await step("isVisibleHidden", () => win.isVisible());
   await step("show", () => win.show());
+  await mainWindow.show();
   await step("setFocus", () => win.setFocus()); await sleep(300);
   const visibleAgain = await step("isVisibleAgain", () => win.isVisible());
   const focused = await step("isFocused", () => win.isFocused());
@@ -308,8 +362,7 @@ async function windowCheck() {
  * advance muted media in a hidden window, so it would measure nothing. Use
  * VITE_SELFTEST_AUDIBLE=1 for this measurement.
  */
-async function hiddenPlaybackCheck() {
-  const win = getCurrentWindow();
+async function hiddenPlaybackCheck(s: Step) {
   if (activeAudio().muted) return { ok: true, status: "skipped (muted)", reason: "set VITE_SELFTEST_AUDIBLE=1 to measure" };
   if (activeAudio().paused) return { ok: true, status: "stalled", reason: "not playing" };
   let last = performance.now();
@@ -324,10 +377,11 @@ async function hiddenPlaybackCheck() {
   const tickEl = activeAudio();
   tickEl.addEventListener("timeupdate", onTick);
   try {
-    await win.hide();
+    await mainWindow.hide(s, 40000);
     const visibility = document.visibilityState;
     last = performance.now();
     const t0 = activeAudio().currentTime, l0 = listenedSeconds(), w0 = last;
+    s("hidden for 20 s");
     await sleep(20000);
     const wallSec = (performance.now() - w0) / 1000;
     const mediaSec = activeAudio().currentTime - t0;
@@ -340,8 +394,7 @@ async function hiddenPlaybackCheck() {
     };
   } finally {
     tickEl.removeEventListener("timeupdate", onTick);
-    await win.show();
-    await win.setFocus();
+    await mainWindow.show();
   }
 }
 
@@ -352,8 +405,7 @@ async function hiddenPlaybackCheck() {
  * selftest builds (audio.ts), so WebKit never publishes it as Now Playing and the user's
  * media keys stay with whatever else is playing; the system side is a manual check.
  */
-async function mediaSessionCheck() {
-  const win = getCurrentWindow();
+async function mediaSessionCheck(s: Step) {
   const want = ["play", "pause", "previoustrack", "nexttrack", "seekto", "seekbackward", "seekforward"];
   const info = mediaSessionInfo();
   const cur = usePlayer.getState().current();
@@ -364,23 +416,25 @@ async function mediaSessionCheck() {
   // handlers were not.
   if (activeAudio().paused) return { ok: registered && metadata, status: "handlers skipped (not playing)", handlers: "skipped", ...base, playbackState: info.playbackState };
   const playingState = info.playbackState === "playing";
-  await win.hide();
+  await mainWindow.hide(s, 15000);
+  let guardShows: number | null = null;
   try {
-    runMediaSessionAction("pause"); await sleep(600);
+    s("pause"); runMediaSessionAction("pause"); await sleep(600);
     const paused = activeAudio().paused && usePlayer.getState().status === "paused" && mediaSessionInfo().playbackState === "paused";
-    runMediaSessionAction("play"); await sleep(1500);
+    s("play"); runMediaSessionAction("play"); await sleep(1500);
     const resumed = !activeAudio().paused && mediaSessionInfo().playbackState === "playing";
     const target = Math.min(20, Math.max(1, (usePlayer.getState().duration || 30) - 5));
-    runMediaSessionAction("seekto", { seekTime: target }); await sleep(800);
+    s("seekto"); runMediaSessionAction("seekto", { seekTime: target }); await sleep(800);
     const seeked = Math.abs(activeAudio().currentTime - target) < 3;
     const reportedSeek = (mediaSessionInfo().lastPosition?.position ?? -1) >= target - 1;
-    runMediaSessionAction("seekbackward"); await sleep(500);
+    s("seekbackward"); runMediaSessionAction("seekbackward"); await sleep(500);
     const steppedBack = activeAudio().currentTime < target - 5;
+    const hidden = document.visibilityState;
+    guardShows = await mainWindow.show();
     const ok = registered && metadata && playingState && paused && resumed && seeked && reportedSeek && steppedBack && info.positionReports > 0;
-    return { ok, status: "checked", ...base, playingState, paused, resumed, seeked, reportedSeek, steppedBack, hidden: document.visibilityState };
+    return { ok, status: "checked", ...base, playingState, paused, resumed, seeked, reportedSeek, steppedBack, hidden, guardShows };
   } finally {
-    await win.show();
-    await win.setFocus();
+    if (guardShows == null) await mainWindow.show();
   }
 }
 
@@ -401,7 +455,7 @@ async function mediaSessionCheck() {
  * new element's clock took to start after play() (WKWebView's start latency, which is what is
  * left of the gap). The saved settings are put back afterwards.
  */
-async function transitionCheck(tracks: Track[]) {
+async function transitionCheck(tracks: Track[], s: Step) {
   if (tracks.length < 4) return { ok: false, error: `needs 4 streamable tracks, has ${tracks.length}` };
   const p0 = usePlayer.getState();
   const saved = { gapless: p0.gapless, crossfadeSec: p0.crossfadeSec };
@@ -412,7 +466,8 @@ async function transitionCheck(tracks: Track[]) {
     usePlayer.getState().playTracks([tracks[0], tracks[1], tracks[2], { ...tracks[3], album_id: -1 }], 0);
     for (let i = 0; i < 100 && (activeAudio().paused || !(activeAudio().duration > 0)); i++) await sleep(100);
     if (activeAudio().paused) return { ok: false, error: "the first track didn't start" };
-    for (const expect of ["gapless", "gapless", "crossfade"] as const) {
+    for (const [i, expect] of (["gapless", "gapless", "crossfade"] as const).entries()) {
+      s(`handover ${i + 1} (${expect})`);
       const n = transitionInfo().transitions.length;
       const from = activeAudio();
       const before = usePlayer.getState().index;
@@ -422,6 +477,7 @@ async function transitionCheck(tracks: Track[]) {
       let t = 0;
       for (; t < 75 && transitionInfo().phase !== "ready"; t++) await sleep(200);
       const readyAfterMs = t * 200;
+      s(`handover ${i + 1} (${expect}): seek to the point`);
       usePlayer.getState().seek(from.duration - (expect === "crossfade" ? 6 : 3));
       for (t = 0; t < 400 && transitionInfo().transitions.length === n; t++) await sleep(20);
       const rec = transitionInfo().transitions.at(-1);
@@ -447,14 +503,17 @@ async function transitionCheck(tracks: Track[]) {
         prevRemainingMs: r(rec.prevRemaining * 1000), startLatencyMs: r(clockStart - rec.at),
         index: [before, usePlayer.getState().index], metadata: !!cur && titleNow === cur.title, title: titleNow,
         listened: Math.round(listenedSeconds() * 10) / 10,
+        sinceHandoverSec: Math.round((performance.now() - rec.at) / 100) / 10,
         released: from !== activeAudio() && !from.getAttribute("src"), phase: transitionInfo().phase,
         playing: !to.paused && usePlayer.getState().status === "playing" && usePlayer.getState().wantsPlay,
         gain: to.volume, ...(fade ? { fade } : {}),
       });
     }
+    // The play counter restarted at the handover: it holds no more than the time since then.
+    // (A fixed `< 4` failed the crossfade, which waits ~4.5 s, by timing alone: 3.9 vs 4.2.)
     const ok = handovers.length === 3 && handovers.every((h, i) =>
       h.happened && h.kind === ["gapless", "gapless", "crossfade"][i] && (h.index as number[])[1] === (h.index as number[])[0] + 1
-      && h.metadata && h.released && h.playing && h.phase === "idle" && (h.listened as number) < 4)
+      && h.metadata && h.released && h.playing && h.phase === "idle" && (h.listened as number) <= (h.sinceHandoverSec as number) + 0.3)
       && !!(handovers[2].fade as { ramps?: boolean } | undefined)?.ramps && !!(handovers[2].fade as { bothPlaying?: boolean } | undefined)?.bothPlaying;
     return { ok, muted: activeAudio().muted, handovers };
   } finally {
@@ -462,7 +521,7 @@ async function transitionCheck(tracks: Track[]) {
   }
 }
 
-async function miniPlayerCheck() {
+async function miniPlayerCheck(s: Step) {
   const { emitTo } = await import("@tauri-apps/api/event");
   const { getCurrentWebviewWindow, WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
   const me = getCurrentWebviewWindow();
@@ -491,7 +550,8 @@ async function miniPlayerCheck() {
     out.report = report;
     const titleOk = !!report && !!cur && report.title === cur.title;
     const wasPlaying = usePlayer.getState().status === "playing" && !activeAudio().paused;
-    await win.hide(); await sleep(300);
+    await mainWindow.hide(s, 30000); await sleep(300);
+    s("mini presses with the main window hidden");
     // Muted media in a hidden window can stall ("waiting" sets the store to loading; Play/Pause
     // then still pauses) or be paused by WebKit (then the press plays). Try to get it playing
     // again; if it won't, the pause/resume checks are skipped and the command path is checked.
@@ -528,6 +588,7 @@ async function miniPlayerCheck() {
     const rejected0 = miniBridgeInfo().rejected;
     await emitTo("main", MINI_EVENTS.command, { type: "setVolume", v: 0 }); await sleep(300);
     const rejectsBad = miniBridgeInfo().rejected === rejected0 + 1;
+    s("mini shows the main window");
     await ask({ do: "click", cmd: "showMain" }); await sleep(800);
     const mainShown = await win.isVisible();
     // Exactly the four sent (toggle, toggle, seek, showMain): a doubled listener in either
@@ -544,6 +605,7 @@ async function miniPlayerCheck() {
     // emitted by the mini window does nothing, the real handler does.
     const queueOpen = () => usePlayer.getState().queueOpen;
     const q0 = queueOpen();
+    s("menu dispatch");
     await ask({ do: "forgeMenu" }); await sleep(400);
     const forgedMenuIgnored = queueOpen() === q0;
     await invoke("selftest_menu", { id: "queue" }); await sleep(400);
@@ -551,13 +613,15 @@ async function miniPlayerCheck() {
     await invoke("selftest_menu", { id: "queue" }); await sleep(300);
     // Controls items leave the windows alone: with the main window hidden, Play/Pause acts
     // on the player and the main window stays hidden.
-    await win.hide(); await sleep(300);
+    await mainWindow.hide(s, 15000); await sleep(300);
+    s("menu play-pause with the main window hidden");
     const st0 = usePlayer.getState().status;
     await invoke("selftest_menu", { id: "play-pause" }); await sleep(900);
     const controlActed = usePlayer.getState().status !== st0;
     const controlKeptHidden = (await win.isVisible()) === false;
     await invoke("selftest_menu", { id: "play-pause" }); await sleep(1500);
-    await win.show(); await sleep(300);
+    await mainWindow.show(); await sleep(300);
+    s("close and reshow the mini window");
     // Close Window with the mini window focused hides it (and nothing else), and the bridge
     // stops sending state until the next hello.
     const liveBeforeClose = miniBridgeInfo().live;
@@ -576,9 +640,11 @@ async function miniPlayerCheck() {
     const reshown = await ask({ do: "state" });
     const reshowTitleOk = !!reshown && reshown.title === usePlayer.getState().current()?.title;
     // Close Window on the main window still sends it a close request, which hides it.
+    s("close the main window from the menu");
+    await mainWindow.arm(15000);
     await invoke("selftest_menu", { id: "close-window", focused: "main" }); await sleep(800);
     const mainCloseHides = (await win.isVisible()) === false;
-    await win.show(); await win.setFocus().catch(() => undefined); await sleep(300);
+    out.guardShows = await mainWindow.show(); await sleep(300);
     const menuOk = forgedMenuIgnored && menuDispatched && controlActed && controlKeptHidden;
     const closeOk = liveBeforeClose && miniClosed && mainUntouched && !liveAfterClose && quietWhileHidden && mainCloseHides && liveAfterReshow && reshowTitleOk;
     Object.assign(out, {
@@ -592,8 +658,7 @@ async function miniPlayerCheck() {
     out.ok = opened && out.visible === true && titleOk && perms && playbackOk && rejectsBad && mainShown && menuOk && closeOk;
   } finally {
     off();
-    await win.show().catch(() => undefined);
-    await win.setFocus().catch(() => undefined);
+    await mainWindow.show().catch(() => undefined);
     if (opened) {
       const mini = await WebviewWindow.getByLabel("mini");
       if (await mini?.isVisible().catch(() => false)) await invoke("toggle_mini_player").catch(() => undefined); // hides it
@@ -605,94 +670,172 @@ async function miniPlayerCheck() {
   return out;
 }
 
+const TIMEOUT = Symbol("timeout");
+
+/** `p`, or TIMEOUT after `ms` (timed in Rust too, see sleep). */
+function within<T>(ms: number, p: Promise<T>): Promise<T | typeof TIMEOUT> {
+  return Promise.race([p, sleep(ms).then((): typeof TIMEOUT => TIMEOUT)]);
+}
+
+type Core = Awaited<ReturnType<typeof getCore>>;
+type AlbumDetail = Awaited<ReturnType<Core["album"]>>;
+
 export async function runSelfTest() {
+  captureConsole();
   const out: Record<string, unknown> = { startedAt: new Date().toISOString() };
   const core = await getCore();
+  // With the display asleep or locked every window is covered, so WebKit treats the page as
+  // hidden even while the window is shown, and with only muted media it can stop running the
+  // page altogether (#67): no timers, no IPC replies.
+  out.keepAwake = await mainWindow.keepAwake().catch((e) => String(e));
+  // settings.key='selftest_progress' says which block (and step) the run is in, so a run that
+  // never writes its result still says where it stopped. Written in order, never awaited.
+  let progressWrites: Promise<unknown> = Promise.resolve();
+  const progress = (p: Record<string, unknown>) => {
+    const row = { ...p, visibility: document.visibilityState, at: new Date().toISOString() };
+    progressWrites = progressWrites.then(() => core.setSetting("selftest_progress", row)).catch(() => undefined);
+  };
+  const timedOut: string[] = [];
+  /**
+   * One block of the run with its own timeout: on timeout it records where it was
+   * (`{ status: "timeout", step }`), makes sure the main window is shown again and the run
+   * moves on; the abandoned block stops at its next step (Step throws). A throw is recorded
+   * as `{ ok: false, error }`.
+   */
+  const block = async <T>(name: string, fn: (s: Step) => Promise<T>, timeoutMs = 60_000): Promise<T | Record<string, unknown>> => {
+    let step = "start";
+    let abandoned = false;
+    const s: Step = (label) => {
+      if (abandoned) throw new Abandoned(`${name} timed out`);
+      step = label;
+      progress({ block: name, step });
+    };
+    progress({ block: name, step, ...(name === "import" ? { keepAwake: out.keepAwake } : {}) });
+    const t0 = performance.now();
+    try {
+      const r = await within(timeoutMs, fn(s));
+      if (r !== TIMEOUT) return r;
+      abandoned = true;
+      timedOut.push(name);
+      await within(5000, mainWindow.show()).catch(() => undefined);
+      return { ok: false, status: "timeout", step, afterMs: Math.round(performance.now() - t0) };
+    } catch (e) {
+      return { ok: false, error: `${String(e)}\n${(e as Error)?.stack ?? ""}`.trim(), step };
+    }
+  };
+  const hasOk = (v: unknown): v is { ok: unknown } => !!v && typeof v === "object" && "ok" in v;
+
   // Plays above this id were made by the run (the player or the history check) and are
   // removed at the end, so the selftest never leaves anything in the real history.
   const playsBefore = await core.db.get<{ m: number | null }>("SELECT MAX(id) AS m FROM plays").then((r) => r?.m ?? 0, () => null);
   try {
-    const job = await core.import({ url: ALBUM });
-    for (let i = 0; i < 90; i++) {
-      const j = await core.job(job.id);
-      if (j && (j.status === "done" || j.status === "failed")) { out.job = { status: j.status, done: j.done, failed: j.failed, error: j.error }; break; }
-      await sleep(1000);
-    }
-    const albums = await core.albums();
-    out.albums = albums.length;
-    const album = await core.album(albums.find((a) => a.url === ALBUM)?.id ?? albums[0].id);
-    out.tracks = album?.tracks.length ?? 0;
-    out.libraryFilter = await libraryFilterCheck(core, album);
-    out.history = await historyCheck(core, album).catch((e) => ({ ok: false, error: String(e) }));
-    const playable = album?.tracks.filter((t) => t.streamable) ?? [];
-    usePlayer.getState().playTracks(playable, 0);
-    await sleep(7000);
-    out.audio = { currentTime: activeAudio().currentTime, paused: activeAudio().paused, readyState: activeAudio().readyState, error: activeAudio().error?.code ?? null, src: activeAudio().src.slice(0, 48), storeStatus: usePlayer.getState().status, storeError: usePlayer.getState().error };
-    out.mediaSession = await mediaSessionCheck().catch((e) => ({ ok: false, error: String(e) }));
-    out.miniPlayer = await miniPlayerCheck().catch((e) => ({ ok: false, error: String(e) }));
-    usePlayer.getState().next();
-    await sleep(4000);
-    out.audioAfterNext = { currentTime: activeAudio().currentTime, paused: activeAudio().paused, index: usePlayer.getState().index, title: usePlayer.getState().current()?.title };
-    out.hiddenPlayback = await hiddenPlaybackCheck().catch((e) => ({ ok: false, status: "failed", error: String(e) }));
-    out.transitions = await transitionCheck(playable).catch((e) => ({ ok: false, error: String(e) }));
+    let album = null as AlbumDetail;
+    let playable: Track[] = [];
+    out.import = await block("import", async (s) => {
+      const job = await core.import({ url: ALBUM });
+      s("wait for the import job");
+      for (let i = 0; i < 90; i++) {
+        const j = await core.job(job.id);
+        if (j && (j.status === "done" || j.status === "failed")) { out.job = { status: j.status, done: j.done, failed: j.failed, error: j.error }; break; }
+        await sleep(1000);
+      }
+      const albums = await core.albums();
+      out.albums = albums.length;
+      album = await core.album(albums.find((a) => a.url === ALBUM)?.id ?? albums[0].id);
+      out.tracks = album?.tracks.length ?? 0;
+      playable = album?.tracks.filter((t) => t.streamable) ?? [];
+      return { ok: !!album && playable.length > 0 };
+    }, 120_000);
+    out.libraryFilter = await block("libraryFilter", () => libraryFilterCheck(core, album));
+    out.history = await block("history", () => historyCheck(core, album));
+    out.audio = await block("audio", async (s) => {
+      usePlayer.getState().playTracks(playable, 0);
+      s("playing for 7 s");
+      await sleep(7000);
+      return { visibility: document.visibilityState, currentTime: activeAudio().currentTime, paused: activeAudio().paused, readyState: activeAudio().readyState, error: activeAudio().error?.code ?? null, src: activeAudio().src.slice(0, 48), storeStatus: usePlayer.getState().status, storeError: usePlayer.getState().error };
+    }, 30_000);
+    out.mediaSession = await block("mediaSession", (s) => mediaSessionCheck(s), 30_000);
+    out.miniPlayer = await block("miniPlayer", (s) => miniPlayerCheck(s), 90_000);
+    out.audioAfterNext = await block("next", async (s) => {
+      usePlayer.getState().next();
+      s("playing for 4 s");
+      await sleep(4000);
+      return { currentTime: activeAudio().currentTime, paused: activeAudio().paused, index: usePlayer.getState().index, title: usePlayer.getState().current()?.title };
+    }, 20_000);
+    out.hiddenPlayback = await block("hiddenPlayback", (s) => hiddenPlaybackCheck(s), 60_000);
+    out.transitions = await block("transitions", (s) => transitionCheck(playable, s), 150_000);
     // Nothing below needs playback; stopping here keeps the track from reaching a counted play.
     usePlayer.getState().pause();
-    const pl = await core.createPlaylist("Selftest");
-    await core.addToPlaylist(pl.id, playable.slice(0, 3).map((t) => t.id));
-    const got = await core.playlist(pl.id);
-    out.playlist = { tracks: got?.tracks.length, art_ids: got?.art_ids };
-    await core.deletePlaylist(pl.id);
-    await sleep(1500);
-    out.playState = await core.playState().then((s) => ({ queue: s.queue.length, index: s.queue_index, pos: s.position_sec }));
+    out.playlist = await block("playlist", async () => {
+      const pl = await core.createPlaylist("Selftest");
+      await core.addToPlaylist(pl.id, playable.slice(0, 3).map((t) => t.id));
+      const got = await core.playlist(pl.id);
+      await core.deletePlaylist(pl.id);
+      return { tracks: got?.tracks.length, art_ids: got?.art_ids };
+    }, 30_000);
+    out.playState = await block("playState", async () => {
+      await sleep(1500);
+      return core.playState().then((s) => ({ queue: s.queue.length, index: s.queue_index, pos: s.position_sec }));
+    }, 30_000);
     // The volume curve (#36): the saved state keeps the gain (what older builds read), and
     // the element's gain is the curve of the slider position.
-    out.volume = await core.playState().then((s) => {
+    out.volume = await block("volume", () => core.playState().then((s) => {
       const position = usePlayer.getState().volume;
       const gain = positionToGain(position);
       const ok = Math.abs(s.volume - gain) < 1e-9 && Math.abs(activeAudio().volume - gain) < 1e-6;
       return { ok, saved: s.volume, position, gain: activeAudio().volume };
-    }, (e) => ({ ok: false, error: String(e) }));
-    const results = await core.search("illuminati hotties");
-    out.search = { count: results.length, inLibrary: results.filter((r) => r.in_library).length };
-    const browse = await core.browse("https://illuminatihotties.bandcamp.com");
-    out.browse = { releases: browse.items.length, band: browse.band?.name, inLibrary: browse.items.filter((i) => i.album_id).length, firstTitle: browse.items[0]?.title };
-    out.newReleases = await newReleasesCheck(core, album).catch((e) => ({ ok: false, error: String(e) }));
-    out.preorder = await preorderCheck(core, album).catch((e) => ({ ok: false, error: String(e) }));
+    }), 30_000);
+    out.search = await block("search", async () => {
+      const results = await core.search("illuminati hotties");
+      return { count: results.length, inLibrary: results.filter((r) => r.in_library).length };
+    });
+    out.browse = await block("browse", async () => {
+      const browse = await core.browse("https://illuminatihotties.bandcamp.com");
+      return { releases: browse.items.length, band: browse.band?.name, inLibrary: browse.items.filter((i) => i.album_id).length, firstTitle: browse.items[0]?.title };
+    });
+    out.newReleases = await block("newReleases", () => newReleasesCheck(core, album));
+    out.preorder = await block("preorder", () => preorderCheck(core, album));
     // Custom artist domain: the http scope must allow the custom host (it 303s to name.bandcamp.com),
     // and the library must key the album by the custom-domain URL from data-tralbum.
     // Only albums that are new by id get deleted afterwards, so the real library is left as it was.
-    const before = new Set((await core.albums()).map((x) => x.id));
-    out.customDomain = await core.import({ url: CUSTOM_ALBUM }).then(async (cj) => {
-      let status: string | undefined = "timeout", error: unknown = null;
-      try {
-        for (let i = 0; i < 60; i++) {
-          const j = await core.job(cj.id);
-          if (j && (j.status === "done" || j.status === "failed")) { status = j.status; error = j.error ?? j.items?.[0]?.error ?? null; break; }
-          await sleep(1000);
+    out.customDomain = await block("customDomain", async (s) => {
+      const before = new Set((await core.albums()).map((x) => x.id));
+      return core.import({ url: CUSTOM_ALBUM }).then(async (cj) => {
+        let status: string | undefined = "timeout", error: unknown = null;
+        try {
+          s("wait for the import job");
+          for (let i = 0; i < 60; i++) {
+            const j = await core.job(cj.id);
+            if (j && (j.status === "done" || j.status === "failed")) { status = j.status; error = j.error ?? j.items?.[0]?.error ?? null; break; }
+            await sleep(1000);
+          }
+          const a = (await core.albums()).find((x) => x.url === CUSTOM_ALBUM);
+          // force=true re-fetches the stored (custom-domain) URL through the plugin.
+          s("fresh stream URL and browse");
+          const first = a ? (await core.album(a.id))?.tracks.find((t) => t.streamable) : undefined;
+          const refreshed = first ? await core.getFreshStreamUrl(first.id, true).then((u) => new URL(u.url).hostname, (e) => String(e)) : null;
+          const b = await core.browse(CUSTOM_ARTIST).then((r) => ({ url: r.url, releases: r.items.length, inLibrary: r.items.filter((i) => i.album_id).length }), (e) => String(e));
+          return { status, error, stored: !!a, refreshedStreamHost: refreshed, browse: b };
+        } finally {
+          if (status === "timeout") await core.cancelJob(cj.id).catch(() => false);
+          for (const x of await core.albums()) if (!before.has(x.id)) await core.deleteAlbum(x.id);
         }
-        const a = (await core.albums()).find((x) => x.url === CUSTOM_ALBUM);
-        // force=true re-fetches the stored (custom-domain) URL through the plugin.
-        const first = a ? (await core.album(a.id))?.tracks.find((t) => t.streamable) : undefined;
-        const refreshed = first ? await core.getFreshStreamUrl(first.id, true).then((s) => new URL(s.url).hostname, (e) => String(e)) : null;
-        const b = await core.browse(CUSTOM_ARTIST).then((r) => ({ url: r.url, releases: r.items.length, inLibrary: r.items.filter((i) => i.album_id).length }), (e) => String(e));
-        return { status, error, stored: !!a, refreshedStreamHost: refreshed, browse: b };
-      } finally {
-        if (status === "timeout") await core.cancelJob(cj.id).catch(() => false);
-        for (const x of await core.albums()) if (!before.has(x.id)) await core.deleteAlbum(x.id);
-      }
-    }, (e) => String(e));
+      }, (e) => String(e));
+    }, 150_000);
     // The http scope's deny list must beat the custom-domain allow patterns for private hosts
     // (a redirect hop is checked the same way). The scope check happens before any connection.
-    const denied = ["https://127.0.0.1/album/x", "https://192.168.1.1/music", "https://[::1]/track/x", "https://nas.lan/album/x", "https://router/album/x"];
-    const deniedResults = await Promise.all(denied.map((u) =>
-      tauriFetch(u, { maxRedirections: 0, connectTimeout: 2000 }).then((r) => `fetched ${r.status}`, (e) => String(e))));
-    out.denyScope = {
-      allRejected: deniedResults.every((r) => r.includes("not allowed on the configured scope")),
-      results: Object.fromEntries(denied.map((u, i) => [u, deniedResults[i]])),
-    };
-    out.syncGuards = await checkSyncGuards(core).catch((e) => String(e));
-    out.libraryFile = await libraryFileCheck(core).catch((e) => ({ ok: false, error: String(e) }));
-    out.collection = SELFTEST_FAN ? await (async () => {
+    out.denyScope = await block("denyScope", async () => {
+      const denied = ["https://127.0.0.1/album/x", "https://192.168.1.1/music", "https://[::1]/track/x", "https://nas.lan/album/x", "https://router/album/x"];
+      const deniedResults = await Promise.all(denied.map((u) =>
+        tauriFetch(u, { maxRedirections: 0, connectTimeout: 2000 }).then((r) => `fetched ${r.status}`, (e) => String(e))));
+      return {
+        allRejected: deniedResults.every((r) => r.includes("not allowed on the configured scope")),
+        results: Object.fromEntries(denied.map((u, i) => [u, deniedResults[i]])),
+      };
+    }, 30_000);
+    out.syncGuards = await block("syncGuards", () => checkSyncGuards(core));
+    out.libraryFile = await block("libraryFile", () => libraryFileCheck(core));
+    out.collection = SELFTEST_FAN ? await block("collection", async () => {
       const page = parseFanPage(await core.queue.fetchText(fanPageUrl(SELFTEST_FAN)));
       // POST to bandcamp.com/api/... through the http scope, two items only.
       const api = parseFanItemsResponse(await core.queue.fetchText(FAN_ITEMS_ENDPOINT.collection, {
@@ -723,28 +866,29 @@ export async function runSelfTest() {
         fanId: page.fan_id > 0, counts: [page.collection.count, page.wishlist.count], firstBatch: [page.collection.items.length, page.wishlist.items.length],
         apiItems: api.items.length, apiMore: api.more, imported, filters: { purchased: purchased.length, wishlist: wishlist.length },
       };
-    })().catch((e) => String(e)) : "skipped (set VITE_SELFTEST_FAN to a public fan username)";
+    }, 150_000) : "skipped (set VITE_SELFTEST_FAN to a public fan username)";
     // The challenge cooldown is read from settings through the SQL plugin; null unless Bandcamp challenged us.
-    out.challengeUntil = await core.challengeUntil().then((u) => (u ? new Date(u).toISOString() : null), (e) => String(e));
+    out.challengeUntil = await block("challengeUntil", () => core.challengeUntil().then((u) => (u ? new Date(u).toISOString() : null)), 10_000);
     // Window permissions the menu bar and close-to-hide rely on.
-    out.window = await windowCheck();
+    out.window = await block("window", (s) => windowCheck(s), 30_000);
     // startDragging needs a live mouse-down to do anything, but a missing
     // capability rejects the call outright; record what it says.
-    out.dragPermission = await getCurrentWindow().startDragging().then(() => "ok", (e) => String(e));
+    out.dragPermission = await block("dragPermission", () => getCurrentWindow().startDragging().then(() => "ok", (e) => String(e)), 10_000);
     // The menu-bar command is registered and granted. Resends the current state, so the icon
     // stays as the setting has it (with the setting off, nothing appears on the screen).
-    out.menuBar = await resendMenuBar().then(() => ({ ok: true }), (e) => ({ ok: false, error: String(e) }));
+    out.menuBar = await block("menuBar", () => resendMenuBar().then(() => ({ ok: true })), 10_000);
     // The notification plugin is registered and granted. Read-only: nothing is posted and no
     // permission is requested.
-    out.notifications = await invoke("plugin:notification|is_permission_granted").then((granted) => ({ ok: true, granted }), (e) => ({ ok: false, error: String(e) }));
-    // Overall ok needs every block that reports its own `ok` to pass. The listed blocks must
-    // be present as objects: one caught and stored as a string threw.
-    const required = ["libraryFilter", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "syncGuards", "newReleases", "preorder", "libraryFile", "window"];
+    out.notifications = await block("notifications", () => invoke("plugin:notification|is_permission_granted").then((granted) => ({ ok: true, granted })), 10_000);
+    // Overall ok needs every block that reports its own `ok` to pass (a timed-out or thrown
+    // block reports ok: false). The listed blocks must be present as objects: one caught and
+    // stored as a string threw.
+    const required = ["import", "libraryFilter", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "syncGuards", "newReleases", "preorder", "libraryFile", "window"];
     const failed = Object.entries(out)
-      .filter(([k, v]) => required.includes(k) || (!!v && typeof v === "object" && "ok" in v))
+      .filter(([k, v]) => required.includes(k) || hasOk(v))
       .filter(([, v]) => (v as { ok?: unknown } | null)?.ok !== true)
       .map(([k]) => k);
-    if (!(out.denyScope as { allRejected?: boolean }).allRejected) failed.push("denyScope");
+    if (!failed.includes("denyScope") && !(out.denyScope as { allRejected?: boolean }).allRejected) failed.push("denyScope");
     out.failedBlocks = failed;
     out.ok = failed.length === 0;
   } catch (e) {
@@ -753,11 +897,16 @@ export async function runSelfTest() {
     out.error = `${String(e)}\n${(e as Error)?.stack ?? ""}`;
   } finally {
     if (playsBefore != null) {
-      out.playsRemoved = await core.db.run("DELETE FROM plays WHERE id > ?", [playsBefore]).then((r) => r.changes, (e) => String(e));
+      out.playsRemoved = await within(10_000, core.db.run("DELETE FROM plays WHERE id > ?", [playsBefore])).then((r) => (r === TIMEOUT ? "timeout" : r.changes), (e) => String(e));
     }
   }
+  out.timedOut = timedOut;
+  // How many times the Rust guard had to show a hidden window the page didn't (#67).
+  out.windowGuardShows = await within(5000, mainWindow.show()).then((n) => (n === TIMEOUT ? "timeout" : n), (e) => String(e));
+  out.console = consoleLog.slice();
   out.finishedAt = new Date().toISOString();
-  await core.setSetting("selftest", out);
+  progress({ block: "done" });
+  await core.setSetting("selftest", out).catch((e) => core.setSetting("selftest", { ok: false, finishedAt: out.finishedAt, error: `result not saved: ${String(e)}` }));
   console.log("[selftest]", JSON.stringify(out));
   // Closing only hides the window now (playback continues), so quit explicitly.
   await sleep(500);
