@@ -115,8 +115,6 @@ let skipTimer: ReturnType<typeof setTimeout> | null = null;
 function cancelPendingSkip() {
   if (skipTimer) { clearTimeout(skipTimer); skipTimer = null; }
 }
-/** The last load failed before setting a source: the element still holds the previous track. */
-let staleSource = false;
 
 // Listening history: one PlayCounter follows the current playback (rule in core's playRule.ts).
 const plays = new PlayCounter();
@@ -151,7 +149,6 @@ function load(track: QueueTrack, force = false) {
       const { url } = await core.getFreshStreamUrl(track.id, force);
       if (seq !== loadSeq) return; // a newer load superseded this one
       loading = false;
-      staleSource = false;
       const el = active();
       swapping = swappingAfter(swapping, { type: "load", paused: el.paused });
       el.src = url;
@@ -169,9 +166,13 @@ function load(track: QueueTrack, force = false) {
     } catch (e) {
       if (seq !== loadSeq) return;
       loading = false;
-      staleSource = true;
       const wanted = usePlayer.getState().wantsPlay;
       usePlayer.setState({ error: `Couldn't play "${track.title}". ${friendlyError(e)}`, status: "paused", wantsPlay: false });
+      // The element still holds the previous track: silence it and drop that source, so it
+      // can't play on (or end and advance) under this track's name. Play then reloads this one.
+      const el = active();
+      el.pause();
+      if (el.hasAttribute("src")) { el.removeAttribute("src"); el.load(); }
       // During a Bandcamp cooldown every stale track would fail the same way: stop here
       // with the "try again after" message instead of skipping through the whole queue.
       if ((e as { code?: unknown } | null)?.code === "challenge_cooldown") return;
@@ -188,21 +189,19 @@ function load(track: QueueTrack, force = false) {
  * A load, Play or Pause from the listener in the meantime cancels the skip.
  */
 function skipAfterError(play: boolean) {
-  const { queue, index, repeat } = usePlayer.getState();
   failStreak++;
-  // Stop at the end of the queue unless repeating all, and once every track has failed.
-  if (failStreak >= queue.length || (index >= queue.length - 1 && repeat !== "all")) return;
+  if (shouldStopAfterError()) return;
   const seq = loadSeq;
   const advance = () => {
     skipTimer = null;
     if (seq !== loadSeq) return; // something else was loaded since
+    if (shouldStopAfterError()) return; // the queue may have been edited in the meantime
     skippingError = true;
     try {
       // A plain Next, not the end-of-track one: repeat-one would replay the failed track (#69).
       if (play) usePlayer.getState().next();
       else {
         const s = usePlayer.getState();
-        if (!s.queue.length) return;
         const ni = (s.index + 1) % s.queue.length;
         usePlayer.setState({ index: ni, status: "paused", wantsPlay: false, position: 0, duration: 0 });
         load(s.queue[ni]);
@@ -212,6 +211,15 @@ function skipAfterError(play: boolean) {
   cancelPendingSkip();
   if (typeof document !== "undefined" && document.visibilityState === "hidden") advance();
   else skipTimer = setTimeout(advance, 800);
+}
+
+/**
+ * Stop rather than skip: at the end of the queue unless repeating all, once every track has
+ * failed in a row, or when the failed track is the only one left.
+ */
+function shouldStopAfterError() {
+  const { queue, index, repeat } = usePlayer.getState();
+  return queue.length <= 1 || failStreak >= queue.length || (index >= queue.length - 1 && repeat !== "all");
 }
 
 // ---- gapless and crossfade (#35; the rules are in core's transition.ts) ----
@@ -495,7 +503,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     const el = active();
     // The track's URL is still resolving: load() starts it when it arrives.
     if (loading) set({ status: "loading" });
-    else if (!el.src || staleSource) load(cur);
+    else if (!el.src) load(cur);
     else {
       // Play after the queue ended restarts the track from the top: a new playback.
       if (el.ended) startPlayback(cur);

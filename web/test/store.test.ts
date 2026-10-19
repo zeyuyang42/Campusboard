@@ -191,6 +191,61 @@ describe("skipping a track that fails (#67)", () => {
       expect(h.active().calls.play).toBe(plays);
     });
 
+    it("Next onto a failing URL leaves no element playing", async () => {
+      const list = tracks(3);
+      const el = await h.startPlaying(list);
+      h.core.failing.add(list[1].id);
+      h.state().next();
+      await flush();
+      expect(h.state()).toMatchObject({ index: 1, status: "paused", wantsPlay: false });
+      expect(h.els.every((e) => e.paused)).toBe(true);
+      expect(el.src).toBe("");
+    });
+
+    it("a cooldown during a load leaves silence, and nothing advances when the old track would have ended", async () => {
+      const list = tracks(3);
+      h.state().cycleRepeat(); h.state().cycleRepeat(); // repeat-one
+      const el = await h.startPlaying(list);
+      h.core.getFreshStreamUrl.mockImplementationOnce(async () => { throw Object.assign(new Error("cooldown"), { code: "challenge_cooldown" }); });
+      h.state().next();
+      await flush();
+      expect(h.els.every((e) => e.paused)).toBe(true);
+      expect(el.src).toBe("");
+      const calls = h.core.getFreshStreamUrl.mock.calls.length;
+      const plays = el.calls.play;
+      vi.advanceTimersByTime(200_000); // past where track 1 would have ended
+      await flush();
+      expect(h.state()).toMatchObject({ index: 1, status: "paused", wantsPlay: false });
+      expect(h.core.getFreshStreamUrl.mock.calls.length).toBe(calls);
+      expect(el.calls.play).toBe(plays);
+    });
+
+    it("removeAt during the window that leaves the failed track last doesn't wrap with repeat off", async () => {
+      const list = tracks(3);
+      const el = await h.startPlaying(list);
+      h.core.failing.add(list[1].id);
+      h.state().next();
+      await flush(); // B fails; skip pending
+      h.state().removeAt(2); // [A, B]: B is now last
+      vi.advanceTimersByTime(800);
+      await flush();
+      expect(h.state()).toMatchObject({ index: 1, status: "paused", wantsPlay: false });
+      expect(el.src).toBe("");
+    });
+
+    it("clearQueue during the window does no extra fetch", async () => {
+      const list = tracks(3);
+      h.core.failing.add(list[0].id);
+      h.state().cycleRepeat(); // repeat-all, so only the one-track rule can stop it
+      h.state().playTracks(list);
+      await flush();
+      h.state().clearQueue(); // [A], the failed track
+      vi.advanceTimersByTime(800);
+      await flush();
+      expect(h.core.getFreshStreamUrl).toHaveBeenCalledTimes(1);
+      expect(h.state()).toMatchObject({ index: 0, wantsPlay: false });
+    });
+
     it("a Bandcamp cooldown stops instead of skipping through the queue", async () => {
       const list = tracks(3);
       h.core.getFreshStreamUrl.mockImplementationOnce(async () => { throw Object.assign(new Error("cooldown"), { code: "challenge_cooldown" }); });
