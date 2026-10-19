@@ -39,15 +39,22 @@ export async function saveTextFile(defaultName: string, text: string, filter: { 
   return true;
 }
 
-/** Copy a user-picked image into the app's backgrounds folder; returns the stored file name. */
+/**
+ * Copy a user-picked image into the app's backgrounds folder; returns the stored file name.
+ * The dialog adds the picked file to the fs scope. The capability scopes mkdir, copy-file and
+ * read-file to `$APPDATA/backgrounds`: the only part of $APPDATA the webview reaches statically.
+ */
 export async function pickBackgroundImage(): Promise<string | null> {
   if (!isTauri) return null;
   const { open } = await import("@tauri-apps/plugin-dialog");
+  const path = await open({ multiple: false, directory: false, filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }] });
+  return path ? storeBackgroundImage(String(path)) : null;
+}
+
+/** Copy an image the fs scope allows (a dialog pick) into the backgrounds folder. */
+export async function storeBackgroundImage(src: string): Promise<string> {
   const fs = await import("@tauri-apps/plugin-fs");
   const { BaseDirectory } = await import("@tauri-apps/api/path");
-  const path = await open({ multiple: false, directory: false, filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }] });
-  if (!path) return null;
-  const src = String(path);
   const name = `${Date.now()}-${src.split("/").pop()?.replace(/[^A-Za-z0-9._-]/g, "_") ?? "background"}`;
   await fs.mkdir("backgrounds", { baseDir: BaseDirectory.AppData, recursive: true });
   await fs.copyFile(src, `backgrounds/${name}`, { toPathBaseDir: BaseDirectory.AppData });

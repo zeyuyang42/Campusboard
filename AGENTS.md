@@ -53,7 +53,7 @@ src-tauri/
   src/mini.rs              creates/toggles the `mini` window (Window > Mini Player, dock button command)
   src/tray.rs              optional menu-bar icon (Settings, off by default); `set_menu_bar` from web/src/lib/menuBar.ts; items reuse menu.rs ids
   migrations/*.sql         schema; every statement is IF NOT EXISTS so an old library.db can be adopted
-  capabilities/default.json  URL scope for http (bandcamp.com, bcbits.com, custom-domain paths; LAN denied), fs scope ($APPDATA), window permissions, app commands
+  capabilities/default.json  URL scope for http (bandcamp.com, bcbits.com, custom-domain paths; LAN denied), fs per command (mkdir/copy-file/read-file in $APPDATA/backgrounds only; no static scope otherwise), window permissions, app commands
   capabilities/mini.json   the mini window: events, drag, hide, set-always-on-top, set-size, and the read-only notification:allow-is-permission-granted (see Facts)
   tauri.conf.json          window (Overlay title bar), CSP, bundle targets, min macOS 13.3
 ```
@@ -267,8 +267,7 @@ src-tauri/
   playlist entries, plays, mutes and dismissals as `import_pending` rows
   (0007) that the job runner resolves after every item; `imported_playlists`
   makes re-imports idempotent. Saving goes through the dialog plugin, which adds
-  exactly the chosen file to the fs scope at runtime, so the capability file
-  stays $APPDATA-only. Every URL from a file goes through `normalizeBandcampUrl`
+  exactly the chosen file to the fs scope at runtime (see the fs scope fact). Every URL from a file goes through `normalizeBandcampUrl`
   before it is queued or stored; Purchased/Wishlist `fetch_url`s must be on
   bandcamp.com and name the same release path. Backups `VACUUM INTO` a fresh
   `backup-<ms>.tmp.db` in $APPDATA; the Rust `backup_library` command
@@ -276,6 +275,22 @@ src-tauri/
   and the live database by (device, inode) after canonicalizing, and copies
   through a temp file + rename. Stale snapshots are swept at startup. A backup
   contains the identity cookie; the export never does.
+- The webview's fs scope (#78, verified 2026-10-20 in the muted selftest
+  `fsScope`): no `fs:default` and no `fs:scope-*` set, both of which reach all of
+  $APPDATA (default: every read command; scope-appdata-recursive: every command,
+  so writes, removes and renames of `library.db`). The capability grants
+  `fs:deny-default` plus the commands the web code calls; only `mkdir`
+  (`$APPDATA/backgrounds`), `copy-file` and `read-file` (`$APPDATA/backgrounds/*`)
+  carry a static scope, for theme background images. Everything else is reached
+  through the runtime scope (`app.fs_scope()`, shared by every fs command):
+  files the open/save dialogs add (theme and library import/export) and the
+  `<db stem>-offline/` folder lib.rs adds at startup, which follows the live
+  database for release, dev and `BCP_DB_PATH` runs. Backup snapshots need no fs
+  scope: the SQL plugin writes them (`VACUUM INTO`) and Rust removes them. The
+  plugin checks the symlink-resolved path, and a `..` component is refused before
+  that (`cannot traverse directory`). The selftest stands in for the dialogs with
+  the debug-only `selftest_file` command (a `selftest-*` file in the temp folder
+  added to the scope, and its cleanup). The mini window has no fs permission.
 - Bandcamp Radio (#44, verified 2026-10-19 with curl; fixtures `radio.html`,
   `radio-show.html`): `https://bandcamp.com/radio` embeds `data-blob` with
   `appData.shows` (20 latest episodes, newest first: `itemId`, `title`,

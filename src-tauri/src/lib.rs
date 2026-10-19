@@ -206,6 +206,42 @@ fn selftest_take_backup(path: String) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&bytes[..bytes.len().min(15)]).into_owned())
 }
 
+/// Selftest helper (debug builds only) standing in for the native file dialogs, which add
+/// the picked file to the fs scope and nothing else:
+/// - `allow` adds `<temp>/<name>` (a `selftest-*.json` or `selftest-*.png` name) to the fs
+///   scope, as picking it in a save or open dialog would, and returns its real path.
+/// - `drop` deletes that temp file and any `<digits>-<name>` copy in `$APPDATA/backgrounds`
+///   (what storing it as a theme background makes), which the webview cannot remove.
+#[tauri::command]
+fn selftest_file(app: tauri::AppHandle, action: String, name: String) -> Result<String, String> {
+    use tauri_plugin_fs::FsExt;
+    let named = name.starts_with("selftest-")
+        && (name.ends_with(".json") || name.ends_with(".png"))
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
+    if !cfg!(debug_assertions) || !named {
+        return Err("only selftest files in dev builds".into());
+    }
+    let path = std::fs::canonicalize(std::env::temp_dir()).map_err(|e| e.to_string())?.join(&name);
+    match action.as_str() {
+        "allow" => {
+            app.fs_scope().allow_file(&path).map_err(|e| e.to_string())?;
+            Ok(path.to_string_lossy().into_owned())
+        }
+        "drop" => {
+            let _ = std::fs::remove_file(&path);
+            let bg = app.path().app_data_dir().map_err(|e| e.to_string())?.join("backgrounds");
+            for entry in std::fs::read_dir(&bg).into_iter().flatten().flatten() {
+                let f = entry.file_name().to_string_lossy().into_owned();
+                if f.split_once('-').is_some_and(|(ms, rest)| !ms.is_empty() && ms.bytes().all(|b| b.is_ascii_digit()) && rest == name) {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+            Ok(String::new())
+        }
+        _ => Err(format!("unknown action {action}")),
+    }
+}
+
 /// Bumped by every `selftest_window` call, so only the latest armed guard can act.
 static GUARD_GEN: AtomicU64 = AtomicU64::new(0);
 /// How many times a guard had to show the main window again.
@@ -445,7 +481,7 @@ pub fn run() {
             app.manage(OfflineDir(offline));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![library_db_url, offline_dir, backup_library, selftest_take_backup, selftest_window, selftest_sleep, mini::toggle_mini_player, menu::selftest_menu, tray::set_menu_bar])
+        .invoke_handler(tauri::generate_handler![library_db_url, offline_dir, backup_library, selftest_take_backup, selftest_file, selftest_window, selftest_sleep, mini::toggle_mini_player, menu::selftest_menu, tray::set_menu_bar])
         .build(context)
         .unwrap_or_else(|e| startup_failed(&e));
 

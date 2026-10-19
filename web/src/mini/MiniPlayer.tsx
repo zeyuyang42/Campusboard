@@ -197,6 +197,9 @@ function useSelftestHook(s: MiniState | null) {
             .then(() => false, (e) => String(e).includes("not allowed"));
           report.commandDenied = await import("@tauri-apps/api/core").then(({ invoke }) => invoke("library_db_url"))
             .then(() => false, (e) => String(e).includes("not allowed"));
+          // No fs either: not even the offline folder the main window's runtime scope allows.
+          report.fsDenied = await import("@tauri-apps/api/core").then(({ invoke }) => invoke("plugin:fs|exists", { path: "/" }))
+            .then(() => false, (e) => String(e).includes("not allowed"));
         }
         await b.send("mini:selftest-result", report);
       });

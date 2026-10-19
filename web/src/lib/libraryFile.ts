@@ -1,12 +1,15 @@
 // Library export file and database backup. In the app the user picks the destination in a
 // native save dialog. For the export, the dialog plugin adds exactly that file to the fs
-// scope, so the capability file keeps its $APPDATA-only scope. The backup's destination is
-// chosen, checked and written in Rust (src-tauri/src/backup.rs), never from a path the
-// webview supplies. Browser mode (no fs) downloads the export and reads imports from a file
-// input; backups need the app.
+// scope; the capability gives write-text-file no static scope. The backup's snapshot is
+// written by the SQL plugin (VACUUM INTO) and removed in Rust, so it needs no fs scope either;
+// its destination is chosen, checked and written in Rust (src-tauri/src/backup.rs), never
+// from a path the webview supplies. Browser mode (no fs) downloads the export and reads
+// imports from a file input; backups need the app.
 //
 // The `debug*` arguments (dev builds only) skip the dialogs so the selftest can run the same
-// code without putting a window on screen. They take `selftest-*` file names only.
+// code without putting a window on screen. They take `selftest-*` file names only, in the temp
+// folder. For the export, the debug-only `selftest_file` command adds that one file to the fs
+// scope, as the save dialog would.
 import { getCore } from "../api/core";
 import { isTauri } from "./env";
 import { saveTextFile } from "./files";
@@ -25,15 +28,15 @@ function debugOnly(name: string | undefined, ext: "json" | "db"): string | undef
 }
 
 /** Export the library to a JSON file. Returns false if the save dialog was cancelled. */
-export async function exportLibraryFile(opts: { history: boolean }, debugAppDataPath?: string): Promise<boolean> {
-  const debug = debugOnly(debugAppDataPath, "json");
+export async function exportLibraryFile(opts: { history: boolean }, debugTempName?: string): Promise<boolean> {
+  const debug = debugOnly(debugTempName, "json");
   const core = await getCore();
   const appVersion = isTauri ? await import("@tauri-apps/api/app").then((m) => m.getVersion()).catch(() => undefined) : undefined;
   const text = JSON.stringify(await core.exportLibrary({ history: opts.history, appVersion }), null, 1);
   if (debug) {
     const fs = await import("@tauri-apps/plugin-fs");
-    const { BaseDirectory } = await import("@tauri-apps/api/path");
-    await fs.writeTextFile(debug, text, { baseDir: BaseDirectory.AppData });
+    const { invoke } = await import("@tauri-apps/api/core");
+    await fs.writeTextFile(await invoke<string>("selftest_file", { action: "allow", name: debug }), text);
     return true;
   }
   return saveTextFile(`Bandcamp library ${today()}.json`, text, { name: "Library export", extensions: ["json"] });
