@@ -2,9 +2,17 @@ import { VOLUME_STEP } from "@bc/core";
 import { usePlayer } from "./store";
 import { useUi } from "../ui/store";
 import { focusFind } from "../lib/navigation";
+import { isTauri } from "../lib/env";
+import { openPalette } from "../ui/palette";
+
+/** ⌘K (Ctrl+K off the Mac), nothing else held. */
+export const isPaletteKey = (e: KeyboardEvent) => (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k";
 
 export function initShortcuts() {
   window.addEventListener("keydown", (e) => {
+    // ⌘K is the native View → Command Palette item in the app (menu.rs). A browser has no
+    // native menu, so it is caught here, unless something focused already handled ⌘K itself.
+    if (isPaletteKey(e) && !isTauri && !e.defaultPrevented) { e.preventDefault(); openPalette(); return; }
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;

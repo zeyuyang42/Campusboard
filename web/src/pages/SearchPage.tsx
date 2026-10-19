@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useImport, useJob, useSearch, useInvalidateLibrary } from "../api/queries";
 import type { SearchResult } from "@bc/core";
 import { JobProgress } from "../components/JobProgress";
@@ -14,7 +14,11 @@ function useDebounced<T>(v: T, ms: number): T {
 }
 
 export function SearchPage() {
-  const [q, setQ] = useState("");
+  // ?q= (Search Bandcamp… in the command palette) starts the search with that text.
+  const [params] = useSearchParams();
+  const initial = params.get("q") ?? "";
+  const [q, setQ] = useState(initial);
+  useEffect(() => { if (initial) setQ(initial); }, [initial]);
   const dq = useDebounced(q, 350);
   const { data, isFetching, error } = useSearch(dq);
   const groups: { title: string; type: SearchResult["type"] }[] = [

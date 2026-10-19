@@ -63,6 +63,10 @@ Requires macOS 13.3 or later. Your library lives in
 - **Filtered library**: when the filter field, a tag or the **Show** menu narrows the
   Library, a bar above the grid plays, shuffles, queues or adds to a playlist
   every matching album in the current sort order (it asks first above 500 tracks).
+- **Command palette**: `⌘K` (View → Command Palette) jumps to an album, artist
+  or playlist in your library, or runs an action: play/pause, next, import,
+  Search Bandcamp, a Settings section, the mini player, light or dark, the sleep
+  timer. ↑/↓ and Enter choose, Esc closes.
 - **Now playing**: press `N` or click the artwork in the dock for a full view
   with queue and lyrics.
 - **Mini player**: Window → Mini Player (`⌘⇧M`) or the mini player button in

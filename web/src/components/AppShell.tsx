@@ -5,6 +5,7 @@ import { PlayerBar } from "./PlayerBar";
 import { QueueDrawer } from "./QueueDrawer";
 import { Ambient } from "./Ambient";
 import { MenuHost } from "./MenuHost";
+import { CommandPalette } from "./CommandPalette";
 import { NowPlaying } from "./NowPlaying";
 import { usePlayer } from "../player/store";
 import { useUi } from "../ui/store";
@@ -55,6 +56,7 @@ export function AppShell() {
         {queueOpen && !nowPlayingOpen && <QueueDrawer />}
       </div>
       <MenuHost />
+      <CommandPalette />
     </>
   );
 }
