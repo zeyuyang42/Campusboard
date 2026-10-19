@@ -16,7 +16,7 @@ export function ConfirmButton({ label, confirmLabel, question, onConfirm, classN
   return (
     <span className="confirm" ref={ref} role="group" aria-label={question}>
       <span className="muted">{question}</span>
-      <button className={confirmClassName} autoFocus onClick={() => { setArming(false); void onConfirm(); }}>{confirmLabel}</button>
+      <button className={confirmClassName} autoFocus disabled={disabled} onClick={() => { setArming(false); void onConfirm(); }}>{confirmLabel}</button>
       <button className="btn" onClick={() => setArming(false)}>Cancel</button>
     </span>
   );

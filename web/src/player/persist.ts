@@ -1,4 +1,4 @@
-import { loadPlayState, savePlayState } from "../api/queries";
+import { loadPlayState, savePlayPosition, savePlayState } from "../api/queries";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { playbackPosition, usePlayer } from "./store";
 import { gainToPosition, positionToGain, type PlayState } from "@bc/core";
@@ -30,7 +30,7 @@ export async function initPersistence() {
   let timer: number | null = null;
   const save = () => {
     if (timer) window.clearTimeout(timer);
-    timer = window.setTimeout(() => void savePlayState(snapshot()).catch(() => undefined), 400);
+    timer = window.setTimeout(() => { timer = null; void savePlayState(snapshot()).catch(() => undefined); }, 400);
   };
 
   let prev = usePlayer.getState();
@@ -41,7 +41,13 @@ export async function initPersistence() {
     prev = s;
     if (trackChanged || structural || paused) save();
   });
-  window.setInterval(() => { if (usePlayer.getState().status === "playing") save(); }, 5000);
+  // While playing only the position moves: save just that, not the whole queue (up to
+  // MAX_QUEUE entries) every 5 s. Queue changes go through save() above.
+  window.setInterval(() => {
+    const s = usePlayer.getState();
+    if (s.status !== "playing" || timer !== null) return;
+    void savePlayPosition(s.queue[s.index]?.id ?? null, playbackPosition() || s.position || 0, s.index).catch(() => undefined);
+  }, 5000);
   // Closing the window hides it and playback continues (Cmd+Q quits, as in
   // Music.app). Flush first so the position survives either way.
   try {

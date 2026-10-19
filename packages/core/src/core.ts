@@ -153,6 +153,8 @@ export function createCore(deps: CoreDeps) {
     /** Forget all plays, and plays an imported library still has waiting (so they don't come back). */
     clearHistory: async () => { await importPending.clearPendingPlays(db); return plays.clearPlays(db); },
     savePlayState: (s: PlayState) => playState.setPlayState(db, s),
+    /** Save just the position (the queue as last saved stays). */
+    savePlayPosition: (currentTrackId: number | null, positionSec: number, queueIndex: number) => playState.setPlayPosition(db, currentTrackId, positionSec, queueIndex),
     // Bandcamp account (the identity cookie is write-only from the UI's side)
     account: () => getAccount(db),
     setAccountUsername: (username: string) => setUsername(db, username),

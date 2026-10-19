@@ -16,3 +16,11 @@ export async function setPlayState(db: Db, s: PlayState): Promise<void> {
     [s.current_track_id, s.position_sec, JSON.stringify(s.queue), s.queue_index, s.shuffle ? 1 : 0, s.repeat, s.volume, now()],
   );
 }
+
+/** Only the playing track, its position and index: the periodic save while the queue itself hasn't changed. */
+export async function setPlayPosition(db: Db, currentTrackId: number | null, positionSec: number, queueIndex: number): Promise<void> {
+  await db.run(
+    "UPDATE play_state SET current_track_id = ?, position_sec = ?, queue_index = ?, updated_at = ? WHERE id = 1",
+    [currentTrackId, positionSec, queueIndex, now()],
+  );
+}

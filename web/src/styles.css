@@ -148,11 +148,12 @@ h2 { font-family: var(--font-display); font-size: 18px; font-weight: 600; letter
 .card:hover .play, .card:focus-within .play { opacity: 1; }
 .card .title { margin-top: 9px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card .sub { color: var(--text-muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Recently played: one row of the same grid, cut to the columns that fit (LibraryPage). */
+/* Bulk actions on a filtered Library (BulkBar). */
 .bulk-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: -6px 0 18px; }
 .bulk-bar .bulk-count { color: var(--text-muted); margin-right: 4px; font-variant-numeric: tabular-nums; }
 .bulk-bar .btn svg { flex: none; }
 .bulk-bar .confirm .btn { padding: 4px 9px; font-size: 13px; }
+/* Recently played: one row of the same grid, cut to the columns that fit (LibraryPage). */
 .shelf { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--line); }
 .shelf-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
 .shelf-head h2 { margin: 0; }

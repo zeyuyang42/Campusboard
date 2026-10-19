@@ -104,29 +104,32 @@ export async function getPlaylist(db: Db, id: number): Promise<PlaylistWithTrack
   return { ...rowToPlaylist(p), track_count: tracks.length, tracks };
 }
 
-/** Append tracks; positions are computed inside the single INSERT so no transaction is needed. */
+/**
+ * Append tracks; positions are computed inside the single INSERT so no transaction is needed.
+ * The ids travel as one JSON parameter: no bind-variable or compound-SELECT limit, whatever
+ * the count (bulk actions add tens of thousands).
+ */
 export async function addTracks(db: Db, playlistId: number, trackIds: number[]): Promise<void> {
   if (!trackIds.length) return;
-  // SQLite has no `VALUES ... AS v(cols)`, so build the row set with UNION ALL.
-  const rows = trackIds.map((_, i) => (i === 0 ? "SELECT ? AS tid, 0 AS off" : `SELECT ?, ${i}`)).join(" UNION ALL ");
   await db.run(
     `INSERT INTO playlist_tracks (playlist_id, track_id, position)
-     SELECT ?, v.tid, (SELECT COALESCE(MAX(position), -1) FROM playlist_tracks WHERE playlist_id = ?) + 1 + v.off
-     FROM (${rows}) AS v`,
-    [playlistId, playlistId, ...trackIds],
+     SELECT ?, j.value, (SELECT COALESCE(MAX(position), -1) FROM playlist_tracks WHERE playlist_id = ?) + 1 + j.key
+     FROM json_each(?) AS j ORDER BY j.key`,
+    [playlistId, playlistId, JSON.stringify(trackIds)],
   );
   await db.run("UPDATE playlists SET updated_at = ? WHERE id = ?", [now(), playlistId]);
 }
 
-/** Rewrite positions in one statement from the given order of playlist_track ids. */
+/** Rewrite positions in one statement from the given order of playlist_track ids (one JSON parameter, any length). */
 export async function reorder(db: Db, playlistId: number, playlistTrackIds: number[]): Promise<void> {
   if (!playlistTrackIds.length) return;
-  const cases = playlistTrackIds.map(() => "WHEN ? THEN ?").join(" ");
-  const params: unknown[] = [];
-  playlistTrackIds.forEach((ptid, i) => params.push(ptid, i));
   await db.run(
-    `UPDATE playlist_tracks SET position = CASE id ${cases} ELSE position END WHERE playlist_id = ? AND id IN (${playlistTrackIds.map(() => "?").join(",")})`,
-    [...params, playlistId, ...playlistTrackIds],
+    // MATERIALIZED makes the ids the outer loop, each probing playlist_tracks by primary key.
+    // As a plain subquery SQLite scans the JSON once per playlist row (minutes at 40k).
+    `WITH o AS MATERIALIZED (SELECT j.value AS id, j.key AS pos FROM json_each(?) AS j)
+     UPDATE playlist_tracks SET position = o.pos FROM o
+     WHERE playlist_tracks.id = o.id AND playlist_tracks.playlist_id = ?`,
+    [JSON.stringify(playlistTrackIds), playlistId],
   );
   await db.run("UPDATE playlists SET updated_at = ? WHERE id = ?", [now(), playlistId]);
 }
@@ -137,13 +140,16 @@ export async function removeTrack(db: Db, playlistId: number, playlistTrackId: n
   return r.changes > 0;
 }
 
-/** Which of the given playlists already contain ALL of the given tracks (for check marks). */
+/** Which of the given playlists already contain ALL of the given tracks (for check marks). Any number of ids. */
 export async function playlistsContaining(db: Db, trackIds: number[]): Promise<Set<number>> {
   if (!trackIds.length) return new Set();
+  const ids = JSON.stringify(trackIds);
   const rows = await db.select<{ playlist_id: number }>(
-    `SELECT playlist_id FROM playlist_tracks WHERE track_id IN (${trackIds.map(() => "?").join(",")})
-     GROUP BY playlist_id HAVING COUNT(DISTINCT track_id) = ?`,
-    [...trackIds, trackIds.length],
+    // IN (subquery) makes SQLite build a temporary index over the ids; playlist_tracks has no
+    // index on track_id, so a join driven from the ids would scan it once per id.
+    `SELECT playlist_id FROM playlist_tracks WHERE track_id IN (SELECT j.value FROM json_each(?) AS j)
+     GROUP BY playlist_id HAVING COUNT(DISTINCT track_id) = (SELECT COUNT(DISTINCT j.value) FROM json_each(?) AS j)`,
+    [ids, ids],
   );
   return new Set(rows.map((r) => r.playlist_id));
 }
