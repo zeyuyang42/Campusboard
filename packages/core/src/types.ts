@@ -83,7 +83,8 @@ export interface PlaylistWithTracks extends Playlist {
 }
 
 export type JobKind = "album" | "track" | "discography" | "selection" | "collection" | "library";
-export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
+/** "pending": created, items not yet inserted; the runner and the job list ignore it. */
+export type JobStatus = "pending" | "queued" | "running" | "done" | "failed" | "cancelled";
 
 export interface JobItem {
   id: number;

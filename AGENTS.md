@@ -111,7 +111,9 @@ src-tauri/
 - The Tauri SQL plugin pools connections and has no transaction API. Writes are
   single statements or ordered so any interruption leaves a readable library
   (parents first, deletes last, every step idempotent). Multi-row inserts use
-  `valuesList()`; playlist append computes positions inside one INSERT.
+  `valuesList()`; playlist append computes positions inside one INSERT. A job is
+  inserted as `pending` (ignored by the runner and the job list) and flipped to
+  `queued` once its items exist; `resetStaleJobs` settles any left pending by a crash.
 - WKWebView supports `@property`, `color-mix`, `oklch`, `OffscreenCanvas` from
   macOS 13.3, hence the minimum version.
 - `core:window:default` does not include `allow-start-dragging`, so the
