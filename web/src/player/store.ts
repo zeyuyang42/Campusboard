@@ -106,6 +106,15 @@ let loading = false;
  * own, not the listener's or the system's. Cleared by that pause or once the new track plays.
  */
 let swapping = false;
+/** Tracks that failed in a row since something last played; a queue that all fails stops. */
+let failStreak = 0;
+/** The load() in progress was started by skipAfterError, so it continues the failure streak. */
+let skippingError = false;
+/** The visible-window skip waiting to run; anything the listener does first cancels it. */
+let skipTimer: ReturnType<typeof setTimeout> | null = null;
+function cancelPendingSkip() {
+  if (skipTimer) { clearTimeout(skipTimer); skipTimer = null; }
+}
 
 // Listening history: one PlayCounter follows the current playback (rule in core's playRule.ts).
 const plays = new PlayCounter();
@@ -132,6 +141,8 @@ function load(track: QueueTrack, force = false) {
   const seq = ++loadSeq;
   loading = true;
   retriedFor = force ? track.id : null;
+  // A load the listener asked for starts counting failures afresh and wins over a pending skip.
+  if (!force && !skippingError) { failStreak = 0; cancelPendingSkip(); }
   void (async () => {
     try {
       const core = await getCore();
@@ -157,11 +168,15 @@ function load(track: QueueTrack, force = false) {
       loading = false;
       const wanted = usePlayer.getState().wantsPlay;
       usePlayer.setState({ error: `Couldn't play "${track.title}". ${friendlyError(e)}`, status: "paused", wantsPlay: false });
+      // The element still holds the previous track: silence it and drop that source, so it
+      // can't play on (or end and advance) under this track's name. Play then reloads this one.
+      const el = active();
+      el.pause();
+      if (el.hasAttribute("src")) { el.removeAttribute("src"); el.load(); }
       // During a Bandcamp cooldown every stale track would fail the same way: stop here
       // with the "try again after" message instead of skipping through the whole queue.
       if ((e as { code?: unknown } | null)?.code === "challenge_cooldown") return;
-      const { queue, index } = usePlayer.getState();
-      if (wanted && index < queue.length - 1) skipAfterError();
+      if (wanted) skipAfterError(true);
     }
   })();
 }
@@ -170,11 +185,41 @@ function load(track: QueueTrack, force = false) {
  * After a track fails, move on to the next one. With the window visible the error shows for a
  * moment first. With it hidden (closed) nothing is audible after the failure, and WebKit may
  * then hold a hidden page's timers indefinitely (#67), so it moves on right away.
+ * `play` is false for a track that failed while paused: the next one is loaded but not started.
+ * A load, Play or Pause from the listener in the meantime cancels the skip.
  */
-function skipAfterError() {
-  const next = () => usePlayer.getState().next(true);
-  if (typeof document !== "undefined" && document.visibilityState === "hidden") next();
-  else setTimeout(next, 800);
+function skipAfterError(play: boolean) {
+  failStreak++;
+  if (shouldStopAfterError()) return;
+  const seq = loadSeq;
+  const advance = () => {
+    skipTimer = null;
+    if (seq !== loadSeq) return; // something else was loaded since
+    if (shouldStopAfterError()) return; // the queue may have been edited in the meantime
+    skippingError = true;
+    try {
+      // A plain Next, not the end-of-track one: repeat-one would replay the failed track (#69).
+      if (play) usePlayer.getState().next();
+      else {
+        const s = usePlayer.getState();
+        const ni = (s.index + 1) % s.queue.length;
+        usePlayer.setState({ index: ni, status: "paused", wantsPlay: false, position: 0, duration: 0 });
+        load(s.queue[ni]);
+      }
+    } finally { skippingError = false; }
+  };
+  cancelPendingSkip();
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") advance();
+  else skipTimer = setTimeout(advance, 800);
+}
+
+/**
+ * Stop rather than skip: at the end of the queue unless repeating all, once every track has
+ * failed in a row, or when the failed track is the only one left.
+ */
+function shouldStopAfterError() {
+  const { queue, index, repeat } = usePlayer.getState();
+  return queue.length <= 1 || failStreak >= queue.length || (index >= queue.length - 1 && repeat !== "all");
 }
 
 // ---- gapless and crossfade (#35; the rules are in core's transition.ts) ----
@@ -453,6 +498,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   play: () => {
     const cur = get().current();
     if (!cur) return;
+    cancelPendingSkip(); // Play after an error retries this track instead
     set({ wantsPlay: true });
     const el = active();
     // The track's URL is still resolving: load() starts it when it arrives.
@@ -473,6 +519,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // While a track starts there may be no "pause" event to report it (the element can
     // already be paused), so the status follows the intent here.
     set(get().status === "loading" ? { wantsPlay: false, status: "paused" } : { wantsPlay: false });
+    cancelPendingSkip();
     if (armTimer) { clearTimeout(armTimer); armTimer = null; }
     active().pause();
     if (tx.phase === "fading") {
@@ -552,6 +599,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   },
 
   enqueueNext: (tracks) => {
+    failStreak = 0; // the queue changed: count failures in it afresh
     const { queue, index } = get();
     if (!queue.length) return get().playTracks(tracks);
     tracks = tracks.filter((t) => t.streamable).slice(0, Math.max(0, MAX_QUEUE - queue.length));
@@ -561,6 +609,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     return add.length;
   },
   enqueueLast: (tracks) => {
+    failStreak = 0; // the queue changed: count failures in it afresh
     const { queue } = get();
     if (!queue.length) return get().playTracks(tracks);
     tracks = tracks.filter((t) => t.streamable).slice(0, Math.max(0, MAX_QUEUE - queue.length));
@@ -569,12 +618,14 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     return tracks.length;
   },
   removeAt: (i) => {
+    failStreak = 0; // the queue changed: count failures in it afresh
     const { queue, index } = get();
     if (i === index) return; // keep it simple: can't remove the playing track
     const q = queue.filter((_, k) => k !== i);
     set({ queue: q, index: i < index ? index - 1 : index });
   },
   move: (from, to) => {
+    failStreak = 0; // the queue changed: count failures in it afresh
     const { queue, index } = get();
     if (from === to || from < 0 || to < 0 || from >= queue.length || to >= queue.length) return;
     const q = queue.slice();
@@ -587,10 +638,12 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     set({ queue: q, index: ni });
   },
   clearQueue: () => {
+    failStreak = 0; // the queue changed: count failures in it afresh
     const cur = get().current();
     set({ queue: cur ? [cur] : [], index: 0, originalOrder: null });
   },
   toggleShuffle: () => {
+    failStreak = 0; // the queue changed: count failures in it afresh
     const { shuffle, queue, index, originalOrder } = get();
     const cur = queue[index];
     if (!shuffle) {
@@ -645,6 +698,7 @@ const onAudioEvent = (type: AudioEventType) => {
   const patch = audioEventPatch(type, { paused: el.paused, ended: el.ended, internal: loading || swapping });
   if (type === "pause") swapping = swappingAfter(swapping, { type: "pause" });
   if (type === "playing") swapping = swappingAfter(swapping, { type: "playing", paused: el.paused });
+  if (type === "playing") failStreak = 0;
   // A pause from outside (the system) mid-crossfade stops the fading track too.
   if (type === "pause" && el.paused && tx.phase === "fading") {
     other().pause();
@@ -700,9 +754,11 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
       load(cur, true);
       return;
     }
+    // Paused (the retry kept it so): move on to the next track but leave it paused. Staying
+    // would leave Play on a track that has already failed its retry.
+    const wanted = usePlayer.getState().wantsPlay;
     usePlayer.setState({ error: `Couldn't play "${cur.title}"`, status: "paused", wantsPlay: false });
-    const { queue, index } = usePlayer.getState();
-    if (index < queue.length - 1) skipAfterError();
+    skipAfterError(wanted);
   },
 };
 
