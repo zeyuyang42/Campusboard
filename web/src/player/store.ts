@@ -133,10 +133,13 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   current: () => get().queue[get().index] ?? null,
 
   playTracks: (tracks, start = 0) => {
-    const playable = tracks.map(toQueueTrack);
-    if (!playable.length) return;
+    // Tracks that can't be streamed (a pre-order's unreleased ones) never enter the queue;
+    // playback starts at the first streamable track from `start` on.
+    const from = tracks.slice(start).find((t) => t.streamable) ?? tracks.find((t) => t.streamable);
+    const playable = tracks.filter((t) => t.streamable).map(toQueueTrack);
+    if (!playable.length || !from) return;
     let queue = playable;
-    let index = Math.min(start, playable.length - 1);
+    let index = Math.max(0, playable.findIndex((t) => t.id === from.id));
     if (get().shuffle) {
       const first = playable[index];
       queue = [first, ...shuffled(playable.filter((_, i) => i !== index))];
@@ -222,6 +225,8 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   },
 
   enqueueNext: (tracks) => {
+    tracks = tracks.filter((t) => t.streamable);
+    if (!tracks.length) return;
     const { queue, index } = get();
     const add = tracks.map(toQueueTrack);
     const q = queue.length ? [...queue.slice(0, index + 1), ...add, ...queue.slice(index + 1)] : add;
@@ -229,6 +234,8 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     if (!queue.length) get().playTracks(tracks);
   },
   enqueueLast: (tracks) => {
+    tracks = tracks.filter((t) => t.streamable);
+    if (!tracks.length) return;
     const { queue } = get();
     if (!queue.length) return get().playTracks(tracks);
     set({ queue: [...queue, ...tracks.map(toQueueTrack)] });

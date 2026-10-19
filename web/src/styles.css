@@ -391,5 +391,7 @@ details.about-wrap summary { cursor: pointer; color: var(--text-muted); margin-t
 .browse-card .badge.right { left: auto; right: 8px; }
 .job .status.paused { color: var(--text-muted); }
 .challenge-paused.inline { font-size: 12px; margin-top: 6px; }
+.album-head .preorder-note { font-size: 13px; color: var(--text); margin: -6px 0 12px; }
+.card .sub .preorder { color: var(--text); }
 .album-head .owned-note { font-size: 13px; color: var(--accent); margin: -6px 0 12px; }
 .library-filter { width: 280px; max-width: 100%; }

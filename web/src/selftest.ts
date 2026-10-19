@@ -150,6 +150,32 @@ async function historyCheck(core: Awaited<ReturnType<typeof getCore>>, album: Aw
  * nothing new. If the real library already watches the artist, its watch row is set aside
  * for the check and put back afterwards; the release rows the check inserted are deleted by id.
  */
+/**
+ * Pre-orders (#37) through the real SQL and http plugins: the imported album is dressed up
+ * as a pre-order released long ago and fetched before that, so nextDuePreorder must pick it;
+ * the refresh the checker would make (one request) must then clear the flag from the live
+ * page and settle it. The album's real values come back with that refresh; if it fails they
+ * are put back by hand.
+ */
+async function preorderCheck(core: Awaited<ReturnType<typeof getCore>>, album: Awaited<ReturnType<Awaited<ReturnType<typeof getCore>>["album"]>>) {
+  if (!album) return { ok: false, error: "no album" };
+  const db = core.db;
+  const orig = await db.get<{ is_preorder: number; release_date: string | null; fetched_at: string }>("SELECT is_preorder, release_date, fetched_at FROM albums WHERE id = ?", [album.id]);
+  if (!orig || orig.is_preorder) return { ok: true, status: "skipped (album is a real pre-order)" };
+  try {
+    await db.run("UPDATE albums SET is_preorder = 1, release_date = '01 Jan 2020 00:00:00 GMT', fetched_at = '2019-12-31 00:00:00' WHERE id = ?", [album.id]);
+    const due = await repos.nextDuePreorder(db, Date.now());
+    const notYet = await repos.nextDuePreorder(db, Date.UTC(2020, 0, 1, 6));
+    const refreshed = await core.refreshAlbum(album.id);
+    const after = await repos.nextDuePreorder(db, Date.now());
+    const ok = due?.id === album.id && notYet === null && refreshed?.is_preorder === false && refreshed.release_date === orig.release_date && after === null;
+    return { ok, picked: due?.id === album.id, waitsForGrace: notYet === null, clearedByRefresh: refreshed?.is_preorder === false, releaseDateRestored: refreshed?.release_date === orig.release_date, settled: after === null };
+  } finally {
+    const now = await db.get<{ is_preorder: number }>("SELECT is_preorder FROM albums WHERE id = ?", [album.id]);
+    if (now?.is_preorder) await db.run("UPDATE albums SET is_preorder = ?, release_date = ?, fetched_at = ? WHERE id = ?", [orig.is_preorder, orig.release_date, orig.fetched_at, album.id]);
+  }
+}
+
 async function newReleasesCheck(core: Awaited<ReturnType<typeof getCore>>, album: Awaited<ReturnType<Awaited<ReturnType<typeof getCore>>["album"]>>) {
   if (!album) return { ok: false, error: "no album" };
   const db = core.db;
@@ -540,6 +566,7 @@ export async function runSelfTest() {
     const browse = await core.browse("https://illuminatihotties.bandcamp.com");
     out.browse = { releases: browse.items.length, band: browse.band?.name, inLibrary: browse.items.filter((i) => i.album_id).length, firstTitle: browse.items[0]?.title };
     out.newReleases = await newReleasesCheck(core, album).catch((e) => ({ ok: false, error: String(e) }));
+    out.preorder = await preorderCheck(core, album).catch((e) => ({ ok: false, error: String(e) }));
     // Custom artist domain: the http scope must allow the custom host (it 303s to name.bandcamp.com),
     // and the library must key the album by the custom-domain URL from data-tralbum.
     // Only albums that are new by id get deleted afterwards, so the real library is left as it was.
@@ -615,7 +642,7 @@ export async function runSelfTest() {
     out.dragPermission = await getCurrentWindow().startDragging().then(() => "ok", (e) => String(e));
     // Overall ok needs every block that reports its own `ok` to pass. The listed blocks must
     // be present as objects: one caught and stored as a string threw.
-    const required = ["libraryFilter", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "syncGuards", "newReleases", "libraryFile", "window"];
+    const required = ["libraryFilter", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "syncGuards", "newReleases", "preorder", "libraryFile", "window"];
     const failed = Object.entries(out)
       .filter(([k, v]) => required.includes(k) || (!!v && typeof v === "object" && "ok" in v))
       .filter(([, v]) => (v as { ok?: unknown } | null)?.ok !== true)

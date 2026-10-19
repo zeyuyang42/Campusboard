@@ -2,6 +2,7 @@ import type { Db } from "../Db.js";
 import { likeContains } from "../Db.js";
 import { dismissAlbum } from "./fanItems.js";
 import type { Album, AlbumWithTracks, Track } from "../../types.js";
+import { preorderRecheckDue, releaseTime } from "../../services/preorder.js";
 
 export interface AlbumRow extends Omit<Album, "tags" | "is_preorder" | "owned" | "wishlisted"> {
   tags_json: string;
@@ -108,4 +109,19 @@ export async function albumUrlsInLibrary(db: Db): Promise<Set<string>> {
 
 export async function artistUrlsInLibrary(db: Db): Promise<Set<string>> {
   return new Set((await db.select<{ url: string }>("SELECT url FROM artists")).map((r) => r.url));
+}
+
+export interface PreorderAlbum { id: number; url: string; title: string; release_date: string | null; fetched_at: string }
+
+/**
+ * The first pre-order album due for its after-release re-fetch (services/preorder.ts), oldest
+ * release first. Pre-orders are few, so the date logic runs here rather than in SQL (release
+ * dates are stored as Bandcamp sends them). `skip` holds ids to pass over (recent failures).
+ */
+export async function nextDuePreorder(db: Db, now: number, skip: ReadonlySet<number> = new Set()): Promise<PreorderAlbum | null> {
+  const rows = await db.select<PreorderAlbum>("SELECT id, url, title, release_date, fetched_at FROM albums WHERE is_preorder = 1");
+  const due = rows
+    .filter((r) => !skip.has(r.id) && preorderRecheckDue({ is_preorder: true, release_date: r.release_date, fetched_at: r.fetched_at }, now))
+    .sort((a, b) => (releaseTime(a.release_date) ?? 0) - (releaseTime(b.release_date) ?? 0) || a.id - b.id);
+  return due[0] ?? null;
 }

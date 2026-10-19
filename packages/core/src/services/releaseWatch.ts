@@ -4,7 +4,8 @@ import { normalizeBandcampUrl } from "../scrape/url.js";
 import { parseMusicPage } from "../scrape/parseMusic.js";
 import { ScrapeError } from "../scrape/errors.js";
 import { cachedFetchText } from "./pageCache.js";
-import { albumUrlsInLibrary } from "../db/repos/albums.js";
+import { albumUrlsInLibrary, getAlbum, nextDuePreorder, type PreorderAlbum } from "../db/repos/albums.js";
+import { refreshAlbum } from "./streamService.js";
 import { getSetting, setSetting } from "../db/repos/settings.js";
 import * as releases from "../db/repos/releases.js";
 import {
@@ -14,9 +15,23 @@ import type { ArtistCheckResult, ReleaseCheckStatus } from "../types.js";
 
 export interface ReleaseCheckerOptions {
   onChange?: () => void;
+  /** A pre-order album was fetched again after its release date (library rows changed). */
+  onAlbumRefreshed?: (albumId: number) => void;
   intervalMs?: number;
   startDelayMs?: number;
   tickMs?: number;
+}
+
+/** One pre-order album fetched again after its release date (services/preorder.ts). */
+export interface PreorderCheckResult {
+  album_id: number;
+  status: "preorder";
+  /** Bandcamp no longer lists it as a pre-order. */
+  released: boolean;
+  /** Streamable tracks before and after. */
+  streamable_before: number;
+  streamable_after: number;
+  error?: string;
 }
 
 /** Why a tick did nothing. */
@@ -44,6 +59,11 @@ function releaseUrl(u: string): string | null {
  *
  * An artist's first successful check is the baseline: everything listed then is stored as
  * seen, so only releases that show up on a later check count as new.
+ *
+ * A tick first looks for a pre-order album whose release date has passed and whose page was
+ * fetched before then (preorderRecheckDue): if there is one, that tick fetches its album page
+ * instead, once, so the released tracks become playable. A failed re-fetch is not retried
+ * for `intervalMs`.
  */
 export class ReleaseChecker {
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -53,6 +73,8 @@ export class ReleaseChecker {
   private readonly intervalMs: number;
   private readonly startDelayMs: number;
   private readonly tickMs: number;
+  /** Pre-order re-fetches that failed, by album id, with when; retried after intervalMs. */
+  private readonly preorderFailed = new Map<number, number>();
 
   constructor(private db: Db, private queue: FetchQueue, private opts: ReleaseCheckerOptions = {}) {
     this.intervalMs = opts.intervalMs ?? RELEASE_CHECK_INTERVAL_MS;
@@ -116,11 +138,14 @@ export class ReleaseChecker {
   }
 
   /** One background step: check the most overdue artist, if any is due and nothing blocks. */
-  async tick(now = Date.now()): Promise<ArtistCheckResult | { skipped: SkipReason }> {
+  async tick(now = Date.now()): Promise<ArtistCheckResult | PreorderCheckResult | { skipped: SkipReason }> {
     if (!this.claim()) return { skipped: "busy" };
     try {
       const why = await this.blocked();
       if (why) return { skipped: why };
+      for (const [id, at] of this.preorderFailed) if (now - at >= this.intervalMs) this.preorderFailed.delete(id);
+      const preorder = await nextDuePreorder(this.db, now, new Set(this.preorderFailed.keys()));
+      if (preorder) return await this.recheckPreorder(preorder, now);
       const artist = await releases.nextDueArtist(this.db, now, this.intervalMs);
       if (!artist) return { skipped: "none_due" };
       return await this.check(artist);
@@ -178,6 +203,24 @@ export class ReleaseChecker {
   async status(): Promise<ReleaseCheckStatus> {
     const s = await releases.watchSummary(this.db);
     return { enabled: await this.enabled(), ...s, running: this.sweeping };
+  }
+
+  /** Fetch a released pre-order's album page once (no retries); the upsert updates its tracks. */
+  private async recheckPreorder(album: PreorderAlbum, now: number): Promise<PreorderCheckResult> {
+    const streamable = async () => (await this.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM tracks WHERE album_id = ? AND streamable = 1", [album.id]))?.n ?? 0;
+    const before = await streamable();
+    try {
+      await refreshAlbum(this.db, this.queue, album.id, album.url, 0);
+      const after = await getAlbum(this.db, album.id);
+      this.opts.onAlbumRefreshed?.(album.id);
+      return { album_id: album.id, status: "preorder", released: !after?.is_preorder, streamable_before: before, streamable_after: await streamable() };
+    } catch (e) {
+      const msg = e instanceof ScrapeError ? `[${e.code}] ${e.message}` : String(e);
+      // A challenge leaves it due (the cooldown keeps ticks quiet until then); anything else
+      // waits a day so a missing page isn't fetched every tick.
+      if (!(e instanceof ScrapeError && (e.code === "client_challenge" || e.code === "challenge_cooldown"))) this.preorderFailed.set(album.id, now);
+      return { album_id: album.id, status: "preorder", released: false, streamable_before: before, streamable_after: before, error: msg };
+    }
   }
 
   /**

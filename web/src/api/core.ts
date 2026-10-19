@@ -47,6 +47,8 @@ export function getCore(): Promise<Core> {
           for (const k of ["playlists", "playlist", "history"]) void qc?.invalidateQueries({ queryKey: [k] });
         },
         onReleasesChange: () => { void qc?.invalidateQueries({ queryKey: ["releases"] }); },
+        // A pre-order that came out: its tracks became playable.
+        onLibraryChange: () => { for (const k of ["albums", "album", "artist", "tracks", "playlist", "history"]) void qc?.invalidateQueries({ queryKey: [k] }); },
       });
       // Background new-release checks: the first one a few minutes after launch. The selftest
       // runs its own single check instead, so its requests stay predictable.
