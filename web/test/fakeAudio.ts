@@ -45,6 +45,16 @@ export class FakeAudio extends EventTarget {
     this.readyState = 0;
   }
 
+  /**
+   * The track plays to its end: a real element sets paused and ended, then fires "pause"
+   * followed by "ended".
+   */
+  end(state: Partial<Pick<FakeAudio, "currentTime">> = {}) {
+    Object.assign(this, { currentTime: Number.isFinite(this.duration) ? this.duration : this.currentTime }, state, { paused: true, ended: true });
+    this.dispatchEvent(new Event("pause"));
+    this.dispatchEvent(new Event("ended"));
+  }
+
   /** Fire an event now, after optionally changing the element's state first. */
   emit(type: string, state: Partial<Pick<FakeAudio, "paused" | "ended" | "currentTime" | "duration" | "readyState">> = {}) {
     Object.assign(this, state);

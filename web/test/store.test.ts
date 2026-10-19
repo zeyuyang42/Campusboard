@@ -74,7 +74,10 @@ describe("the swapping flag", () => {
     const el = await h.startPlaying(tracks(3));
     h.state().next();
     await flush();
-    // The element's own pause from the new source, handled before it starts again.
+    // WebKit: setting src + load() on a playing element pauses it and queues a "pause" task;
+    // play() for the new source only takes effect once the media can play, so that "pause" is
+    // handled while audio.paused is still true. paused: true models that window (the fake's
+    // play() resolves at once, which would otherwise make the event stale).
     el.emit("pause", { paused: true });
     expect(h.state()).toMatchObject({ status: "paused", wantsPlay: true });
     el.emit("playing", { paused: false });
@@ -147,7 +150,7 @@ describe("two elements (#35, #57)", () => {
     const sb = await preloadNext();
     expect(h.core.getFreshStreamUrl).toHaveBeenCalledTimes(2);
 
-    el.emit("ended", { ended: true, paused: true, currentTime: 100 });
+    el.end({ currentTime: 100 });
     expect(h.active()).toBe(sb);
     expect(h.state()).toMatchObject({ index: 1, position: 0, wantsPlay: true });
     expect(sb.paused).toBe(false);
@@ -176,7 +179,7 @@ describe("two elements (#35, #57)", () => {
     expect(h.transitionInfo()).toMatchObject({ phase: "fading" });
     expect(h.transitionInfo().transitions.at(-1)).toMatchObject({ kind: "gapless", fadeSec: 0 });
     // The previous element's own end finishes the tail; its events don't reach the store.
-    el.emit("ended", { ended: true, paused: true });
+    el.end();
     expect(h.transitionInfo().phase).toBe("idle");
     expect(h.state()).toMatchObject({ index: 1, wantsPlay: true });
   });
@@ -210,7 +213,7 @@ describe("two elements (#35, #57)", () => {
     const sb = await preloadNext(75);
     el.emit("timeupdate", { currentTime: 95 });
     expect(h.active()).toBe(el);
-    el.emit("ended", { ended: true, paused: true, currentTime: 100 });
+    el.end({ currentTime: 100 });
     expect(h.active()).toBe(sb);
     expect(h.transitionInfo().transitions.at(-1)).toMatchObject({ kind: "ended", fadeSec: 0 });
   });

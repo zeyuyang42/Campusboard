@@ -121,7 +121,7 @@ Requires Node 22.5+, Rust 1.90+ and Xcode command line tools.
 npm install
 npm run dev          # Tauri window with hot reload (Vite on :5173)
 npm run build        # .app and .dmg in src-tauri/target/release/bundle/
-npm test             # parser, data-layer, theme and palette tests (offline)
+npm test             # core (parser, data layer, theme, palette) and web player tests (offline)
 npm run typecheck
 ```
 
