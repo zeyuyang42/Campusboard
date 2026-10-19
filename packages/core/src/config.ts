@@ -32,3 +32,13 @@ export const RELEASE_CHECK_START_DELAY_MS = 3 * 60 * 1000;
 export const RELEASE_CHECK_TICK_MS = 3 * 60 * 1000;
 /** settings key for the new-releases checker: { enabled: boolean } (missing means on). */
 export const RELEASE_CHECK_SETTING_KEY = "release_check";
+/** Background collection refresh: the account's lists are synced automatically at most this often. */
+export const COLLECTION_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** Its first look comes this long after launch (after the new-releases checker's), never at startup. */
+export const COLLECTION_REFRESH_START_DELAY_MS = 5 * 60 * 1000;
+/** Then it looks every this often whether a refresh is due and the app is idle. */
+export const COLLECTION_REFRESH_TICK_MS = 10 * 60 * 1000;
+/** settings key: { enabled: boolean } (missing means on). Written only by the toggle. */
+export const COLLECTION_REFRESH_SETTING_KEY = "collection_refresh";
+/** settings key: ms timestamp of the last automatic refresh. Written only by the refresher, so neither can undo the other. */
+export const COLLECTION_REFRESH_LAST_KEY = "collection_refresh_last";

@@ -5,6 +5,7 @@ import { cancelJobsOfKind } from "../db/repos/jobs.js";
 import { mayCarryIdentity, normalizeFanUsername } from "../scrape/fan.js";
 import { ScrapeError } from "../scrape/errors.js";
 import type { AccountInfo, SyncSummary } from "../types.js";
+import { COLLECTION_REFRESH_LAST_KEY } from "../config.js";
 
 /** settings keys. The cookie has a key of its own so nothing that reads the account reads it by accident. */
 export const ACCOUNT_KEY = "bandcamp_account";
@@ -77,6 +78,8 @@ export async function clearAccount(db: Db): Promise<AccountInfo> {
   await cancelJobsOfKind(db, "collection");
   await deleteSetting(db, IDENTITY_KEY);
   await forgetSync(db);
+  // The next account gets its first automatic sync at the next look, not up to a day later.
+  await deleteSetting(db, COLLECTION_REFRESH_LAST_KEY);
   await deleteSetting(db, ACCOUNT_KEY);
   return getAccount(db);
 }

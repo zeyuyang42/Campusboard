@@ -43,6 +43,9 @@ Requires macOS 13.3 or later. Your library lives in
   Optionally paste the `identity` cookie from a browser where you're logged in to
   bandcamp.com to include a private collection and stream your purchases as MP3 V0.
   The cookie stays in your local library database and is only sent to bandcamp.com.
+  While the app is open it also syncs on its own, at most once a day and only when
+  no import is running (turn this off in the same section). An automatic sync
+  doesn't re-send a cookie Bandcamp rejected; it reads the public lists instead.
 - **New releases**: while the app is open it looks at one library artist's
   Bandcamp page every few minutes (each artist at most once a day) and lists
   releases that appeared since its first look, to import or dismiss. Turn it off
