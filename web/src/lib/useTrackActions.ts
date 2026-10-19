@@ -18,15 +18,18 @@ export function useTrackActions() {
   return (tracks: Track[], opts: TrackActionOptions = {}): MenuContent => {
     const playable = tracks.filter((t) => t.streamable);
     const one = tracks.length === 1 ? tracks[0] : null;
-    const items: MenuItem[] = [
-      { label: "Play", onSelect: () => player.getState().playTracks(playable), disabled: !playable.length },
-      { label: "Play next", onSelect: () => player.getState().enqueueNext(playable), disabled: !playable.length },
-      { label: "Add to queue", onSelect: () => player.getState().enqueueLast(playable), disabled: !playable.length },
+    // Tracks that can't be streamed (not out yet, or never) get no play actions at all.
+    const items: MenuItem[] = playable.length ? [
+      { label: "Play", onSelect: () => player.getState().playTracks(playable) },
+      { label: "Play next", onSelect: () => player.getState().enqueueNext(playable) },
+      { label: "Add to queue", onSelect: () => player.getState().enqueueLast(playable) },
+    ] : [];
+    items.push(
       { label: tracks.length === 1 ? "Add to playlist…" : `Add ${tracks.length} tracks to playlist…`, onSelect: () => {
           const m = useMenu.getState();
           setTimeout(() => m.show({ x: m.x, y: m.y }, { playlistPicker: { trackIds: tracks.map((t) => t.id) } }), 0);
         } },
-    ];
+    );
     if (one && !opts.onAlbumPage) items.push({ kind: "separator" }, { label: "Go to album", onSelect: () => nav(`/album/${one.album_id}`) });
     if (one?.album_url) items.push({ label: "Open on Bandcamp", onSelect: () => void openUrl(one.album_url!).catch(() => window.open(one.album_url!, "_blank")) });
     if (opts.remove) items.push({ kind: "separator" }, { label: opts.remove.label, onSelect: opts.remove.onSelect, danger: true });

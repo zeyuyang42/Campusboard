@@ -78,6 +78,16 @@ src-tauri/
   A persisted cooldown longer than the cap is dropped on load. Only a page
   titled exactly "Client Challenge" counts. No headless-browser fallback: it
   doesn't fit the app.
+- Pre-orders (verified 2026-10-19 on four current pre-orders; fixture `preorder.html`):
+  `data-tralbum` has `is_preorder: true` and `album_is_preorder: true`, and
+  `album_release_date` (= `current.release_date`) is the future release day as
+  `"30 Oct 2026 00:00:00 GMT"`. A track that isn't out yet has `file: null` and
+  `unreleased_track: true`, while `streaming` may be 1 or null, so stream
+  availability comes from `file`, not `streaming`. Tracks released early have a
+  normal `file` with `mp3-128`. No per-track release date exists: an unreleased
+  track becomes available on the album's date. Every track also carries
+  `album_preorder`. `hasAudio` is false when no track is out yet. A pre-order is
+  fetched once more 12 h after its release date (`services/preorder.ts`).
 - Search `item_url_path` may be absolute or relative; album `img` from search
   lacks the `a` prefix real art URLs need (derive from `art_id`).
 - `albums.release_date` is stored as Bandcamp sends it (`01 Oct 2021 00:00:00 GMT`),

@@ -19,9 +19,14 @@ export interface TrackListProps {
   /** When set, rows can be dragged to reorder and removed. */
   reorder?: { onMove: (from: number, to: number) => void; onRemove: (index: number) => void; removeLabel?: string };
   onAlbumPage?: boolean;
+  /**
+   * The list is a pre-order album: its tracks that can't be streamed aren't out yet. The
+   * release date when known (shown in their tooltip), or null.
+   */
+  availableOn?: string | null;
 }
 
-export function TrackList({ tracks, showAlbum = false, useTrackNum = false, reorder, onAlbumPage = false }: TrackListProps) {
+export function TrackList({ tracks, showAlbum = false, useTrackNum = false, reorder, onAlbumPage = false, availableOn }: TrackListProps) {
   const currentId = usePlayer((s) => s.queue[s.index]?.id);
   const status = usePlayer((s) => s.status);
   const playTracks = usePlayer((s) => s.playTracks);
@@ -86,8 +91,8 @@ export function TrackList({ tracks, showAlbum = false, useTrackNum = false, reor
                     <span>{useTrackNum ? t.track_num ?? i + 1 : i + 1}</span>
                   )}
                 </td>
-                <td className="title">
-                  <div>{t.title}{!t.streamable && <span className="muted"> (not streamable)</span>}</div>
+                <td className="title" title={t.streamable ? undefined : availableOn ? `Available on ${availableOn}` : availableOn === null ? "Not out yet" : "Can't be streamed from Bandcamp"}>
+                  <div>{t.title}{!t.streamable && availableOn === undefined && <span className="muted"> (not streamable)</span>}</div>
                   {showAlbum && (
                     <div className="sub meta">
                       <span>{t.track_artist ?? t.artist_name}</span><Link to={`/album/${t.album_id}`} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>{t.album_title}</Link>
@@ -96,7 +101,7 @@ export function TrackList({ tracks, showAlbum = false, useTrackNum = false, reor
                   {!showAlbum && t.track_artist && <div className="sub">{t.track_artist}</div>}
                 </td>
                 {showPlays && <td className="plays">{t.play_count ? formatPlays(t.play_count) : null}</td>}
-                <td className="dur">{formatDuration(t.duration)}</td>
+                <td className="dur">{t.streamable || t.duration ? formatDuration(t.duration) : ""}</td>
                 <td className="actions">
                   <button className="icon-btn" title="More" aria-label={`More actions for ${t.title}`} onMouseDown={(e) => e.stopPropagation()} onClick={(e) => openMenuFromEvent(e, menuFor(i))}><MoreIcon /></button>
                 </td>

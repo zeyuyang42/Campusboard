@@ -38,6 +38,8 @@ export interface CoreDeps {
   onJobsChange?: () => void;
   /** Called when the new-releases checker stored something or its status changed. */
   onReleasesChange?: () => void;
+  /** Called when a background check refreshed an album (a pre-order that came out). */
+  onLibraryChange?: () => void;
   /** Timing overrides for the new-releases checker (tests). */
   releaseCheck?: Omit<ReleaseCheckerOptions, "onChange">;
 }
@@ -51,7 +53,9 @@ export function createCore(deps: CoreDeps) {
   }, () => deps.onJobsChange?.());
   const queue = new FetchQueue(deps.fetch, RATE_LIMIT_MS, gate);
   const runner = new JobRunner(db, queue, deps.onJobsChange);
-  const checker = new ReleaseChecker(db, queue, { ...deps.releaseCheck, onChange: () => deps.onReleasesChange?.() });
+  const checker = new ReleaseChecker(db, queue, {
+    ...deps.releaseCheck, onChange: () => deps.onReleasesChange?.(), onAlbumRefreshed: () => deps.onLibraryChange?.(),
+  });
   void prunePageCache(db);
   void vacuumOrphans(db);
   // Cheap, and repairs flags if the app quit between a sync's membership and flag writes.

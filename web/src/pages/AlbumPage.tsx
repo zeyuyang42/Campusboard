@@ -5,7 +5,7 @@ import { TrackList, PlayPauseAll } from "../components/TrackList";
 import { ExternalIcon, MoreIcon } from "../components/Icons";
 import { ExternalLink } from "../components/ExternalLink";
 import { ConfirmButton } from "../components/ConfirmButton";
-import { formatDate, formatTotal } from "../lib/format";
+import { formatReleaseDate, formatTotal } from "../lib/format";
 import { friendlyError } from "../lib/errors";
 import { useTrackActions } from "../lib/useTrackActions";
 import { openMenuFromEvent } from "../ui/menu";
@@ -29,9 +29,14 @@ export function AlbumPage() {
           <div className="artist"><Link to={`/artist/${album.artist_id}`}>{album.artist_name}</Link></div>
           <div className="meta-line">
             {album.tracks.length === 1 ? "Single" : `${album.tracks.length} tracks`}, {formatTotal(total)}
-            {album.release_date ? `, released ${formatDate(album.release_date)}` : ""}
-            {album.is_preorder ? ". Pre-order" : ""}
+            {album.release_date && !album.is_preorder ? `, released ${formatReleaseDate(album.release_date)}` : ""}
           </div>
+          {album.is_preorder && (
+            <div className="preorder-note">
+              Pre-order{album.release_date ? `, out ${formatReleaseDate(album.release_date)}` : ""}
+              {album.tracks.some((t) => t.streamable) ? "" : ". Nothing to stream yet"}
+            </div>
+          )}
           {album.owned && <div className="owned-note">Purchased</div>}
           <div>{album.tags.map((t) => <span className="tag" key={t}>{t}</span>)}</div>
           <div className="actions">
@@ -43,7 +48,7 @@ export function AlbumPage() {
           </div>
         </div>
       </div>
-      <TrackList tracks={album.tracks} useTrackNum onAlbumPage />
+      <TrackList tracks={album.tracks} useTrackNum onAlbumPage availableOn={album.is_preorder ? formatReleaseDate(album.release_date) || null : undefined} />
       {album.about && (
         <details className="about-wrap">
           <summary>About this release</summary>

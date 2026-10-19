@@ -15,7 +15,8 @@ export {
 export { getFreshStreamUrl, refreshAlbum } from "./services/streamService.js";
 export { JobRunner, type ImportRequest, type ImportSelectionRequest } from "./services/jobRunner.js";
 export { cachedFetchText, prunePageCache } from "./services/pageCache.js";
-export { ReleaseChecker, type ReleaseCheckerOptions, type SkipReason } from "./services/releaseWatch.js";
+export { ReleaseChecker, type ReleaseCheckerOptions, type SkipReason, type PreorderCheckResult } from "./services/releaseWatch.js";
+export { releaseTime, preorderRecheckDue, PREORDER_RECHECK_GRACE_MS } from "./services/preorder.js";
 export { normalizeIdentityCookie } from "./services/account.js";
 export * as repos from "./db/repos/index.js";
 export { normalizePlaylistName, PlaylistNameError, PLAYLIST_NAME_MAX } from "./db/repos/playlists.js";

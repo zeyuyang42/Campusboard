@@ -15,13 +15,13 @@ const inflight = new Map<number, Promise<void>>();
  * A purchased album is fetched from its name.bandcamp.com address with the identity
  * cookie when one is set, so its tracks come back as mp3-v0.
  */
-export function refreshAlbum(db: Db, queue: FetchQueue, albumId: number, url: string): Promise<void> {
+export function refreshAlbum(db: Db, queue: FetchQueue, albumId: number, url: string, retries?: number): Promise<void> {
   let p = inflight.get(albumId);
   if (!p) {
     p = (async () => {
       const owned = await ownedFetchUrl(db, albumId);
       const headers = owned ? await identityHeaders(db, owned) : {};
-      const html = await queue.fetchText(headers.Cookie ? owned! : url, { headers });
+      const html = await queue.fetchText(headers.Cookie ? owned! : url, { headers }, retries);
       await upsertTralbum(db, parseTralbumPage(html));
     })().finally(() => inflight.delete(albumId));
     inflight.set(albumId, p);
