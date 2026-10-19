@@ -179,7 +179,10 @@ src-tauri/
   WebKit picks; the store moves the index when the next element starts. LAME
   MP3s carry ~1105 samples of encoder delay plus end padding: Chromium trims them
   (a 12 s file reports 12.000 s), WebKit doesn't (12.042 s), so ~40 ms of silence
-  stays between tracks in WebKit even with a perfect handover.
+  stays between tracks in WebKit even with a perfect handover. The outgoing track's
+  crossfade tail is not counted toward listening history: the PlayCounter moves to
+  the new track when the fade starts. After priming the standby stays muted until
+  it takes over, so a paused standby is never Now Playing eligible.
 - Now Playing and media keys (researched 2026-10-18) come from WebKit's Media
   Session, with no native code. `MediaSessionEnabled` defaults to true for
   WKWebView since WebKit 612 (Safari 15) and is still on; no private preference

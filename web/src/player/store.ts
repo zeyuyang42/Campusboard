@@ -295,7 +295,6 @@ const baseMuted = audioEls.map((el) => el.muted);
  */
 function prime(el: HTMLAudioElement) {
   const seq = txSeq;
-  const i = audioEls.indexOf(el);
   primedUrl = el.src;
   el.muted = true;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -305,7 +304,9 @@ function prime(el: HTMLAudioElement) {
     if (seq !== txSeq || tx.phase !== "preloading") return; // cancelled: release() reset the element
     el.pause();
     el.currentTime = 0;
-    el.muted = baseMuted[i];
+    // Stays muted until start(): priming made it the most recently started element, and an
+    // unmuted one (even at volume 0) would be Now Playing eligible, so WebKit could pick the
+    // paused standby and F8 would send "play" instead of "pause" for the rest of the track.
     dispatch({ type: "canPlay" });
   };
   // Done once its clock has run for a moment. A hidden window may not advance muted media,
@@ -357,9 +358,12 @@ function start(up: { index: number; track: QueueTrack }, fadeSec: number, kind: 
   const next = other();
   const s = usePlayer.getState();
   // Started late (a seek into the fade): fade over what is left, so it still ends at the end.
+  // Too little left to fade: a plain switch, and the old track stops now rather than playing
+  // its last moments at full volume over the new one (it belongs to another album).
   if (fadeSec > 0) {
     const left = prev.duration - prev.currentTime;
     if (Number.isFinite(left)) fadeSec = left >= CROSSFADE_MIN_SEC ? Math.min(fadeSec, left) : 0;
+    if (fadeSec === 0) prev.pause();
   }
   transitions.push({ at: performance.now(), from: s.current()?.id ?? null, to: up.track.id, kind, fadeSec, prevRemaining: prev.duration - prev.currentTime });
   if (transitions.length > 10) transitions.shift();
@@ -370,6 +374,7 @@ function start(up: { index: number; track: QueueTrack }, fadeSec: number, kind: 
   retriedFor = null;
   pendingSeek = null;
   next.volume = fadeSec > 0 ? 0 : positionToGain(s.volume);
+  next.muted = baseMuted[audioEls.indexOf(next)]; // muted since priming; audible from here
   // From here the play counter, the queue index, the position and Now Playing follow `next`.
   plays.start(up.track.id, finitePositive(next.duration) ? next.duration : up.track.duration);
   lastTick = 0;
@@ -432,8 +437,11 @@ export const usePlayer = create<PlayerState>((set, get) => ({
       // Play after the queue ended restarts the track from the top: a new playback.
       if (el.ended) startPlayback(cur);
       void el.play().catch(() => undefined);
-      // Paused mid-crossfade: both carry on from where they were.
-      if (tx.phase === "fading" && !other().ended) void other().play().catch(() => undefined);
+      // Paused mid-crossfade: both carry on from where they were, and so do the volume ticks.
+      if (tx.phase === "fading" && !other().ended) {
+        void other().play().catch(() => undefined);
+        if (tx.fadeSec > 0 && !fadeTimer) fadeTimer = setInterval(fadeTick, FADE_TICK_MS);
+      }
     }
   },
   pause: () => {
@@ -442,7 +450,10 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     set(get().status === "loading" ? { wantsPlay: false, status: "paused" } : { wantsPlay: false });
     if (armTimer) { clearTimeout(armTimer); armTimer = null; }
     active().pause();
-    if (tx.phase === "fading") other().pause(); // a crossfade pauses as a whole
+    if (tx.phase === "fading") {
+      other().pause(); // a crossfade pauses as a whole
+      if (fadeTimer) { clearInterval(fadeTimer); fadeTimer = null; } // nothing moves until play()
+    }
   },
   toggle: () => (toggleAction(get().status, get().wantsPlay) === "pause" ? get().pause() : get().play()),
 
@@ -608,7 +619,10 @@ const onAudioEvent = (type: AudioEventType) => {
   if (type === "pause") swapping = swappingAfter(swapping, { type: "pause" });
   if (type === "playing") swapping = swappingAfter(swapping, { type: "playing", paused: el.paused });
   // A pause from outside (the system) mid-crossfade stops the fading track too.
-  if (type === "pause" && el.paused && tx.phase === "fading") other().pause();
+  if (type === "pause" && el.paused && tx.phase === "fading") {
+    other().pause();
+    if (fadeTimer) { clearInterval(fadeTimer); fadeTimer = null; }
+  }
   if (patch) usePlayer.setState(patch);
 };
 

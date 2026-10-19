@@ -41,6 +41,9 @@ export function audioEventPatch(type: AudioEventType, el: AudioElementState): Au
       // Buffering: the playhead stops, the intent to play doesn't (see toggleAction).
       return el.paused ? null : { status: "loading" };
     case "pause":
+      // Stale: the element plays again by the time it is handled (e.g. a late pause from an
+      // element's priming, #35, or a pause followed at once by a play).
+      if (!el.paused) return null;
       if (el.ended) return null; // "ended" follows and decides (next track, or stop)
       return el.internal ? { status: "paused" } : { status: "paused", wantsPlay: false };
   }
