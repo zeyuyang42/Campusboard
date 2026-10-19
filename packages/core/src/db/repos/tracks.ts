@@ -22,7 +22,8 @@ export interface TrackRow {
   play_count: number;
 }
 
-const TRACK_SELECT = `
+/** Track columns with their album's and artist's; ends with the FROM/JOINs (t, al, ar) so callers can add joins and WHERE. */
+export const TRACK_SELECT = `
   SELECT t.*, al.title AS album_title, al.url AS album_url, al.item_type AS album_item_type,
          al.art_id AS art_id, ar.name AS artist_name,
          (SELECT COUNT(*) FROM plays p WHERE p.track_id = t.id) AS play_count

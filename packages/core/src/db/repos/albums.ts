@@ -1,6 +1,7 @@
 import type { Db } from "../Db.js";
 import { likeContains } from "../Db.js";
 import { dismissAlbum } from "./fanItems.js";
+import { TRACK_SELECT, rowToTrack, type TrackRow } from "./tracks.js";
 import type { Album, AlbumWithTracks, Track } from "../../types.js";
 import { preorderRecheckDue, releaseTime } from "../../services/preorder.js";
 
@@ -20,13 +21,16 @@ const WISHLISTED = "EXISTS (SELECT 1 FROM fan_items f WHERE f.list = 'wishlist' 
 // Per album through ix_tracks_album and ix_plays_track, so only that album's plays are read.
 const ALBUM_PLAYS = "FROM plays p JOIN tracks t ON t.id = p.track_id WHERE t.album_id = al.id";
 
+const PLAY_COUNT = `(SELECT COUNT(*) ${ALBUM_PLAYS})`;
+const LAST_PLAYED = `(SELECT MAX(p.played_at) ${ALBUM_PLAYS})`;
+
 /** Every album column the UI uses; ends with the FROM/JOIN so callers can add joins and WHERE. */
 export const ALBUM_SELECT = `
   SELECT al.*, ar.name AS artist_name, ${WISHLISTED} AS wishlisted,
     (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
     (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id AND t.streamable = 1) AS streamable_count,
-    (SELECT COUNT(*) ${ALBUM_PLAYS}) AS play_count,
-    (SELECT MAX(p.played_at) ${ALBUM_PLAYS}) AS last_played_at
+    ${PLAY_COUNT} AS play_count,
+    ${LAST_PLAYED} AS last_played_at
   FROM albums al JOIN artists ar ON ar.id = al.artist_id`;
 
 export type AlbumFilter = "all" | "purchased" | "wishlist";
@@ -39,28 +43,33 @@ export const RELEASE_KEY = `(substr(al.release_date, 8, 4) || printf('%02d', ins
 
 /**
  * Library sort orders, in the order the UI offers them. A new order is one entry here plus
- * its ORDER BY in SORTS. "played" and "plays" put never-played albums last, newest first
+ * its ORDER BY in sorts(). "played" and "plays" put never-played albums last, newest first
  * (NULL sorts last in DESC).
  */
 export const ALBUM_SORTS = ["added", "played", "plays", "artist", "title", "release"] as const;
 export type AlbumSort = (typeof ALBUM_SORTS)[number];
-const SORTS: Record<AlbumSort, string> = {
+
+/**
+ * ORDER BY per sort. `plays` and `last` name the album's play count and latest play: the
+ * ALBUM_SELECT aliases by default, or the expressions themselves where those aliases aren't
+ * visible (a window's ORDER BY).
+ */
+const sorts = (plays = "play_count", last = "last_played_at"): Record<AlbumSort, string> => ({
   added: "al.created_at DESC, al.id DESC",
-  played: "last_played_at DESC, al.created_at DESC, al.id DESC",
-  plays: "play_count DESC, last_played_at DESC, al.created_at DESC, al.id DESC",
+  played: `${last} DESC, al.created_at DESC, al.id DESC`,
+  plays: `${plays} DESC, ${last} DESC, al.created_at DESC, al.id DESC`,
   artist: `ar.name COLLATE NOCASE, ${RELEASE_KEY} DESC, al.id DESC`,
   title: "al.title COLLATE NOCASE, ar.name COLLATE NOCASE, al.id",
   release: `${RELEASE_KEY} DESC, al.title COLLATE NOCASE, al.id`,
-};
+});
+const SORTS = sorts();
+const INLINE_SORTS = sorts(PLAY_COUNT, LAST_PLAYED);
 
 const MATCH = `(al.title LIKE ? ESCAPE '\\' OR ar.name LIKE ? ESCAPE '\\'
   OR EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND (t.title LIKE ? ESCAPE '\\' OR t.track_artist LIKE ? ESCAPE '\\')))`;
 
-/**
- * The library's albums. `q` matches album title, artist name, track titles and track
- * artists as a substring (case-insensitive for ASCII), combined with `filter`.
- */
-export async function listAlbums(db: Db, sort: AlbumSort = "added", filter: AlbumFilter = "all", q = ""): Promise<Album[]> {
+/** The WHERE clause (or "") and its parameters for the Show filter plus the filter text. */
+function albumWhere(filter: AlbumFilter, q: string): { sql: string; params: unknown[] } {
   const where: string[] = [];
   const params: unknown[] = [];
   const f = FILTERS[filter];
@@ -71,8 +80,33 @@ export async function listAlbums(db: Db, sort: AlbumSort = "added", filter: Albu
     where.push(MATCH);
     params.push(like, like, like, like);
   }
-  const sql = `${ALBUM_SELECT} ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY ${SORTS[sort] ?? SORTS.added}`;
-  return (await db.select<AlbumRow>(sql, params)).map(rowToAlbum);
+  return { sql: where.length ? `WHERE ${where.join(" AND ")}` : "", params };
+}
+
+/**
+ * The library's albums. `q` matches album title, artist name, track titles and track
+ * artists as a substring (case-insensitive for ASCII), combined with `filter`.
+ */
+export async function listAlbums(db: Db, sort: AlbumSort = "added", filter: AlbumFilter = "all", q = ""): Promise<Album[]> {
+  const w = albumWhere(filter, q);
+  const sql = `${ALBUM_SELECT} ${w.sql} ORDER BY ${SORTS[sort] ?? SORTS.added}`;
+  return (await db.select<AlbumRow>(sql, w.params)).map(rowToAlbum);
+}
+
+/**
+ * Every track of the albums listAlbums returns for the same arguments: the albums in that
+ * order, each album's tracks in track order. Unstreamable tracks are included (the player
+ * skips them; a playlist keeps them). No stream URLs are fetched.
+ */
+export async function listAlbumTracks(db: Db, sort: AlbumSort = "added", filter: AlbumFilter = "all", q = ""): Promise<Track[]> {
+  const w = albumWhere(filter, q);
+  const sql = `
+    WITH fa AS (
+      SELECT al.id AS album_id, ROW_NUMBER() OVER (ORDER BY ${INLINE_SORTS[sort] ?? INLINE_SORTS.added}) AS ord
+      FROM albums al JOIN artists ar ON ar.id = al.artist_id ${w.sql})
+    ${TRACK_SELECT} JOIN fa ON fa.album_id = t.album_id
+    ORDER BY fa.ord, t.track_num, t.id`;
+  return (await db.select<TrackRow>(sql, w.params)).map(rowToTrack);
 }
 
 export async function getAlbum(db: Db, id: number): Promise<Album | null> {

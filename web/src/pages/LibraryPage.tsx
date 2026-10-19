@@ -6,6 +6,7 @@ import { useUi } from "../ui/store";
 import { friendlyError } from "../lib/errors";
 import { formatPlays } from "../lib/format";
 import { AlbumCard } from "../components/AlbumCard";
+import { BulkBar } from "../components/BulkBar";
 import { TrackList, PlayPauseAll } from "../components/TrackList";
 
 export function LibraryPage() {
@@ -81,11 +82,13 @@ function AlbumGrid({ sort: savedSort, filter, set }: LibraryView & { set: (p: Pa
   // The Recently played row sits over the plain library view only: not while filtering, and
   // not when the grid itself is already ordered by listening.
   const shelf = filter === "all" && !term && !q.trim() && sort !== "played" && sort !== "plays";
+  // Bulk actions only while the filter or Show narrows the list (the bar carries the count then).
+  const bulk = (filter !== "all" || !!term) && n > 0;
   return (
     <>
       <div className="toolbar">
         <FilterInput value={q} onChange={setQ} placeholder="Filter albums, artists, tracks" />
-        <span className="muted">{n} album{n === 1 ? "" : "s"}</span>
+        {!bulk && <span className="muted">{n} album{n === 1 ? "" : "s"}</span>}
         <span className="spacer" />
         <label className="muted" htmlFor="album-filter">Show</label>
         <select id="album-filter" value={filter} onChange={(e) => set({ filter: e.target.value as repos.AlbumFilter })}>
@@ -98,6 +101,7 @@ function AlbumGrid({ sort: savedSort, filter, set }: LibraryView & { set: (p: Pa
           {repos.ALBUM_SORTS.map((s) => <option key={s} value={s}>{SORT_LABELS[s]}</option>)}
         </select>
       </div>
+      {bulk && <BulkBar albums={data!} sort={sort} filter={filter} q={term} />}
       {shelf && <RecentlyPlayed libraryCount={n} onShowAll={() => setTempSort("played")} />}
       {n ? <div className="grid">{data!.map((a) => <AlbumCard key={a.id} album={a} detail={sort === "plays" ? (a.play_count ? formatPlays(a.play_count) : "") : undefined} />)}</div>
         : term ? (
