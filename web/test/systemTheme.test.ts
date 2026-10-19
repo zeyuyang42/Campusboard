@@ -151,6 +151,21 @@ describe("the default theme", () => {
 });
 
 describe("the first paint", () => {
+  it("a slow early-paint background never overrides the saved theme's", async () => {
+    // The remembered theme has a file background that resolves late; the saved one has none.
+    const slow = { ...dusk, background: { source: "file" as const, value: "old.jpg", blur: 0, dim: 0 } };
+    localStorage.setItem("bc.theme.last", JSON.stringify(slow));
+    let release!: () => void;
+    const files = await import("../src/lib/files");
+    vi.spyOn(files, "backgroundFileUrl").mockImplementation(() => new Promise((r) => { release = () => r("asset://old.jpg"); }));
+    h.core.settings.set("theme", { theme: dusk, basePreset: dusk.name });
+    await theme.initTheme();
+    expect(css("--bg-image")).toBe("none");
+    release();
+    await flush();
+    expect(css("--bg-image")).toBe("none");
+  });
+
   it("shows the theme last used in this window before the database answers", async () => {
     theme.useTheme.getState().replace(dusk, dusk.name); // a pinned dark theme, on a light Mac
     await relaunch(3);

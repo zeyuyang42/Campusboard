@@ -65,8 +65,10 @@ async function setNativeAppearance(mode: Theme["mode"]) {
 }
 
 /** Push the theme onto :root, including the background image layer. */
+let paints = 0;
 async function paint(theme: ResolvedTheme) {
   const root = document.documentElement;
+  const mine = ++paints;
   applyTheme(theme, root);
   let img = "none";
   if (theme.background.source === "url") img = `url("${encodeURI(theme.background.value)}")`;
@@ -74,6 +76,8 @@ async function paint(theme: ResolvedTheme) {
     const u = await backgroundFileUrl(theme.background.value);
     img = u ? `url("${u}")` : "none";
   }
+  // A later paint (the saved theme after the early one) owns the background now.
+  if (mine !== paints) return;
   root.style.setProperty("--bg-image", img);
 }
 
