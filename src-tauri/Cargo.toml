@@ -14,7 +14,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # tray-icon: the optional menu-bar icon (tray.rs), off unless turned on in Settings.
-tauri = { version = "2", features = ["tray-icon"] }
+# protocol-asset: <audio> plays offline copies (#2) from asset://, scoped at runtime to the
+# offline folder only (lib.rs `offline_dir`); it serves Range requests for seeking.
+tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 # unsafe-headers: lets core send the optional Bandcamp identity cookie (Cookie is a forbidden
 # header otherwise). No "cookies" feature: without a jar, Set-Cookie from a logged-in

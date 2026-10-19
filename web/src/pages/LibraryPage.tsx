@@ -29,8 +29,9 @@ export function LibraryPage() {
 const FILTER_EMPTY: Record<string, string> = {
   purchased: "No purchases here yet. Add your Bandcamp username in Settings and sync your collection.",
   wishlist: "Nothing from your wishlist here yet. Add your Bandcamp username in Settings and sync your collection.",
+  downloaded: "Nothing is available offline yet. Open an album and choose Make available offline.",
 };
-const FILTER_NAME: Record<string, string> = { purchased: "your purchases", wishlist: "your wishlist" };
+const FILTER_NAME: Record<string, string> = { purchased: "your purchases", wishlist: "your wishlist", downloaded: "your downloads" };
 
 // Offered in ALBUM_SORTS order; a new sort in core needs a label here.
 const SORT_LABELS: Record<repos.AlbumSort, string> = { added: "Date added", played: "Recently played", plays: "Most played", artist: "Artist", title: "Album title", release: "Release date" };
@@ -95,6 +96,7 @@ function AlbumGrid({ sort: savedSort, filter, set }: LibraryView & { set: (p: Pa
           <option value="all">All</option>
           <option value="purchased">Purchased</option>
           <option value="wishlist">Wishlist</option>
+          <option value="downloaded">Downloaded</option>
         </select>
         <label className="muted" htmlFor="album-sort">Sort</label>
         <select id="album-sort" value={sort} onChange={(e) => { setTempSort(null); set({ sort: e.target.value as repos.AlbumSort }); }}>
@@ -111,7 +113,7 @@ function AlbumGrid({ sort: savedSort, filter, set }: LibraryView & { set: (p: Pa
             {filter !== "all" && <> <button className="btn" onClick={() => set({ filter: "all" })}>Search all albums</button></>}
           </div>
         )
-        : <div className="empty">{FILTER_EMPTY[filter]}<br /><Link className="btn" to="/settings#account">Open Settings</Link></div>}
+        : <div className="empty">{FILTER_EMPTY[filter]}{filter !== "downloaded" && <><br /><Link className="btn" to="/settings#account">Open Settings</Link></>}</div>}
     </>
   );
 }

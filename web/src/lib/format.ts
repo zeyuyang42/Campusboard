@@ -33,3 +33,11 @@ export function yearOf(d: string | null | undefined): string {
 }
 /** "1 play", "3 plays". */
 export const formatPlays = (n: number) => `${n} play${n === 1 ? "" : "s"}`;
+/** Decimal units, as Finder shows sizes: 1 MB = 1,000,000 bytes. */
+export function formatBytes(n: number): string {
+  // At most three significant digits, no trailing zeros: 193 KB, 4.5 MB, 1 GB, 1.25 GB.
+  const fmt = (x: number) => String(Number(x.toPrecision(3)));
+  if (n < 1e6) return `${fmt(Math.max(n, 0) / 1e3)} KB`;
+  if (n < 1e9) return `${fmt(n / 1e6)} MB`;
+  return `${fmt(n / 1e9)} GB`;
+}

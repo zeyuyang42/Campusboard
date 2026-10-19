@@ -1,4 +1,4 @@
-import { FETCH_TIMEOUT_MS, RATE_LIMIT_MS, USER_AGENT } from "../config.js";
+import { DOWNLOAD_TIMEOUT_MS, FETCH_TIMEOUT_MS, RATE_LIMIT_MS, USER_AGENT } from "../config.js";
 import { ScrapeError } from "./errors.js";
 import { ChallengeGate } from "./challenge.js";
 import { isChallengePage } from "./html.js";
@@ -78,8 +78,60 @@ export class FetchQueue {
         }
       }
       if (lastErr instanceof ScrapeError) throw lastErr;
-      throw new ScrapeError("fetch_failed", `Failed to fetch ${url}: ${String(lastErr)}`);
+      // No answer at all (offline, DNS, timeout): the player treats this as "offline" (#2).
+      throw new ScrapeError("fetch_failed", `Failed to fetch ${url}: ${String(lastErr)}`, { network: true });
     });
+  }
+
+  /**
+   * Download `url` (an offline copy's mp3, #2) and hand its body to `sink` as a stream, so
+   * the file is written as it arrives rather than buffered. Only the request's start takes a
+   * queue slot, like every other request; the body then streams outside the queue (the job
+   * runner downloads one track at a time). No retries. Resolves to the bytes `sink` consumed,
+   * which must match Content-Length when the CDN sends one. HTTP errors carry `{ status }`.
+   */
+  async download(url: string, sink: (body: ReadableStream<Uint8Array>) => Promise<void>, init: RequestInit = {}): Promise<number> {
+    await this.gate.ready();
+    this.gate.assertClear();
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), DOWNLOAD_TIMEOUT_MS);
+    try {
+      const res = await this.schedule(async () => {
+        try {
+          return await this.fetchImpl(url, {
+            ...init,
+            signal: ctrl.signal,
+            headers: { "User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9", ...(init.headers ?? {}) },
+          });
+        } catch (e) {
+          throw new ScrapeError("fetch_failed", `Failed to fetch ${url}: ${String(e)}`, { network: true });
+        }
+      });
+      const type = res.headers.get("content-type") ?? "";
+      if (!res.ok || /text\/html/i.test(type)) {
+        const body = await res.text().catch(() => "");
+        if (isChallengePage(body)) throw await this.challenged(url);
+        throw new ScrapeError("fetch_failed", `HTTP ${res.status}${res.ok ? " (a page, not audio)" : ""} for ${url}`, { status: res.status });
+      }
+      if (!res.body) throw new ScrapeError("fetch_failed", `Empty answer for ${url}`, { status: res.status });
+      let bytes = 0;
+      const counted = res.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, c) { bytes += chunk.byteLength; c.enqueue(chunk); },
+      }));
+      try {
+        await sink(counted);
+      } catch (e) {
+        if (e instanceof ScrapeError) throw e;
+        throw new ScrapeError("fetch_failed", `Download of ${url} stopped: ${String(e)}`, { network: true });
+      }
+      const expected = Number(res.headers.get("content-length"));
+      if (ctrl.signal.aborted || (expected > 0 && bytes !== expected)) {
+        throw new ScrapeError("fetch_failed", `Download of ${url} was cut short (${bytes} of ${expected || "?"} bytes)`, { network: true });
+      }
+      return bytes;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**

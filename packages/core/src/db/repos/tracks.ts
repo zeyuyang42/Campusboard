@@ -14,6 +14,8 @@ export interface TrackRow {
   stream_url: string | null;
   stream_expires_at: number | null;
   lyrics: string | null;
+  /** The offline copy's file name (#2), or null. */
+  local_path: string | null;
   album_title: string;
   album_url: string;
   album_item_type: "album" | "track";
@@ -34,8 +36,8 @@ export function getTrackRow(db: Db, id: number): Promise<TrackRow | null> {
 }
 
 export function rowToTrack(r: TrackRow): Track {
-  const { stream_url: _u, stream_expires_at: _e, album_item_type: _t, ...rest } = r;
-  return { ...rest, streamable: !!r.streamable };
+  const { stream_url: _u, stream_expires_at: _e, album_item_type: _t, local_path: _l, ...rest } = r;
+  return { ...rest, streamable: !!r.streamable, downloaded: !!r.local_path };
 }
 
 export async function searchTracks(db: Db, q: string, limit = 500): Promise<Track[]> {

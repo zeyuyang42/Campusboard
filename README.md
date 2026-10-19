@@ -77,6 +77,14 @@ Requires macOS 13.3 or later. Your library lives in
   background and starts as the current one ends (on by default). Crossfade
   (off by default, up to 10 s) blends tracks from different albums; tracks of
   the same album always play back to back as recorded.
+- **Offline listening**: on an album page, **Make available offline** saves the
+  album's streams (the same 128 kbps the player uses) one track at a time at
+  the usual polite pace; downloaded tracks play without a connection, and
+  others are skipped while you're offline. **Remove download** frees the space;
+  Settings → Storage shows the total, sets an optional size limit and removes
+  everything. Library → Show → Downloaded lists what's saved. These copies are
+  for listening in the app, not purchases: buy on Bandcamp to own a release.
+  Radio episodes always stream.
 - **Themes**: Settings → pick a preset (including High contrast), follow the
   system appearance or pin dark or light, adjust colors, fonts, corner radius,
   density, the album-art wash and an optional background image. Export writes a
@@ -173,5 +181,5 @@ src-tauri/       Rust shell: plugins, migrations, capabilities, bundle config
 ## Not yet
 
 Syncing purchased items with your Bandcamp login (higher-quality streams),
-offline caching, Windows/Linux builds,
+Windows/Linux builds,
 custom artist domains. Tracked as issues labelled `feature`.

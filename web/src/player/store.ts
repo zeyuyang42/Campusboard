@@ -139,10 +139,38 @@ function recordPlay(p: CountedPlay) {
     .catch(() => undefined); // history is best-effort; playback never depends on it
 }
 
-/** A fresh stream URL for a queue entry: a library track's, or a radio episode's (#44). */
+/**
+ * Set when a stream URL couldn't be fetched because the network is down (no answer at all):
+ * until then, tracks without an offline copy fail at once instead of each waiting out the
+ * queue's retries, and the #74 skip moves through them to the downloaded ones.
+ */
+let offlineUntil = 0;
+const OFFLINE_HOLD_MS = 30_000;
+const isNetworkError = (e: unknown) => (e as { code?: unknown; detail?: { network?: unknown } } | null)?.code === "fetch_failed"
+  && (e as { detail?: { network?: unknown } }).detail?.network === true;
+
+/**
+ * What the element plays for a queue entry: a library track's offline copy when it has one
+ * (#2; no request at all), else a fresh stream URL; a radio episode always streams (#44, no
+ * offline copies of radio). `force` (the retry after a media error) skips the copy, so a
+ * damaged file falls back to the stream.
+ */
 async function streamUrlFor(track: QueueTrack, force = false): Promise<{ url: string; expires_at: number }> {
   const core = await getCore();
-  return track.radio ? core.radioStreamUrl(track.radio.show_id, force) : core.getFreshStreamUrl(track.id, force);
+  if (track.radio) return core.radioStreamUrl(track.radio.show_id, force);
+  if (!force) {
+    const local = await core.localTrackUrl(track.id).catch(() => null);
+    if (local) return { url: local, expires_at: Number.MAX_SAFE_INTEGER };
+  }
+  if (Date.now() < offlineUntil) throw Object.assign(new Error("Offline, and this track isn't downloaded"), { code: "offline" });
+  try {
+    const r = await core.getFreshStreamUrl(track.id, force);
+    offlineUntil = 0;
+    return r;
+  } catch (e) {
+    if (isNetworkError(e)) offlineUntil = Date.now() + OFFLINE_HOLD_MS;
+    throw e;
+  }
 }
 
 /** Resolve a fresh CDN URL for the track and point the active audio element at it. */

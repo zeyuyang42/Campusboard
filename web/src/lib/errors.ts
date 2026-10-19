@@ -14,6 +14,9 @@ const MESSAGES: Record<string, string> = {
   invalid_username: "That doesn't look like a Bandcamp username. It's the last part of your fan page address, bandcamp.com/username.",
   invalid_cookie: "That doesn't look like the identity cookie. Copy the value of the cookie named identity for bandcamp.com.",
   no_account: "Add your Bandcamp username in Settings first.",
+  offline: "You're offline and this track isn't downloaded.",
+  storage_full: "Downloads reached the size limit in Settings → Storage.",
+  offline_unavailable: "Downloads aren't available here.",
 };
 
 export function friendlyError(err: unknown, fallback = "Something went wrong."): string {

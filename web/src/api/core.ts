@@ -1,7 +1,8 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
-import { createCore, type Core } from "@bc/core";
+import { createCore, type Core, type OfflineFiles } from "@bc/core";
 import { openDb } from "./tauriDb";
+import { memoryOfflineFiles, tauriOfflineFiles } from "./offlineFiles";
 
 const BROWSER_MODE = import.meta.env.VITE_BROWSER_MODE === "1";
 const SELFTEST = import.meta.env.VITE_SELFTEST === "1";
@@ -25,12 +26,15 @@ export function getCore(): Promise<Core> {
     corePromise = (async () => {
       let db: Awaited<ReturnType<typeof openDb>>;
       let fetchImpl: (input: string, init?: RequestInit) => Promise<Response>;
+      let files: OfflineFiles | null;
       if (BROWSER_MODE) {
         const b = await import("./browserDb");
         db = await b.openBrowserDb();
         fetchImpl = b.browserFetch;
+        files = memoryOfflineFiles();
       } else {
         db = await openDb();
+        files = await tauriOfflineFiles();
         // redirect: "manual" (FetchQueue.resolveRedirect) maps to the plugin's maxRedirections: 0,
         // which answers with the 3xx itself and its Location header (reqwest Policy::none).
         fetchImpl = (input, init) => tauriFetch(input, { ...init, maxRedirections: init?.redirect === "manual" ? 0 : 5 });
@@ -38,6 +42,7 @@ export function getCore(): Promise<Core> {
       const core = createCore({
         db,
         fetch: fetchImpl,
+        files,
         onJobsChange: () => {
           void qc?.invalidateQueries({ queryKey: ["jobs"] });
           void qc?.invalidateQueries({ queryKey: ["job"] });
@@ -47,6 +52,8 @@ export function getCore(): Promise<Core> {
           void qc?.invalidateQueries({ queryKey: ["releases"] });
           // An imported library's playlists and history fill in as its albums arrive.
           for (const k of ["playlists", "playlist", "history"]) void qc?.invalidateQueries({ queryKey: [k] });
+          // A download job (#2) marks tracks as saved one by one.
+          for (const k of ["album", "offline"]) void qc?.invalidateQueries({ queryKey: [k] });
         },
         onReleasesChange: () => { void qc?.invalidateQueries({ queryKey: ["releases"] }); },
         // A pre-order that came out: its tracks became playable.

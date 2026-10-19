@@ -17,6 +17,8 @@ export const UpIcon = () => <I size={16} d="M7.41 15.41L12 10.83l4.59 4.58L18 14
 export const DownIcon = () => <I size={16} d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z" />;
 export const ExternalIcon = () => <I size={14} d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z" />;
 export const ExpandIcon = ({ size }: { size?: number } = {}) => <I size={size} d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />;
+/** An offline copy (#2): a small check in a circle, for track rows. */
+export const SavedIcon = ({ size = 13 }: Sized) => <I size={size} d="M12 2a10 10 0 100 20 10 10 0 000-20zm-1.6 14.2L6.2 12l1.4-1.4 2.8 2.8 6-6 1.4 1.4-7.4 7.4z" />;
 export const MenuIcon = () => <I d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />;
 type Sized = { size?: number };
 export const MiniPlayerIcon = ({ size }: Sized) => <I size={size} d="M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z" />;

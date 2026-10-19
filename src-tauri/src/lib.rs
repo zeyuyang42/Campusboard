@@ -56,6 +56,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0007_library_import.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 8,
+            description: "offline copies of tracks",
+            sql: include_str!("../migrations/0008_offline.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -90,6 +96,46 @@ fn live_db_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     } else {
         app.path().app_config_dir().ok().map(|d| d.join(p))
     }
+}
+
+/// Offline copies of tracks (#2) live next to the database they belong to, in
+/// `<db stem>-offline/`: `library-offline` for the app, `library-dev-offline` for dev runs and
+/// the selftest, `<scratch>-offline` beside a `BCP_DB_PATH`. Each library sweeps its own folder
+/// of files it doesn't name, so two libraries must never share one. Application Support, not
+/// Caches: macOS may purge Caches, and a copy kept for offline listening must stay.
+fn offline_dir_for(db: &std::path::Path) -> PathBuf {
+    let stem = db.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "library".into());
+    db.with_file_name(format!("{stem}-offline"))
+}
+
+/// The offline folder, created at startup and added to the fs and asset protocol scopes
+/// (that folder only, recursively). None if it couldn't be created.
+struct OfflineDir(Option<PathBuf>);
+
+fn setup_offline_dir(app: &tauri::App) -> Option<PathBuf> {
+    use tauri_plugin_fs::FsExt;
+    let dir = offline_dir_for(&live_db_path(app.handle())?);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        eprintln!("offline folder {}: {e}", dir.display());
+        return None;
+    }
+    // The real path: the scopes compare against it with symlinks resolved (/tmp on macOS).
+    let dir = std::fs::canonicalize(&dir).ok()?;
+    if let Err(e) = app.fs_scope().allow_directory(&dir, true) {
+        eprintln!("offline folder fs scope: {e}");
+        return None;
+    }
+    if let Err(e) = app.asset_protocol_scope().allow_directory(&dir, true) {
+        eprintln!("offline folder asset scope: {e}");
+        return None;
+    }
+    Some(dir)
+}
+
+/// The absolute path of the offline folder, for the frontend's OfflineFiles.
+#[tauri::command]
+fn offline_dir(state: tauri::State<OfflineDir>) -> Result<String, String> {
+    state.0.as_ref().map(|p| p.to_string_lossy().into_owned()).ok_or_else(|| "no offline folder".into())
 }
 
 /// Save a database snapshot the frontend wrote with VACUUM INTO (`$APPDATA/<tmp_name>`) to a
@@ -395,9 +441,11 @@ pub fn run() {
             if let Ok(dir) = app.path().app_data_dir() {
                 backup::sweep_snapshots(&dir);
             }
+            let offline = setup_offline_dir(app);
+            app.manage(OfflineDir(offline));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![library_db_url, backup_library, selftest_take_backup, selftest_window, selftest_sleep, mini::toggle_mini_player, menu::selftest_menu, tray::set_menu_bar])
+        .invoke_handler(tauri::generate_handler![library_db_url, offline_dir, backup_library, selftest_take_backup, selftest_window, selftest_sleep, mini::toggle_mini_player, menu::selftest_menu, tray::set_menu_bar])
         .build(context)
         .unwrap_or_else(|e| startup_failed(&e));
 
@@ -438,6 +486,15 @@ mod tests {
         let (title, body) = StartupFailure::NewerLibrary.message("migration 7 is missing");
         assert!(title.contains("newer version"));
         assert!(body.contains(RELEASES_URL) && body.contains("migration 7"));
+    }
+
+    #[test]
+    fn each_library_has_its_own_offline_folder() {
+        let support = std::path::Path::new("/Users/x/Library/Application Support/com.bandcampplayer.app");
+        assert_eq!(offline_dir_for(&support.join("library.db")), support.join("library-offline"));
+        assert_eq!(offline_dir_for(&support.join("library-dev.db")), support.join("library-dev-offline"));
+        let scratch = std::path::Path::new("/tmp/run/scratch.db");
+        assert_eq!(offline_dir_for(scratch), std::path::Path::new("/tmp/run/scratch-offline"));
     }
 
     #[test]

@@ -12,6 +12,7 @@ fn main() {
             "toggle_mini_player",
             "selftest_menu",
             "set_menu_bar",
+            "offline_dir",
         ]),
     ))
     .expect("failed to run tauri-build");
