@@ -47,7 +47,7 @@ web/src/
   ui/menu.ts + components/MenuHost.tsx   the one context menu / playlist picker for the whole app
   components/, pages/      plain CSS in styles.css driven by tokens on :root
 src-tauri/
-  src/lib.rs               registers sql/http/dialog/fs/opener/window-state plugins, migrations, Dock reopen
+  src/lib.rs               registers sql/http/dialog/fs/opener/notification/window-state plugins, migrations, Dock reopen
   src/backup.rs            database backup destination check + atomic copy (Rust-side save dialog)
   src/menu.rs              native menu bar; custom items run `window.__bcMenu(id)` in the main webview (web/src/lib/appMenu.ts)
   src/mini.rs              creates/toggles the `mini` window (Window > Mini Player, dock button command)
@@ -135,6 +135,12 @@ src-tauri/
 - App commands are listed in `build.rs` (AppManifest), so each needs an
   `allow-<command>` entry in a capability; a new `#[tauri::command]` is unreachable
   until it is added there and granted (normally to `default.json`, the main window).
+- tauri-plugin-notification 2.7 on macOS posts through notify-rust /
+  mac-notification-sys (NSUserNotification). Its desktop `request_permission`
+  resolves "granted" without prompting (checked in the crate source,
+  2026-10-19); the user controls it in System Settings → Notifications. Under
+  `tauri dev` notifications are attributed to Terminal; only the built app
+  posts under its own name.
 - The mini player window has no audio and no core (verified 2026-10-18, selftest
   `miniPlayer`): it drives the main window's store over `mini:state` /
   `mini:command` events, which keep working with the main window hidden. The

@@ -11,6 +11,7 @@ import { ConfirmButton } from "../components/ConfirmButton";
 import { useClearHistory, usePlayCount, useReleaseCheckStatus, useReleaseMutations } from "../api/queries";
 import { formatPlays } from "../lib/format";
 import { useMenuBar } from "../lib/menuBar";
+import { useTrackNotifications } from "../lib/notifications";
 
 const SHORTCUTS: [string, string][] = [
   ["Space", "Play or pause"], ["← →", "Seek 5 seconds"], ["⇧← ⇧→", "Previous or next track"], ["↑ ↓", "Volume"],
@@ -292,6 +293,7 @@ function PlaybackSettings() {
 /** Things the app does while its window is closed. Desktop app only. */
 function BackgroundSettings() {
   const menuBar = useMenuBar();
+  const notify = useTrackNotifications();
   if (!isTauri) return null;
   return (
     <section id="background">
@@ -301,6 +303,11 @@ function BackgroundSettings() {
         <input type="checkbox" checked={menuBar.enabled} onChange={(e) => menuBar.setEnabled(e.target.checked)} />
         Show playback controls in the menu bar
       </label>
+      <label className="check-row">
+        <input type="checkbox" checked={notify.enabled} onChange={(e) => void notify.setEnabled(e.target.checked)} />
+        Show a notification when the track changes
+      </label>
+      {notify.denied && <p className="muted">Notifications are turned off for Bandcamp Player in System Settings → Notifications.</p>}
     </section>
   );
 }

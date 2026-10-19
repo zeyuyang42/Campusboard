@@ -257,6 +257,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         // Remember size and position. VISIBLE is excluded on purpose: closing
         // the window hides it, and restoring "hidden" would launch an invisible app.
         .plugin(

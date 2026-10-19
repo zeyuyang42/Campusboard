@@ -734,6 +734,9 @@ export async function runSelfTest() {
     // The menu-bar command is registered and granted. Resends the current state, so the icon
     // stays as the setting has it (with the setting off, nothing appears on the screen).
     out.menuBar = await resendMenuBar().then(() => ({ ok: true }), (e) => ({ ok: false, error: String(e) }));
+    // The notification plugin is registered and granted. Read-only: nothing is posted and no
+    // permission is requested.
+    out.notifications = await invoke("plugin:notification|is_permission_granted").then((granted) => ({ ok: true, granted }), (e) => ({ ok: false, error: String(e) }));
     // Overall ok needs every block that reports its own `ok` to pass. The listed blocks must
     // be present as objects: one caught and stored as a string threw.
     const required = ["libraryFilter", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "syncGuards", "newReleases", "preorder", "libraryFile", "window"];
