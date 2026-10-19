@@ -2,9 +2,16 @@ import type { Db } from "../Db.js";
 import { now } from "../Db.js";
 import type { Job, JobItem, JobKind, JobStatus } from "../../types.js";
 
+/**
+ * Create a job with its items. The job is inserted as "pending", which the runner never
+ * picks up, and flipped to "queued" only once its items exist, so a runner pass between
+ * the statements can't see a job with no items. The flip is conditional, so a cancel that
+ * lands in between wins. A crash in between is repaired by resetStaleJobs().
+ */
 export async function createJob(db: Db, kind: JobKind, inputUrl: string, itemUrls: string[]): Promise<Job> {
-  const r = await db.get<{ id: number }>("INSERT INTO jobs (kind, input_url, total) VALUES (?, ?, ?) RETURNING id", [kind, inputUrl, itemUrls.length]);
+  const r = await db.get<{ id: number }>("INSERT INTO jobs (kind, input_url, total, status) VALUES (?, ?, ?, 'pending') RETURNING id", [kind, inputUrl, itemUrls.length]);
   if (itemUrls.length) await addJobItems(db, r!.id, itemUrls);
+  await transitionJob(db, r!.id, ["pending"], "queued");
   return (await getJob(db, r!.id, false))!;
 }
 
@@ -16,8 +23,9 @@ export async function addJobItems(db: Db, jobId: number, urls: string[]): Promis
   await db.run("UPDATE jobs SET total = (SELECT COUNT(*) FROM job_items WHERE job_id = ?), updated_at = ? WHERE id = ?", [jobId, now(), jobId]);
 }
 
+/** Jobs still being created ("pending") are left out until they are queued. */
 export function listJobs(db: Db, limit = 50): Promise<Job[]> {
-  return db.select<Job>("SELECT * FROM jobs ORDER BY id DESC LIMIT ?", [limit]);
+  return db.select<Job>("SELECT * FROM jobs WHERE status != 'pending' ORDER BY id DESC LIMIT ?", [limit]);
 }
 
 export async function getJob(db: Db, id: number, withItems = true): Promise<Job | null> {
@@ -47,6 +55,21 @@ export async function transitionJob(db: Db, id: number, from: JobStatus[], to: J
   return !!r;
 }
 
+/**
+ * Recount a job's total, done and failed from its items, in one statement. The counters are
+ * bumped per item in a second statement, so a crash between the two can leave them one short;
+ * the items are the record.
+ */
+export async function recountJob(db: Db, jobId: number): Promise<void> {
+  await db.run(
+    `UPDATE jobs SET total = (SELECT COUNT(*) FROM job_items WHERE job_id = ?),
+       done = (SELECT COUNT(*) FROM job_items WHERE job_id = ? AND status = 'done'),
+       failed = (SELECT COUNT(*) FROM job_items WHERE job_id = ? AND status = 'failed'),
+       updated_at = ? WHERE id = ?`,
+    [jobId, jobId, jobId, now(), jobId],
+  );
+}
+
 /** Fail every item still queued with one reason, then recount. Each step is idempotent. */
 export async function failQueuedItems(db: Db, jobId: number, error: string): Promise<void> {
   await db.run("UPDATE job_items SET status = 'failed', error = ? WHERE job_id = ? AND status = 'queued'", [error, jobId]);
@@ -66,13 +89,25 @@ export async function setItemResult(db: Db, itemId: number, jobId: number, ok: b
   await db.run(`UPDATE jobs SET ${ok ? "done = done + 1" : "failed = failed + 1"}, updated_at = ? WHERE id = ?`, [now(), jobId]);
 }
 
-/** Cancel every queued or running job of one kind, in one statement. True if any was. */
+/** Cancel every pending, queued or running job of one kind, in one statement. True if any was. */
 export async function cancelJobsOfKind(db: Db, kind: JobKind): Promise<boolean> {
-  const r = await db.run("UPDATE jobs SET status = 'cancelled', updated_at = ? WHERE kind = ? AND status IN ('queued','running')", [now(), kind]);
+  const r = await db.run("UPDATE jobs SET status = 'cancelled', updated_at = ? WHERE kind = ? AND status IN ('pending','queued','running')", [now(), kind]);
   return r.changes > 0;
 }
 
+/**
+ * On startup: re-queue what was running, and settle jobs left "pending" by a crash inside
+ * createJob(). One with items is queued with its total recounted (the items may have been
+ * cut short between chunks); one created without items on purpose (discography, collection:
+ * total 0) is queued as is; one whose items never landed is removed. Each step is idempotent.
+ */
 export async function resetStaleJobs(db: Db): Promise<void> {
   await db.run("UPDATE jobs SET status = 'queued' WHERE status = 'running'");
   await db.run("UPDATE job_items SET status = 'queued' WHERE status = 'running'");
+  await db.run(
+    `UPDATE jobs SET status = 'queued', total = (SELECT COUNT(*) FROM job_items WHERE job_id = jobs.id), updated_at = ?
+     WHERE status = 'pending' AND (total = 0 OR EXISTS (SELECT 1 FROM job_items WHERE job_id = jobs.id))`,
+    [now()],
+  );
+  await db.run("DELETE FROM jobs WHERE status = 'pending'");
 }

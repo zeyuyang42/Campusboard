@@ -101,7 +101,7 @@ export class ReleaseChecker {
     if (!(await this.enabled())) return "off";
     await this.queue.gate.ready();
     if (this.queue.gate.until()) return "cooldown";
-    if (await this.db.get("SELECT 1 FROM jobs WHERE status IN ('queued','running') LIMIT 1")) return "job";
+    if (await this.db.get("SELECT 1 FROM jobs WHERE status IN ('pending','queued','running') LIMIT 1")) return "job";
     return null;
   }
 

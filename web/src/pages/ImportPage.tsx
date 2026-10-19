@@ -15,7 +15,7 @@ export function ImportPage() {
   const nav = useNavigate();
 
   // Refresh library views whenever a job finishes.
-  const activeCount = jobs?.filter((j) => j.status === "queued" || j.status === "running").length ?? 0;
+  const activeCount = jobs?.filter((j) => j.status === "pending" || j.status === "queued" || j.status === "running").length ?? 0;
   const prevActive = useRef(activeCount);
   useEffect(() => { if (prevActive.current > 0 && activeCount === 0) invalidate(); prevActive.current = activeCount; }, [activeCount]); // eslint-disable-line react-hooks/exhaustive-deps
 

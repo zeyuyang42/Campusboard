@@ -228,7 +228,7 @@ async function libraryState(db: Db): Promise<LibraryState> {
   const tracks = await db.select<{ track_id: number }>("SELECT track_id FROM tracks");
   // URLs an unfinished job will fetch anyway (an earlier import of the same file, say).
   const queued = await db.select<{ url: string }>(
-    "SELECT ji.url FROM job_items ji JOIN jobs j ON j.id = ji.job_id WHERE j.status IN ('queued','running') AND ji.status IN ('queued','running')",
+    "SELECT ji.url FROM job_items ji JOIN jobs j ON j.id = ji.job_id WHERE j.status IN ('pending','queued','running') AND ji.status IN ('queued','running')",
   );
   const playlists = await db.select<{ id: number; name: string; created_at: string }>("SELECT id, name, created_at FROM playlists");
   const names = new Map<string, number[]>();

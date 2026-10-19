@@ -26,7 +26,7 @@ export function AccountSettings() {
   useEffect(() => { setUsernameText(account?.username ?? ""); }, [account?.username]);
 
   const job = jobs?.find((j) => j.kind === "collection");
-  const busy = setUsername.isPending || setCookie.isPending || sync.isPending || (!!job && (job.status === "queued" || job.status === "running"));
+  const busy = setUsername.isPending || setCookie.isPending || sync.isPending || (!!job && (job.status === "pending" || job.status === "queued" || job.status === "running"));
 
   const syncNow = async () => {
     setError(null);

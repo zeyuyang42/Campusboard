@@ -6,7 +6,7 @@ import { ChallengeNotice } from "./ChallengeNotice";
 
 export function JobProgress({ job, compact = false }: { job: Job; compact?: boolean }) {
   const qc = useQueryClient();
-  const active = job.status === "queued" || job.status === "running";
+  const active = job.status === "pending" || job.status === "queued" || job.status === "running";
   const { data: challengeUntil } = useChallengeUntil();
   const paused = active && !!challengeUntil;
   const pct = job.total ? Math.round(((job.done + job.failed) / job.total) * 100) : active ? 0 : 100;
