@@ -22,3 +22,6 @@ export function focusFind() {
   const el = document.querySelector<HTMLInputElement>("[data-library-filter]");
   if (el) { el.focus(); el.select(); } else focusSearch();
 }
+
+/** The Library's album grid narrowed to one tag (#71). */
+export const libraryTagPath = (tag: string) => `/library/albums?tag=${encodeURIComponent(tag)}`;

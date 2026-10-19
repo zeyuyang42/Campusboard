@@ -77,12 +77,25 @@ const INLINE_SORTS = sorts(PLAY_COUNT, LAST_PLAYED);
 const MATCH = `(al.title LIKE ? ESCAPE '\\' OR ar.name LIKE ? ESCAPE '\\'
   OR EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND (t.title LIKE ? ESCAPE '\\' OR t.track_artist LIKE ? ESCAPE '\\')))`;
 
-/** The WHERE clause (or "") and its parameters for the Show filter plus the filter text. */
-function albumWhere(filter: AlbumFilter, q: string): { sql: string; params: unknown[] } {
+/**
+ * Albums carrying a tag (#71). Tags stay in albums.tags_json as Bandcamp sends them; json_each
+ * over a few thousand short arrays costs about a millisecond, so there is no tag table to keep
+ * in step. Matching folds ASCII case only ("Ambient" and "ambient" are one tag; "électronique"
+ * and "electronique" are two), like the filter text.
+ */
+const HAS_TAG = "EXISTS (SELECT 1 FROM json_each(al.tags_json) j WHERE j.type = 'text' AND j.value = ? COLLATE NOCASE)";
+
+/** The WHERE clause (or "") and its parameters for the Show filter, the filter text and a tag. */
+function albumWhere(filter: AlbumFilter, q: string, tag = ""): { sql: string; params: unknown[] } {
   const where: string[] = [];
   const params: unknown[] = [];
   const f = FILTERS[filter];
   if (f) where.push(f);
+  const t = tag.trim();
+  if (t) {
+    where.push(HAS_TAG);
+    params.push(t);
+  }
   const term = q.trim();
   if (term) {
     const like = likeContains(term);
@@ -94,10 +107,11 @@ function albumWhere(filter: AlbumFilter, q: string): { sql: string; params: unkn
 
 /**
  * The library's albums. `q` matches album title, artist name, track titles and track
- * artists as a substring (case-insensitive for ASCII), combined with `filter`.
+ * artists as a substring (case-insensitive for ASCII), combined with `filter` and, when
+ * given, one tag.
  */
-export async function listAlbums(db: Db, sort: AlbumSort = "added", filter: AlbumFilter = "all", q = ""): Promise<Album[]> {
-  const w = albumWhere(filter, q);
+export async function listAlbums(db: Db, sort: AlbumSort = "added", filter: AlbumFilter = "all", q = "", tag = ""): Promise<Album[]> {
+  const w = albumWhere(filter, q, tag);
   const sql = `${ALBUM_SELECT} ${w.sql} ORDER BY ${SORTS[sort] ?? SORTS.added}`;
   return (await db.select<AlbumRow>(sql, w.params)).map(rowToAlbum);
 }
@@ -107,8 +121,8 @@ export async function listAlbums(db: Db, sort: AlbumSort = "added", filter: Albu
  * order, each album's tracks in track order. Unstreamable tracks are included (the player
  * skips them; a playlist keeps them). No stream URLs are fetched.
  */
-export async function listAlbumTracks(db: Db, sort: AlbumSort = "added", filter: AlbumFilter = "all", q = ""): Promise<Track[]> {
-  const w = albumWhere(filter, q);
+export async function listAlbumTracks(db: Db, sort: AlbumSort = "added", filter: AlbumFilter = "all", q = "", tag = ""): Promise<Track[]> {
+  const w = albumWhere(filter, q, tag);
   const sql = `
     WITH fa AS (
       SELECT al.id AS album_id, ROW_NUMBER() OVER (ORDER BY ${INLINE_SORTS[sort] ?? INLINE_SORTS.added}) AS ord
@@ -116,6 +130,25 @@ export async function listAlbumTracks(db: Db, sort: AlbumSort = "added", filter:
     ${TRACK_SELECT} JOIN fa ON fa.album_id = t.album_id
     ORDER BY fa.ord, t.track_num, t.id`;
   return (await db.select<TrackRow>(sql, w.params)).map(rowToTrack);
+}
+
+export interface TagCount { tag: string; album_count: number }
+
+/**
+ * Every tag in the library with how many albums carry it (under the Show `filter`), most
+ * used first, then by name. Spellings that differ only in ASCII case count as one tag, shown
+ * in the form that sorts first (the capitalised genre Bandcamp lists before the free tags).
+ */
+export async function listTags(db: Db, filter: AlbumFilter = "all"): Promise<TagCount[]> {
+  const w = albumWhere(filter, "");
+  return db.select<TagCount>(
+    `SELECT MIN(j.value) AS tag, COUNT(DISTINCT al.id) AS album_count
+     FROM albums al, json_each(al.tags_json) j
+     ${w.sql ? `${w.sql} AND` : "WHERE"} j.type = 'text' AND trim(j.value) <> ''
+     GROUP BY j.value COLLATE NOCASE
+     ORDER BY album_count DESC, tag COLLATE NOCASE`,
+    w.params,
+  );
 }
 
 export async function getAlbum(db: Db, id: number): Promise<Album | null> {
