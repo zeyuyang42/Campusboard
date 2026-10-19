@@ -1,6 +1,13 @@
 import { create } from "zustand";
-import { audioEventPatch, PlayCounter, swappingAfter, positionToGain, stepVolume, toggleAction, toggleMute, type AudioEventType, type CountedPlay, type QueueTrack, type RepeatMode, type Track } from "@bc/core";
-import { audioEl } from "./audio";
+import {
+  audioEventPatch, PlayCounter, swappingAfter, positionToGain, stepVolume, toggleAction, toggleMute,
+  crossfadeGains, elementRole, fadeProgress, fadeSeconds, gaplessDelayMs, parsePlaybackSettings, preloadDue, preloadStale, routeElementEvent,
+  standbyUsable, transitionAfter, transitionKind, transitionPoint, upcomingIndex,
+  CROSSFADE_MIN_SEC, DEFAULT_PLAYBACK, GAPLESS_ARM_SEC, GAPLESS_START_LEAD_MS, PLAYBACK_SETTING_KEY, STANDBY_PRIME_MS, TRANSITION_IDLE,
+  type AudioEventType, type CountedPlay, type ElementEventType, type PlaybackSettings, type QueueTrack, type RepeatMode, type Track,
+  type TransitionEvent, type TransitionKind, type TransitionState,
+} from "@bc/core";
+import { audioEls } from "./audio";
 import { getCore, invalidateQueries } from "../api/core";
 import { friendlyError } from "../lib/errors";
 
@@ -25,6 +32,10 @@ export interface PlayerState {
   repeat: RepeatMode;
   error: string | null;
   queueOpen: boolean;
+  /** Settings > Playback (#35): start the next track exactly when the current one ends. */
+  gapless: boolean;
+  /** Settings > Playback: crossfade between tracks of different albums, in seconds (0 = off). */
+  crossfadeSec: number;
   current: () => QueueTrack | null;
   playTracks: (tracks: Track[], start?: number) => void;
   play: () => void;
@@ -48,6 +59,8 @@ export interface PlayerState {
   toggleShuffle: () => void;
   cycleRepeat: () => void;
   setQueueOpen: (open: boolean) => void;
+  /** Change and save the Gapless / Crossfade settings. */
+  setPlayback: (patch: Partial<PlaybackSettings>) => void;
   /** `volume` is a slider position (persist.ts derives it from the saved gain). */
   hydrate: (s: { queue: QueueTrack[]; index: number; position: number; volume: number; shuffle: boolean; repeat: RepeatMode }) => void;
 }
@@ -62,6 +75,15 @@ function shuffled<T>(arr: T[]): T[] {
   }
   return a;
 }
+
+// ---- the two elements (#35) ----
+// The active element plays the current track: the queue index, status, wantsPlay, the play
+// counter, the position and Now Playing all follow it. The other one is the standby (the next
+// track preloading at volume 0), the fading one (the previous track playing out its end or
+// fading out after a transition), or idle. Events are routed by role (core's routeElementEvent).
+let activeIdx = 0;
+const active = () => audioEls[activeIdx];
+const other = () => audioEls[1 - activeIdx];
 
 let retriedFor: number | null = null;
 let pendingSeek: number | null = null;
@@ -80,7 +102,8 @@ let swapping = false;
 const plays = new PlayCounter();
 /** A fresh playback of `track` starts now (new source, repeat-one, Previous, play after the end). */
 function startPlayback(track: QueueTrack) {
-  plays.start(track.id, Number.isFinite(audioEl.duration) ? audioEl.duration : track.duration);
+  const el = active();
+  plays.start(track.id, Number.isFinite(el.duration) ? el.duration : track.duration);
 }
 /** Seconds listened in the current playback (read by the selftest). */
 export const listenedSeconds = () => plays.listenedSeconds;
@@ -92,9 +115,11 @@ function recordPlay(p: CountedPlay) {
     .catch(() => undefined); // history is best-effort; playback never depends on it
 }
 
-/** Resolve a fresh CDN URL for the track and point the audio element at it. */
+/** Resolve a fresh CDN URL for the track and point the active audio element at it. */
 /** Plays when it is ready if `wantsPlay` is still set then; skips on to the next track on failure only if so. */
 function load(track: QueueTrack, force = false) {
+  // A new source for the active element: a preload or a fade in progress is moot.
+  cancelTransition();
   const seq = ++loadSeq;
   loading = true;
   retriedFor = force ? track.id : null;
@@ -104,14 +129,15 @@ function load(track: QueueTrack, force = false) {
       const { url } = await core.getFreshStreamUrl(track.id, force);
       if (seq !== loadSeq) return; // a newer load superseded this one
       loading = false;
-      swapping = swappingAfter(swapping, { type: "load", paused: audioEl.paused });
-      audioEl.src = url;
-      audioEl.load();
+      const el = active();
+      swapping = swappingAfter(swapping, { type: "load", paused: el.paused });
+      el.src = url;
+      el.load();
       // A retry after a media error continues the same playback; anything else is a fresh one.
       if (!force || plays.trackId !== track.id) plays.start(track.id, track.duration);
       // A pause pressed while the URL was resolving wins; a play pressed then starts it here.
       if (usePlayer.getState().wantsPlay) {
-        await audioEl.play().catch((e: unknown) => {
+        await el.play().catch((e: unknown) => {
           if (seq === loadSeq) swapping = swappingAfter(swapping, { type: "playRejected" });
           // Autoplay refused: nothing will play until the listener asks, so stop intending to.
           if (seq === loadSeq && (e as { name?: unknown } | null)?.name === "NotAllowedError") usePlayer.setState({ wantsPlay: false, status: "paused" });
@@ -131,6 +157,233 @@ function load(track: QueueTrack, force = false) {
   })();
 }
 
+// ---- gapless and crossfade (#35; the rules are in core's transition.ts) ----
+let tx: TransitionState = TRANSITION_IDLE;
+/** Bumped by every cancel, so a preload's URL that arrives late is dropped. */
+let txSeq = 0;
+/** The URL the standby element was given, so a stale canplay can't mark another one ready. */
+let preloadUrl: string | null = null;
+let armTimer: ReturnType<typeof setTimeout> | null = null;
+let fadeTimer: ReturnType<typeof setInterval> | null = null;
+let tailTimer: ReturnType<typeof setTimeout> | null = null;
+/** How often the fade's volumes are updated while the window is visible (timeupdate covers a hidden one). */
+const FADE_TICK_MS = 50;
+/**
+ * Start the next element this long before the end for a gapless switch; null starts it only
+ * on "ended". Diagnostics (dev builds) can change it to compare the two.
+ */
+let startLeadMs: number | null = GAPLESS_START_LEAD_MS;
+
+interface TransitionRecord { at: number; from: number | null; to: number; kind: TransitionKind | "ended"; fadeSec: number; prevRemaining: number }
+/** The last few transitions, for the selftest and the browser-mode measurements. */
+const transitions: TransitionRecord[] = [];
+
+const finitePositive = (x: number) => Number.isFinite(x) && x > 0;
+const dispatch = (e: TransitionEvent) => { tx = transitionAfter(tx, e); };
+const settingsOf = (s: PlayerState): PlaybackSettings => ({ gapless: s.gapless, crossfadeSec: s.crossfadeSec });
+
+function clearTimers() {
+  if (armTimer) clearTimeout(armTimer);
+  if (fadeTimer) clearInterval(fadeTimer);
+  if (tailTimer) clearTimeout(tailTimer);
+  armTimer = fadeTimer = tailTimer = null;
+}
+
+/** Stop an element and drop its source, so it holds no stream and is never Now Playing. */
+function release(el: HTMLAudioElement) {
+  el.pause();
+  el.muted = baseMuted[audioEls.indexOf(el)];
+  if (el.hasAttribute("src")) {
+    el.removeAttribute("src");
+    el.load();
+  }
+  el.volume = 0;
+}
+
+/** Drop any preload or fade: release the other element and give the active one its full gain. */
+function cancelTransition() {
+  txSeq++;
+  clearTimers();
+  dispatch({ type: "invalidate" });
+  preloadUrl = null;
+  release(other());
+  active().volume = positionToGain(usePlayer.getState().volume);
+}
+
+/** The fade (or the gapless tail) is over: the previous element goes, the new one plays at full gain. */
+function finishFade() {
+  if (tx.phase !== "fading") return;
+  clearTimers();
+  dispatch({ type: "fadeDone" });
+  const prev = other();
+  prev.pause();
+  active().volume = positionToGain(usePlayer.getState().volume);
+  // Released a moment later: tearing a player down in the same instant the next one starts
+  // delayed that start by ~100 ms in WebKit. Paused, it is not Now Playing meanwhile. Skipped
+  // if it was given a new source (the next preload) or took over again by then.
+  const src = prev.src;
+  setTimeout(() => { if (prev !== active() && prev.src === src && tx.phase !== "preloading" && tx.phase !== "ready") release(prev); }, RELEASE_DELAY_MS);
+}
+const RELEASE_DELAY_MS = 1000;
+
+function fadeTick() {
+  if (tx.phase !== "fading") return;
+  const prev = other();
+  if (prev.ended) return finishFade();
+  if (tx.fadeSec <= 0) return; // a gapless tail plays its last milliseconds at full gain
+  const p = fadeProgress(prev.currentTime, tx.fadeStart, tx.fadeSec);
+  const g = crossfadeGains(p, usePlayer.getState().volume);
+  prev.volume = g.out;
+  active().volume = g.in;
+  if (p >= 1) finishFade();
+}
+
+function upcoming(): { index: number; track: QueueTrack } | null {
+  const { queue, index, repeat } = usePlayer.getState();
+  const ni = upcomingIndex(queue.length, index, repeat);
+  return ni == null || !queue[ni] ? null : { index: ni, track: queue[ni] };
+}
+
+/** What the coming transition is, or null when there is none to prepare. */
+function plan() {
+  const s = usePlayer.getState();
+  const cur = s.current();
+  const up = upcoming();
+  const duration = active().duration;
+  if (!cur || !up || !finitePositive(duration)) return null;
+  const settings = settingsOf(s);
+  const kind = transitionKind(cur, up.track, settings, duration);
+  const fadeSec = kind === "crossfade" ? fadeSeconds(settings, duration, up.track.duration) : 0;
+  return { up, kind, fadeSec, point: transitionPoint(kind, duration, fadeSec) };
+}
+
+/** Resolve the next track's fresh URL and load it into the standby element at volume 0. */
+function preload(track: QueueTrack) {
+  dispatch({ type: "preload", trackId: track.id });
+  const seq = ++txSeq;
+  void (async () => {
+    try {
+      const { url, expires_at } = await (await getCore()).getFreshStreamUrl(track.id);
+      if (seq !== txSeq || tx.phase !== "preloading") return;
+      dispatch({ type: "resolved", expiresAt: expires_at });
+      const el = other();
+      // Volume 0 while it waits: it is paused (and only muted while priming), so it is silent
+      // and starts a crossfade from silence. Volume 0 alone would not keep a PLAYING element
+      // out of Now Playing (WebKit still counts it eligible), which is why prime() mutes.
+      el.volume = 0;
+      el.src = url;
+      preloadUrl = el.src; // as the element normalised it, for the canplay check
+      primedUrl = null; // the same URL may come round again (repeat, replaying an album)
+      el.load();
+    } catch {
+      if (seq === txSeq) dispatch({ type: "failed" }); // it loads the plain way at the end
+    }
+  })();
+}
+
+/** The source the standby element primed (or is priming), so canplay and canplaythrough prime it once. */
+let primedUrl: string | null = null;
+/** Each element's `muted` as audio.ts set it (true in a muted selftest); priming puts it back. */
+const baseMuted = audioEls.map((el) => el.muted);
+
+/**
+ * Play the loaded standby muted for a moment, then pause it back at 0, before calling it ready.
+ * WebKit (AVFoundation) prerolls a playing element: a primed element starts in ~35-60 ms
+ * against ~130-300 ms for one that only loaded (measured in Playwright's WebKit, see #35).
+ * Muted, not volume 0, so it is never Now Playing eligible meanwhile and never takes over
+ * Control Center or the media keys from the active element.
+ */
+function prime(el: HTMLAudioElement) {
+  const seq = txSeq;
+  const i = audioEls.indexOf(el);
+  primedUrl = el.src;
+  el.muted = true;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const finish = () => {
+    el.removeEventListener("timeupdate", onProgress);
+    if (timer) clearTimeout(timer);
+    if (seq !== txSeq || tx.phase !== "preloading") return; // cancelled: release() reset the element
+    el.pause();
+    el.currentTime = 0;
+    el.muted = baseMuted[i];
+    dispatch({ type: "canPlay" });
+  };
+  // Done once its clock has run for a moment. A hidden window may not advance muted media,
+  // so a timer ends the prime either way.
+  const onProgress = () => { if (el.currentTime >= STANDBY_PRIME_MS / 1000) finish(); };
+  el.addEventListener("timeupdate", onProgress);
+  timer = setTimeout(finish, STANDBY_PRIME_MS + 4000);
+  void el.play().catch(() => undefined);
+}
+
+/**
+ * Called on the active element's progress and by the arm timer: preload when due, and start
+ * the next track at its point. Returns true if it started it. `fromEnded`: the active element
+ * has just ended, so start now if the standby can (a missed fade becomes a plain switch).
+ */
+function stepTransition(fromEnded = false): boolean {
+  if (tx.phase === "fading") { fadeTick(); return false; }
+  const s = usePlayer.getState();
+  const el = active();
+  if (preloadStale(tx, upcoming()?.track.id ?? null)) cancelTransition();
+  const p = plan();
+  if (!p || p.kind === "plain" || loading || !s.wantsPlay || (!fromEnded && el.paused)) {
+    if (p?.kind === "plain" && tx.phase !== "idle") cancelTransition();
+    return false;
+  }
+  if (tx.phase === "idle" && preloadDue(el.currentTime, p.point)) preload(p.up.track);
+  if (tx.phase === "ready" && !standbyUsable(tx, p.up.track.id, Date.now())) {
+    cancelTransition(); // the preloaded URL is about to expire: the plain path fetches a fresh one
+    return false;
+  }
+  if (tx.phase !== "ready") return false;
+  if (fromEnded) { start(p.up, 0, "ended"); return true; }
+  if (p.kind === "gapless" && startLeadMs == null) return false; // waits for "ended"
+  const lead = p.kind === "gapless" ? (startLeadMs ?? 0) : 0;
+  const remaining = p.point - el.currentTime;
+  if (remaining > GAPLESS_ARM_SEC) return false;
+  const wait = gaplessDelayMs(remaining, el.playbackRate || 1, lead);
+  if (wait <= 1) { start(p.up, p.fadeSec, p.kind); return true; }
+  // Close to the point: poll the playhead (it is interpolated, unlike timeupdate's 250 ms steps).
+  if (armTimer) clearTimeout(armTimer);
+  armTimer = setTimeout(() => { armTimer = null; stepTransition(); }, wait > 40 ? wait - 25 : Math.max(1, wait - 1));
+  return false;
+}
+
+/** The standby element takes over as the active one. */
+function start(up: { index: number; track: QueueTrack }, fadeSec: number, kind: TransitionKind | "ended") {
+  clearTimers();
+  const prev = active();
+  const next = other();
+  const s = usePlayer.getState();
+  // Started late (a seek into the fade): fade over what is left, so it still ends at the end.
+  if (fadeSec > 0) {
+    const left = prev.duration - prev.currentTime;
+    if (Number.isFinite(left)) fadeSec = left >= CROSSFADE_MIN_SEC ? Math.min(fadeSec, left) : 0;
+  }
+  transitions.push({ at: performance.now(), from: s.current()?.id ?? null, to: up.track.id, kind, fadeSec, prevRemaining: prev.duration - prev.currentTime });
+  if (transitions.length > 10) transitions.shift();
+  dispatch({ type: "start", fadeStart: prev.currentTime, fadeSec });
+  activeIdx = 1 - activeIdx;
+  preloadUrl = null;
+  swapping = false;
+  retriedFor = null;
+  pendingSeek = null;
+  next.volume = fadeSec > 0 ? 0 : positionToGain(s.volume);
+  // From here the play counter, the queue index, the position and Now Playing follow `next`.
+  plays.start(up.track.id, finitePositive(next.duration) ? next.duration : up.track.duration);
+  lastTick = 0;
+  usePlayer.setState({ index: up.index, position: 0, duration: finitePositive(next.duration) ? next.duration : (up.track.duration ?? 0), error: null });
+  void next.play().catch((e: unknown) => {
+    if (active() !== next) return;
+    if ((e as { name?: unknown } | null)?.name === "NotAllowedError") usePlayer.setState({ wantsPlay: false, status: "paused" });
+  });
+  if (prev.ended || prev.paused) finishFade();
+  else if (fadeSec > 0) fadeTimer = setInterval(fadeTick, FADE_TICK_MS);
+  // A gapless tail ends on its own within the lead; this only guards against one that stalls.
+  else tailTimer = setTimeout(finishFade, Math.max(0, startLeadMs ?? 0) + 1500);
+}
+
 export const usePlayer = create<PlayerState>((set, get) => ({
   queue: [],
   originalOrder: null,
@@ -144,6 +397,8 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   repeat: "off",
   error: null,
   queueOpen: false,
+  gapless: DEFAULT_PLAYBACK.gapless,
+  crossfadeSec: DEFAULT_PLAYBACK.crossfadeSec,
 
   current: () => get().queue[get().index] ?? null,
 
@@ -169,37 +424,43 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     const cur = get().current();
     if (!cur) return;
     set({ wantsPlay: true });
+    const el = active();
     // The track's URL is still resolving: load() starts it when it arrives.
     if (loading) set({ status: "loading" });
-    else if (!audioEl.src) load(cur);
+    else if (!el.src) load(cur);
     else {
       // Play after the queue ended restarts the track from the top: a new playback.
-      if (audioEl.ended) startPlayback(cur);
-      void audioEl.play().catch(() => undefined);
+      if (el.ended) startPlayback(cur);
+      void el.play().catch(() => undefined);
+      // Paused mid-crossfade: both carry on from where they were.
+      if (tx.phase === "fading" && !other().ended) void other().play().catch(() => undefined);
     }
   },
   pause: () => {
     // While a track starts there may be no "pause" event to report it (the element can
     // already be paused), so the status follows the intent here.
     set(get().status === "loading" ? { wantsPlay: false, status: "paused" } : { wantsPlay: false });
-    audioEl.pause();
+    if (armTimer) { clearTimeout(armTimer); armTimer = null; }
+    active().pause();
+    if (tx.phase === "fading") other().pause(); // a crossfade pauses as a whole
   },
   toggle: () => (toggleAction(get().status, get().wantsPlay) === "pause" ? get().pause() : get().play()),
 
   next: (auto = false) => {
     const { queue, index, repeat } = get();
     if (!queue.length) return;
+    const el = active();
     if (auto && repeat === "one") {
       startPlayback(queue[index]);
-      audioEl.currentTime = 0;
-      void audioEl.play().catch(() => undefined);
+      el.currentTime = 0;
+      void el.play().catch(() => undefined);
       return;
     }
     let ni = index + 1;
     if (ni >= queue.length) {
       // End of queue: wrap when repeating (or when the user pressed Next), otherwise stop.
       if (auto && repeat !== "all") {
-        audioEl.pause();
+        el.pause();
         set({ status: "paused", wantsPlay: false });
         return;
       }
@@ -211,9 +472,11 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   prev: () => {
     const { queue, index } = get();
     if (!queue.length) return;
-    if (audioEl.currentTime > 3 || index === 0) {
+    const el = active();
+    if (el.currentTime > 3 || index === 0) {
+      if (tx.phase === "fading") cancelTransition();
       startPlayback(queue[index]);
-      audioEl.currentTime = 0;
+      el.currentTime = 0;
       return;
     }
     const ni = index - 1;
@@ -227,16 +490,23 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     load(queue[i]);
   },
   seek: (sec) => {
+    // Seeking cancels a crossfade: the new track carries on alone at full volume. A preload
+    // stays (still the next track); the start timer is re-armed from the new position.
+    if (tx.phase === "fading") cancelTransition();
+    if (armTimer) { clearTimeout(armTimer); armTimer = null; }
     plays.seeked();
-    if (Number.isFinite(audioEl.duration)) audioEl.currentTime = Math.max(0, Math.min(sec, audioEl.duration));
+    const el = active();
+    if (Number.isFinite(el.duration)) el.currentTime = Math.max(0, Math.min(sec, el.duration));
     else pendingSeek = sec;
     set({ position: sec });
   },
-  seekBy: (d) => get().seek(audioEl.currentTime + d),
+  seekBy: (d) => get().seek(active().currentTime + d),
   setVolume: (v) => {
     const vol = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0;
-    audioEl.volume = positionToGain(vol);
     set({ volume: vol });
+    // Mid-crossfade both gains follow the new level at once; otherwise only the active one plays.
+    if (tx.phase === "fading" && tx.fadeSec > 0) fadeTick();
+    else active().volume = positionToGain(vol);
   },
   stepVolume: (delta) => get().setVolume(stepVolume(get().volume, delta)),
   toggleMute: () => {
@@ -297,9 +567,16 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   },
   cycleRepeat: () => set({ repeat: get().repeat === "off" ? "all" : get().repeat === "all" ? "one" : "off" }),
   setQueueOpen: (open) => set({ queueOpen: open }),
+  // A queue, repeat or settings change that alters the next track is picked up on the next
+  // progress report: the stale preload is dropped (preloadStale) and the new one made.
+  setPlayback: (patch) => {
+    const next = parsePlaybackSettings({ ...settingsOf(get()), ...patch });
+    set(next);
+    playbackWrites = playbackWrites.then(async () => (await getCore()).setSetting(PLAYBACK_SETTING_KEY, next)).catch(() => undefined);
+  },
 
   hydrate: (s) => {
-    audioEl.volume = positionToGain(s.volume);
+    active().volume = positionToGain(s.volume);
     // Ignore anything that isn't a full queue entry (e.g. state written by older versions or tools).
     const curId = s.queue[s.index]?.id;
     const queue = s.queue.filter((t) => t && typeof t.id === "number" && typeof t.title === "string" && typeof t.album_id === "number");
@@ -313,57 +590,124 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   },
 }));
 
+// settings.key='playback' writes run one after another, so quick changes can't land out of order.
+let playbackWrites: Promise<unknown> = Promise.resolve();
+/** Read the saved Gapless / Crossfade settings (called once at startup). */
+export async function loadPlaybackSettings() {
+  const saved = await getCore().then((c) => c.getSetting(PLAYBACK_SETTING_KEY)).catch(() => null);
+  usePlayer.setState(parsePlaybackSettings(saved));
+}
+
 // ---- audio element wiring ----
+// Both elements get the same listeners; routeElementEvent decides what an event feeds by the
+// element's role when it is handled, so a preload or a fade-out never changes the store.
 let lastTick = 0;
-audioEl.addEventListener("timeupdate", () => {
-  // Every report feeds listening history; only the store update below is throttled.
-  const counted = plays.progress(audioEl.currentTime, performance.now(), audioEl.playbackRate);
-  if (counted) recordPlay(counted);
-  const now = performance.now();
-  if (now - lastTick < 250) return;
-  lastTick = now;
-  usePlayer.setState({ position: audioEl.currentTime });
-});
-audioEl.addEventListener("loadedmetadata", () => {
-  usePlayer.setState({ duration: audioEl.duration });
-  plays.setDuration(audioEl.duration);
-  if (pendingSeek != null) {
-    plays.seeked();
-    audioEl.currentTime = pendingSeek;
-    pendingSeek = null;
-  }
-});
-audioEl.addEventListener("durationchange", () => {
-  usePlayer.setState({ duration: audioEl.duration });
-  plays.setDuration(audioEl.duration);
-});
-// Any jump of the playhead (seek bar, keys, media keys, restore) is not listening; a jump back
-// to the start after the play counted is a manual restart (a fresh playback).
-audioEl.addEventListener("seeking", () => plays.seeked(audioEl.currentTime));
-// play/playing/pause/waiting: the rules are in core's audioEvents.ts (#55). The element's
-// state is read when the event is handled, so a stale queued event can't undo a pause.
-const onAudioEvent = (type: AudioEventType) => () => {
-  const patch = audioEventPatch(type, { paused: audioEl.paused, ended: audioEl.ended, internal: loading || swapping });
+const onAudioEvent = (type: AudioEventType) => {
+  const el = active();
+  const patch = audioEventPatch(type, { paused: el.paused, ended: el.ended, internal: loading || swapping });
   if (type === "pause") swapping = swappingAfter(swapping, { type: "pause" });
-  if (type === "playing") swapping = swappingAfter(swapping, { type: "playing", paused: audioEl.paused });
+  if (type === "playing") swapping = swappingAfter(swapping, { type: "playing", paused: el.paused });
+  // A pause from outside (the system) mid-crossfade stops the fading track too.
+  if (type === "pause" && el.paused && tx.phase === "fading") other().pause();
   if (patch) usePlayer.setState(patch);
 };
-for (const type of ["play", "playing", "pause", "waiting"] as const) audioEl.addEventListener(type, onAudioEvent(type));
-/** audio.paused, for the selftest's record of a toggle (only this module touches the element). */
-export const elementPaused = () => audioEl.paused;
-audioEl.addEventListener("ended", () => usePlayer.getState().next(true));
-audioEl.addEventListener("error", () => {
-  swapping = swappingAfter(swapping, { type: "error" });
-  const cur = usePlayer.getState().current();
-  if (!cur) return;
-  if (retriedFor !== cur.id) {
-    // Most likely an expired stream URL: ask the server to re-scrape and try once more. A
-    // paused player (the listener, or the system) stays paused after the retry.
-    if (usePlayer.getState().status === "paused") usePlayer.setState({ wantsPlay: false });
-    load(cur, true);
-    return;
+
+const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => void>> = {
+  timeupdate: (el) => {
+    // Every report feeds listening history; only the store update below is throttled.
+    const counted = plays.progress(el.currentTime, performance.now(), el.playbackRate);
+    if (counted) recordPlay(counted);
+    stepTransition();
+    if (el !== active()) return; // it just handed over: the new track's position is 0
+    const now = performance.now();
+    if (now - lastTick < 250) return;
+    lastTick = now;
+    usePlayer.setState({ position: el.currentTime });
+  },
+  loadedmetadata: (el) => {
+    usePlayer.setState({ duration: el.duration });
+    plays.setDuration(el.duration);
+    if (pendingSeek != null) {
+      plays.seeked();
+      el.currentTime = pendingSeek;
+      pendingSeek = null;
+    }
+  },
+  durationchange: (el) => {
+    usePlayer.setState({ duration: el.duration });
+    plays.setDuration(el.duration);
+  },
+  // Any jump of the playhead (seek bar, keys, media keys, restore) is not listening; a jump back
+  // to the start after the play counted is a manual restart (a fresh playback).
+  seeking: (el) => plays.seeked(el.currentTime),
+  // play/playing/pause/waiting: the rules are in core's audioEvents.ts (#55). The element's
+  // state is read when the event is handled, so a stale queued event can't undo a pause.
+  play: () => onAudioEvent("play"),
+  playing: () => onAudioEvent("playing"),
+  pause: () => onAudioEvent("pause"),
+  waiting: () => onAudioEvent("waiting"),
+  // Gapless: the standby starts here if the early start didn't happen; otherwise the plain way.
+  ended: () => { if (!stepTransition(true)) usePlayer.getState().next(true); },
+  error: () => {
+    swapping = swappingAfter(swapping, { type: "error" });
+    const cur = usePlayer.getState().current();
+    if (!cur) return;
+    if (retriedFor !== cur.id) {
+      // Most likely an expired stream URL: ask the server to re-scrape and try once more. A
+      // paused player (the listener, or the system) stays paused after the retry.
+      if (usePlayer.getState().status === "paused") usePlayer.setState({ wantsPlay: false });
+      load(cur, true);
+      return;
+    }
+    usePlayer.setState({ error: `Couldn't play "${cur.title}"`, status: "paused", wantsPlay: false });
+    const { queue, index } = usePlayer.getState();
+    if (index < queue.length - 1) setTimeout(() => usePlayer.getState().next(true), 800);
+  },
+};
+
+const EVENTS: ElementEventType[] = ["timeupdate", "loadedmetadata", "durationchange", "seeking", "play", "playing", "pause", "waiting", "ended", "error", "canplay", "canplaythrough"];
+audioEls.forEach((el, i) => {
+  for (const type of EVENTS) {
+    el.addEventListener(type, () => {
+      const route = routeElementEvent(elementRole(i, activeIdx, tx), type);
+      switch (route) {
+        case "store": storeHandlers[type]?.(el); return;
+        case "canPlay":
+          // Only for the source this preload set; primed once, from its metadata on (WebKit may
+          // not buffer a paused element further, and priming makes it load).
+          if (el.src === preloadUrl && el.readyState >= HTMLMediaElement.HAVE_METADATA && primedUrl !== el.src) prime(el);
+          return;
+        case "failed": dispatch({ type: "failed" }); preloadUrl = null; release(el); return;
+        case "fadeDone": finishFade(); return;
+        case "fadeTick": fadeTick(); return;
+        default: return;
+      }
+    });
   }
-  usePlayer.setState({ error: `Couldn't play "${cur.title}"`, status: "paused", wantsPlay: false });
-  const { queue, index } = usePlayer.getState();
-  if (index < queue.length - 1) setTimeout(() => usePlayer.getState().next(true), 800);
 });
+
+/** The element playing the current track (selftest, persistence; only this module changes it). */
+export const activeAudio = () => active();
+/** audio.paused, for the selftest's record of a toggle (only this module touches the elements). */
+export const elementPaused = () => active().paused;
+/** The active element's playhead, for the saved play state. */
+export const playbackPosition = () => active().currentTime;
+/** The transition machinery's state, for the selftest and the browser-mode measurements. */
+export const transitionInfo = () => ({
+  phase: tx.phase, active: activeIdx, transitions: transitions.slice(),
+  volumes: [audioEls[0].volume, audioEls[1].volume], paused: [audioEls[0].paused, audioEls[1].paused],
+});
+
+// Exposed for diagnostics: __bcAudio is always the active element.
+Object.defineProperty(window, "__bcAudio", { get: active, configurable: true });
+(window as unknown as { __bcPlayer?: unknown }).__bcPlayer = {
+  elements: audioEls,
+  info: transitionInfo,
+  // Dev builds only: compare starting on "ended" (null) with an early start, and mute both
+  // elements for a silent Playwright run (priming and release restore this, not unmuted).
+  ...(import.meta.env.DEV ? {
+    store: usePlayer, // the app's own instance (an import from a test can get a second one after HMR)
+    setStartLead: (ms: number | null) => { startLeadMs = ms; },
+    mute: () => audioEls.forEach((el, i) => { baseMuted[i] = true; el.muted = true; }),
+  } : {}),
+};

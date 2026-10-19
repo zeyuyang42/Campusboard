@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { friendlyError } from "../lib/errors";
-import { PRESETS, parseThemeJson, type Theme } from "@bc/core";
+import { CROSSFADE_MAX_SEC, PRESETS, parseThemeJson, type Theme } from "@bc/core";
+import { usePlayer } from "../player/store";
 import { useTheme } from "../theme/store";
 import { appInfo, pickBackgroundImage, pickTextFile, revealDataDir, saveTextFile } from "../lib/files";
 import { isTauri } from "../lib/env";
@@ -53,6 +54,8 @@ export function SettingsPage() {
       <AccountSettings />
 
       <NewReleaseSettings />
+
+      <PlaybackSettings />
 
       <ListeningHistory />
 
@@ -255,6 +258,30 @@ function ListeningHistory() {
         ) : <span className="muted">Nothing recorded yet.</span>}
       </div>
       {clear.error && <div className="notice error">Couldn't clear the history. {String((clear.error as Error).message ?? clear.error)}</div>}
+    </section>
+  );
+}
+
+function PlaybackSettings() {
+  const gapless = usePlayer((s) => s.gapless);
+  const crossfadeSec = usePlayer((s) => s.crossfadeSec);
+  const setPlayback = usePlayer((s) => s.setPlayback);
+  return (
+    <section id="playback">
+      <h2>Playback</h2>
+      <p className="muted">
+        The next track loads in the background shortly before the current one ends. Crossfade only applies
+        between different albums, so an album's own transitions always play as recorded.
+      </p>
+      <label className="check-row">
+        <input type="checkbox" checked={gapless} onChange={(e) => setPlayback({ gapless: e.target.checked })} />
+        Gapless playback
+      </label>
+      <div className="field-row">
+        <label>Crossfade <span className="muted">{crossfadeSec > 0 ? `${crossfadeSec} s` : "Off"}</span>
+          <input type="range" min={0} max={CROSSFADE_MAX_SEC} step={1} value={crossfadeSec} onChange={(e) => setPlayback({ crossfadeSec: Number(e.target.value) })} />
+        </label>
+      </div>
     </section>
   );
 }
