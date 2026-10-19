@@ -125,7 +125,7 @@ appearance as it changes and needs both sides as `paletteDark` and
 `paletteLight` (same keys as `palette`); every preset carries the pair, so
 choosing Settings → Base → Match system keeps the preset's colors. New
 libraries start on Dusk following the system. `"contrast": "high"` (the High
-contrast preset) holds the art-derived accent to WCAG AAA (7:1). Version 0.4
+contrast preset) holds the art-derived accent to WCAG AAA (7:1) on every surface. Version 0.4
 and earlier refuse a `"system"` file; dark and light files with a pair import
 there, since unknown keys are dropped.
 

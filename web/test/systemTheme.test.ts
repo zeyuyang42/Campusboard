@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MINI_EVENTS, PRESETS } from "@bc/core";
+import { MINI_EVENTS, PRESETS, type Theme } from "@bc/core";
 import { boot, flush, useFakeTimers, type Harness } from "./harness";
 
 vi.mock("../src/mini/bus", () => ({
@@ -28,6 +28,9 @@ let h: Harness;
 let theme: typeof import("../src/theme/store");
 beforeEach(async () => {
   useFakeTimers();
+  // Node 25 has its own half-working localStorage global; give each test a clean one.
+  const store = new Map<string, string>();
+  vi.stubGlobal("localStorage", { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => { store.set(k, String(v)); }, removeItem: (k: string) => { store.delete(k); }, clear: () => store.clear() });
   h = await boot(); // resets modules: a fresh theme store per test
   theme = await import("../src/theme/store");
   document.documentElement.removeAttribute("style");
@@ -98,12 +101,38 @@ describe("following the system appearance", () => {
   });
 });
 
+/** Quit and launch again on the same database: fresh modules, same settings and play count. */
+async function relaunch(plays: number) {
+  const settings = new Map(h.core.settings);
+  h = await boot();
+  for (const [k, v] of settings) h.core.settings.set(k, v);
+  h.core.playCount.mockResolvedValue(plays);
+  theme = await import("../src/theme/store");
+  document.documentElement.removeAttribute("style");
+}
+const savedTheme = () => (h.core.settings.get("theme") as { theme: Theme } | undefined)?.theme;
+
 describe("the default theme", () => {
-  it("is System for a new library", async () => {
+  it("is System for a new library, saved at once so it survives the first plays", async () => {
     theme.watchSystemAppearance(fakeMedia(false).win);
     await theme.loadSavedTheme();
     expect(theme.useTheme.getState().theme.mode).toBe("system");
     expect(theme.useTheme.getState().resolved.palette).toEqual(daylight.palette);
+    expect(savedTheme()?.mode).toBe("system"); // written without waiting for the save timer
+
+    // Play something, quit, launch again: still following the system.
+    await relaunch(1);
+    await theme.initTheme();
+    expect(theme.useTheme.getState().theme.mode).toBe("system");
+    expect(savedTheme()?.mode).toBe("system");
+  });
+
+  it("a fresh install importing a library with history but no theme keeps Match system", async () => {
+    await theme.loadSavedTheme(); // first launch
+    // What importLibrary leaves for settings.theme: null with history: plays, theme untouched.
+    h.core.playCount.mockResolvedValue(40);
+    await theme.loadSavedTheme(); // LibrarySettings calls this after the import
+    expect(theme.useTheme.getState().theme.mode).toBe("system");
   });
 
   it("an existing library keeps its saved theme, or the old fixed default if it never saved one", async () => {
@@ -113,12 +142,33 @@ describe("the default theme", () => {
     expect(theme.useTheme.getState().theme).toEqual(daylight);
 
     h.core.settings.delete("theme");
-    Object.assign(h.core, { playCount: vi.fn(async () => 12) });
+    h.core.playCount.mockResolvedValue(12);
     await theme.loadSavedTheme();
     expect(theme.useTheme.getState().theme).toEqual(dusk);
     expect(css("--surface")).toBe(dusk.palette.surface);
-    vi.advanceTimersByTime(400);
+    expect(savedTheme()).toEqual(dusk);
+  });
+});
+
+describe("the first paint", () => {
+  it("shows the theme last used in this window before the database answers", async () => {
+    theme.useTheme.getState().replace(dusk, dusk.name); // a pinned dark theme, on a light Mac
+    await relaunch(3);
+    let answer!: (v: { theme: Theme; basePreset: string }) => void;
+    h.core.getSetting.mockImplementationOnce(() => new Promise<unknown>((r) => { answer = r; }) as Promise<null>);
+    const started = theme.initTheme();
+    expect(css("--surface")).toBe(dusk.palette.surface); // not the default's light side
     await flush();
-    expect((h.core.settings.get("theme") as { theme: unknown }).theme).toEqual(dusk);
+    expect(css("--surface")).toBe(dusk.palette.surface);
+    answer({ theme: dusk, basePreset: dusk.name });
+    await started;
+    expect(css("--surface")).toBe(dusk.palette.surface);
+  });
+
+  it("ignores a damaged remembered theme", async () => {
+    localStorage.setItem("bc.theme.last", JSON.stringify({ ...dusk, palette: { ...dusk.palette, surface: "red;x" } }));
+    const started = theme.initTheme();
+    expect(css("--surface")).toBe(theme.useTheme.getState().resolved.palette.surface);
+    await started;
   });
 });

@@ -1,5 +1,5 @@
 // Keeps --accent / --ambient-* on :root in step with the playing track's artwork and the theme.
-import { accentRatio, fitPalette, type AppliedPalette, type ArtPalette } from "@bc/core";
+import { accentRatio, accentSurface, fitPalette, type AppliedPalette, type ArtPalette } from "@bc/core";
 import { usePlayer } from "../player/store";
 import { useTheme } from "./store";
 import { getCore } from "../api/core";
@@ -30,7 +30,7 @@ function paint() {
     listeners.forEach((fn) => fn());
     return;
   }
-  const fit = fitPalette(currentPalette, theme.palette.surface, accentRatio(theme));
+  const fit = fitPalette(currentPalette, accentSurface(theme), accentRatio(theme));
   root.setProperty("--accent", fit.accent);
   root.setProperty("--accent-text", fit.accentText);
   root.setProperty("--ambient-1", fit.ambient1);

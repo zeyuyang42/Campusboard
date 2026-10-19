@@ -20,9 +20,10 @@ const P = {
   mossLight: { surface: "#EEF2EC", surfaceRaised: "#F9FBF7", text: "#1E2620", textMuted: "#5F6C63", accent: "#4A7A36", danger: "#B8432F" },
   paper: { surface: "#EFEBE3", surfaceRaised: "#F8F5EF", text: "#2B2724", textMuted: "#7A726A", accent: "#9A5A2E", danger: "#B8432F" },
   paperDark: { surface: "#26231F", surfaceRaised: "#302C27", text: "#EFEBE3", textMuted: "#A39A90", accent: "#D49A6A", danger: "#E06A5E" },
-  // WCAG AAA: text and secondary text at 7:1 or more on both surfaces, accent and danger 4.5:1.
+  // WCAG AAA: text, secondary text and accent at 7:1 or more on every surface (page, raised,
+  // row hover and active), danger at 4.5:1.
   hcDark: { surface: "#000000", surfaceRaised: "#141414", text: "#FFFFFF", textMuted: "#D4D4D4", accent: "#7CD3FF", danger: "#FF8A80" },
-  hcLight: { surface: "#FFFFFF", surfaceRaised: "#F0F0F0", text: "#000000", textMuted: "#2E2E2E", accent: "#00507A", danger: "#A0140A" },
+  hcLight: { surface: "#FFFFFF", surfaceRaised: "#F0F0F0", text: "#000000", textMuted: "#2E2E2E", accent: "#003F63", danger: "#A0140A" },
 } satisfies Record<string, Palette>;
 
 const pair = (dark: Palette, light: Palette) => ({ paletteDark: dark, paletteLight: light });

@@ -84,6 +84,7 @@ export const useTheme = create<ThemeState>((set, get) => {
     set({ theme, resolved, basePreset });
     void paint(resolved);
     void setNativeAppearance(theme.mode);
+    rememberTheme(theme);
     if (save) persist(theme, basePreset);
   };
   const systemDark = prefersDark();
@@ -135,12 +136,28 @@ export function watchSystemAppearance(win: Pick<Window, "matchMedia"> = window):
   return () => q.removeEventListener("change", on);
 }
 
-/** Apply the default immediately (before first paint), then the saved theme once the database is open. */
+/** The theme last shown in this window, so the first paint matches it before the database opens. */
+const LAST_THEME_KEY = "bc.theme.last";
+function rememberTheme(theme: Theme) {
+  try { localStorage.setItem(LAST_THEME_KEY, JSON.stringify(theme)); } catch { /* a per-viewer convenience only */ }
+}
+function lastTheme(): Theme | null {
+  try {
+    const raw = localStorage.getItem(LAST_THEME_KEY);
+    // Validated like any theme file: it only ever reaches setProperty.
+    return raw ? parseTheme(JSON.parse(raw)).theme ?? null : null;
+  } catch { return null; }
+}
+
+/**
+ * Paint the theme last shown (or the default) at once, then the saved one once the database is
+ * open. The native title bar waits for the saved theme, so it doesn't flip on launch.
+ */
 export async function initTheme() {
   watchSystemAppearance();
   const s = useTheme.getState();
-  void paint(s.resolved);
-  void setNativeAppearance(s.theme.mode);
+  const last = lastTheme();
+  void paint(last ? resolveTheme(last, s.systemDark) : s.resolved);
   await loadSavedTheme();
 }
 
@@ -150,14 +167,19 @@ export async function loadSavedTheme() {
     const core = await getCore();
     const saved = await core.getSetting<{ theme: unknown; basePreset?: string }>("theme");
     const parsed = saved ? parseTheme(saved.theme) : null;
-    const { load, replace } = useTheme.getState();
+    const { load } = useTheme.getState();
     if (parsed?.theme) load(parsed.theme, saved?.basePreset ?? parsed.theme.name);
-    else if (!saved && (await core.playCount().catch(() => 0)) > 0) {
-      // A library from before system themes that never saved one keeps the old fixed default.
-      replace(LEGACY_DEFAULT_THEME, LEGACY_DEFAULT_THEME.name);
+    else if (saved) load(DEFAULT_THEME, DEFAULT_THEME.name); // unreadable: show the default, keep the file
+    else {
+      // Nothing saved: a new library saves the system default once, so "nothing saved" only ever
+      // means a library from before system themes; one with plays keeps the old fixed default.
+      const plays = await core.playCount().catch(() => null);
+      const t = plays ? LEGACY_DEFAULT_THEME : DEFAULT_THEME;
+      if (plays != null) await core.setSetting("theme", { theme: t, basePreset: t.name });
+      load(t, t.name);
     }
-    useTheme.setState({ loaded: true });
   } catch {
-    useTheme.setState({ loaded: true });
+    /* the database isn't readable: keep what is painted */
   }
+  useTheme.setState({ loaded: true });
 }

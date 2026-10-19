@@ -1,5 +1,5 @@
 import { accentRatio, type ResolvedTheme } from "./schema.js";
-import { hexToRgb, rgbToHex, mix, ensureContrast } from "./color.js";
+import { hexToRgb, rgbToHex, mix, ensureContrast, contrast } from "./color.js";
 
 const BUNDLED = { display: "Bricolage Grotesque Variable", ui: "Instrument Sans Variable" };
 
@@ -14,20 +14,37 @@ export function fontStack(family: string, role: "display" | "ui"): string {
 
 export interface ThemeVars { [name: string]: string }
 
+/** The hover and active row tints: the raised surface mixed toward the text color. */
+function surfaceMixes(t: ResolvedTheme): { hover: string; active: string } {
+  const raised = hexToRgb(t.palette.surfaceRaised), text = hexToRgb(t.palette.text);
+  const dark = t.mode === "dark";
+  return { hover: rgbToHex(mix(raised, text, dark ? 0.06 : 0.05)), active: rgbToHex(mix(raised, text, dark ? 0.11 : 0.09)) };
+}
+
+/**
+ * The surface the accent is clamped against. Standard: the page surface (3:1). High contrast:
+ * the worst of surface, raised, hover and active (the one nearest the text), so 7:1 holds on all.
+ */
+export function accentSurface(t: ResolvedTheme): string {
+  if (t.contrast !== "high") return t.palette.surface;
+  const { hover, active } = surfaceMixes(t);
+  const text = hexToRgb(t.palette.text);
+  return [t.palette.surface, t.palette.surfaceRaised, hover, active]
+    .reduce((worst, s) => (contrast(hexToRgb(s), text) < contrast(hexToRgb(worst), text) ? s : worst));
+}
+
 /** Compute every CSS custom property the stylesheet reads from a theme. Pure, testable. */
 export function themeVars(t: ResolvedTheme): ThemeVars {
-  const surface = hexToRgb(t.palette.surface);
-  const raised = hexToRgb(t.palette.surfaceRaised);
-  const text = hexToRgb(t.palette.text);
   const dark = t.mode === "dark";
   const high = t.contrast === "high";
-  const accent = ensureContrast(hexToRgb(t.palette.accent), surface, accentRatio(t));
+  const { hover, active } = surfaceMixes(t);
+  const accent = ensureContrast(hexToRgb(t.palette.accent), hexToRgb(accentSurface(t)), accentRatio(t));
   const compact = t.density === "compact";
   return {
     "--surface": t.palette.surface,
     "--surface-raised": t.palette.surfaceRaised,
-    "--surface-hover": rgbToHex(mix(raised, text, dark ? 0.06 : 0.05)),
-    "--surface-active": rgbToHex(mix(raised, text, dark ? 0.11 : 0.09)),
+    "--surface-hover": hover,
+    "--surface-active": active,
     "--line": dark ? `rgba(255,255,255,${high ? 0.3 : 0.08})` : `rgba(0,0,0,${high ? 0.3 : 0.08})`,
     "--text": t.palette.text,
     "--text-muted": t.palette.textMuted,

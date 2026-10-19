@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  parseTheme, PRESETS, DEFAULT_THEME, LEGACY_DEFAULT_THEME, presetByName, resolveTheme, withMode, withPalette, themeVars, accentRatio,
+  parseTheme, PRESETS, DEFAULT_THEME, LEGACY_DEFAULT_THEME, presetByName, resolveTheme, withMode, withPalette, themeVars, accentRatio, accentSurface,
   type Theme,
 } from "../src/theme/index.js";
 import { contrast, hexToRgb } from "../src/theme/color.js";
@@ -94,24 +94,27 @@ describe("High contrast preset (WCAG AAA)", () => {
   for (const dark of [true, false]) {
     const t = resolveTheme({ ...HC, mode: "system" }, dark);
     const p = t.palette;
-    it(`${t.mode}: body and secondary text 7:1, accent and danger 4.5:1 on both surfaces`, () => {
+    const v = themeVars(t);
+    // Every surface the accent can sit on: page, raised, row hover and row active.
+    const all = [p.surface, p.surfaceRaised, v["--surface-hover"], v["--surface-active"]];
+    it(`${t.mode}: text, secondary text and accent 7:1 on every surface, danger 4.5:1`, () => {
       expect(t.contrast).toBe("high");
-      for (const s of [p.surface, p.surfaceRaised]) {
+      for (const s of all) {
         expect(ratio(p.text, s)).toBeGreaterThanOrEqual(7);
         expect(ratio(p.textMuted, s)).toBeGreaterThanOrEqual(7);
-        expect(ratio(p.accent, s)).toBeGreaterThanOrEqual(4.5);
+        expect(ratio(p.accent, s)).toBeGreaterThanOrEqual(7); // the preset's own accent, unclamped
+        expect(ratio(v["--accent-fallback"], s)).toBeGreaterThanOrEqual(7);
         expect(ratio(p.danger, s)).toBeGreaterThanOrEqual(4.5);
       }
-      expect(ratio(themeVars(t)["--accent-fallback"], p.surface)).toBeGreaterThanOrEqual(7);
+      expect(v["--accent-fallback"].toLowerCase()).toBe(p.accent.toLowerCase());
     });
-    it(`${t.mode}: any album-art accent is clamped to stay AAA`, () => {
+    it(`${t.mode}: any album-art accent is clamped to stay AAA on every surface`, () => {
       let seed = 11;
       const rnd = () => { seed = (seed * 48271) % 2147483647; return (seed % 256).toString(16).padStart(2, "0"); };
       for (let i = 0; i < 300; i++) {
         const raw = `#${rnd()}${rnd()}${rnd()}`;
-        const fit = fitPalette({ accent: raw, ambient1: raw, ambient2: raw }, p.surface, accentRatio(t));
-        expect(ratio(fit.accent, p.surface)).toBeGreaterThanOrEqual(7 - 1e-9);
-        expect(ratio(fit.accent, p.surfaceRaised)).toBeGreaterThanOrEqual(4.5);
+        const fit = fitPalette({ accent: raw, ambient1: raw, ambient2: raw }, accentSurface(t), accentRatio(t));
+        for (const s of all) expect(ratio(fit.accent, s)).toBeGreaterThanOrEqual(7 - 1e-9);
         expect(ratio(fit.accentText, fit.accent)).toBeGreaterThanOrEqual(7);
       }
     });
