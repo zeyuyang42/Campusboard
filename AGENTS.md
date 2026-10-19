@@ -51,6 +51,7 @@ src-tauri/
   src/backup.rs            database backup destination check + atomic copy (Rust-side save dialog)
   src/menu.rs              native menu bar; custom items run `window.__bcMenu(id)` in the main webview (web/src/lib/appMenu.ts)
   src/mini.rs              creates/toggles the `mini` window (Window > Mini Player, dock button command)
+  src/tray.rs              optional menu-bar icon (Settings, off by default); `set_menu_bar` from web/src/lib/menuBar.ts; items reuse menu.rs ids
   migrations/*.sql         schema; every statement is IF NOT EXISTS so an old library.db can be adopted
   capabilities/default.json  URL scope for http (bandcamp.com, bcbits.com, custom-domain paths; LAN denied), fs scope ($APPDATA), window permissions, app commands
   capabilities/mini.json   the mini window: events, drag, hide, set-always-on-top, set-size only

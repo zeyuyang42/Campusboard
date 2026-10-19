@@ -10,6 +10,7 @@ import { LibrarySettings } from "../components/LibrarySettings";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { useClearHistory, usePlayCount, useReleaseCheckStatus, useReleaseMutations } from "../api/queries";
 import { formatPlays } from "../lib/format";
+import { useMenuBar } from "../lib/menuBar";
 
 const SHORTCUTS: [string, string][] = [
   ["Space", "Play or pause"], ["← →", "Seek 5 seconds"], ["⇧← ⇧→", "Previous or next track"], ["↑ ↓", "Volume"],
@@ -56,6 +57,8 @@ export function SettingsPage() {
       <NewReleaseSettings />
 
       <PlaybackSettings />
+
+      <BackgroundSettings />
 
       <ListeningHistory />
 
@@ -282,6 +285,22 @@ function PlaybackSettings() {
           <input type="range" min={0} max={CROSSFADE_MAX_SEC} step={1} value={crossfadeSec} onChange={(e) => setPlayback({ crossfadeSec: Number(e.target.value) })} />
         </label>
       </div>
+    </section>
+  );
+}
+
+/** Things the app does while its window is closed. Desktop app only. */
+function BackgroundSettings() {
+  const menuBar = useMenuBar();
+  if (!isTauri) return null;
+  return (
+    <section id="background">
+      <h2>When the window is closed</h2>
+      <p className="muted">Music keeps playing after you close the window. These help you follow and control it from elsewhere.</p>
+      <label className="check-row">
+        <input type="checkbox" checked={menuBar.enabled} onChange={(e) => menuBar.setEnabled(e.target.checked)} />
+        Show playback controls in the menu bar
+      </label>
     </section>
   );
 }

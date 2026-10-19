@@ -9,6 +9,7 @@ fn main() {
             "selftest_take_backup",
             "toggle_mini_player",
             "selftest_menu",
+            "set_menu_bar",
         ]),
     ))
     .expect("failed to run tauri-build");

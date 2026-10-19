@@ -11,6 +11,7 @@ import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { BaseDirectory } from "@tauri-apps/api/path";
 import { exists, readTextFile, remove } from "@tauri-apps/plugin-fs";
 import { invoke } from "@tauri-apps/api/core";
+import { resendMenuBar } from "./lib/menuBar";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { backupLibraryDatabase, exportLibraryFile } from "./lib/libraryFile";
 import { miniBridgeInfo } from "./player/miniBridge";
@@ -730,6 +731,9 @@ export async function runSelfTest() {
     // startDragging needs a live mouse-down to do anything, but a missing
     // capability rejects the call outright; record what it says.
     out.dragPermission = await getCurrentWindow().startDragging().then(() => "ok", (e) => String(e));
+    // The menu-bar command is registered and granted. Resends the current state, so the icon
+    // stays as the setting has it (with the setting off, nothing appears on the screen).
+    out.menuBar = await resendMenuBar().then(() => ({ ok: true }), (e) => ({ ok: false, error: String(e) }));
     // Overall ok needs every block that reports its own `ok` to pass. The listed blocks must
     // be present as objects: one caught and stored as a string threw.
     const required = ["libraryFilter", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "syncGuards", "newReleases", "preorder", "libraryFile", "window"];

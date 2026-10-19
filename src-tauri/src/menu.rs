@@ -130,25 +130,54 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 /// so they don't bring the main window forward.
 const CONTROLS: &[&str] = &["play-pause", "next", "previous", "volume-up", "volume-down", "shuffle", "repeat"];
 
+/// What a custom menu item (app menu or menu-bar icon) does.
+#[derive(Debug, PartialEq, Eq)]
+enum Route {
+    /// Toggle the mini window.
+    Mini,
+    /// Close the focused window.
+    Close,
+    /// Bring the main window forward and nothing else (the menu-bar icon's Show Window).
+    ShowMain,
+    /// Hand the id to the player without raising any window.
+    Control,
+    /// Bring the main window forward, then hand it the id.
+    Raise,
+    /// The menu-bar icon's disabled track row.
+    Ignore,
+}
+
+fn route(id: &str) -> Route {
+    match id {
+        "mini-player" => Route::Mini,
+        crate::tray::SHOW_ID => Route::ShowMain,
+        crate::tray::TRACK_ID => Route::Ignore,
+        _ if id.starts_with("close-window") => Route::Close,
+        _ if CONTROLS.contains(&id) => Route::Control,
+        _ => Route::Raise,
+    }
+}
+
 /// Custom items bring the (possibly hidden) main window forward and hand the id to the
 /// web app. Predefined items never reach this handler. Exceptions: Mini Player toggles
-/// the mini window, Close Window closes the focused window, and Controls items leave
-/// the windows as they are.
+/// the mini window, Close Window closes the focused window, and Controls items (also on
+/// the menu-bar icon, whose events arrive here too) leave the windows as they are.
 pub fn on_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
-    if id == "mini-player" {
-        if let Err(e) = crate::mini::toggle(app, true) {
-            eprintln!("mini player: {e}");
+    match route(id) {
+        Route::Mini => {
+            if let Err(e) = crate::mini::toggle(app, true) {
+                eprintln!("mini player: {e}");
+            }
         }
-        return;
+        Route::Close => close_window(app, focused_label(app).as_deref()),
+        Route::ShowMain => show_main(app),
+        Route::Control => dispatch(app, id),
+        Route::Raise => {
+            show_main(app);
+            dispatch(app, id);
+        }
+        Route::Ignore => {}
     }
-    if id.starts_with("close-window") {
-        close_window(app, focused_label(app).as_deref());
-        return;
-    }
-    if !CONTROLS.contains(&id) {
-        show_main(app);
-    }
-    dispatch(app, id);
 }
 
 /// Run a menu action in the main window. Evaluated in that webview rather than sent as an
@@ -252,5 +281,24 @@ mod tests {
             assert!(CONTROLS.contains(&id));
         }
         assert!(!CONTROLS.contains(&"now-playing") && !CONTROLS.contains(&"settings"));
+    }
+
+    #[test]
+    fn routes_menu_ids() {
+        assert_eq!(route("mini-player"), Route::Mini);
+        assert_eq!(route("close-window"), Route::Close);
+        assert_eq!(route("close-window:window-menu"), Route::Close);
+        assert_eq!(route("settings"), Route::Raise);
+        assert_eq!(route("nav:library"), Route::Raise);
+        assert_eq!(route("volume-up"), Route::Control);
+    }
+
+    #[test]
+    fn menu_bar_items_control_playback_without_raising_the_window() {
+        for id in ["play-pause", "next", "previous"] {
+            assert_eq!(route(id), Route::Control);
+        }
+        assert_eq!(route(crate::tray::SHOW_ID), Route::ShowMain);
+        assert_eq!(route(crate::tray::TRACK_ID), Route::Ignore);
     }
 }

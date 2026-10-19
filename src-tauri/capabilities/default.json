@@ -21,6 +21,7 @@
     "allow-selftest-take-backup",
     "allow-toggle-mini-player",
     "allow-selftest-menu",
+    "allow-set-menu-bar",
     "sql:default",
     "sql:allow-execute",
     {

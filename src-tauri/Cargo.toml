@@ -13,7 +13,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# tray-icon: the optional menu-bar icon (tray.rs), off unless turned on in Settings.
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 # unsafe-headers: lets core send the optional Bandcamp identity cookie (Cookie is a forbidden
 # header otherwise). No "cookies" feature: without a jar, Set-Cookie from a logged-in
