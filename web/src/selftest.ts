@@ -3,7 +3,7 @@
 // the app can read them from the SQLite file.
 import { getCore } from "./api/core";
 import { listenedSeconds, usePlayer } from "./player/store";
-import { audioEl } from "./player/audio";
+import { activeAudio, transitionInfo } from "./player/store";
 import { mediaSessionInfo, runMediaSessionAction } from "./player/mediaSession";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { exit } from "@tauri-apps/api/app";
@@ -14,7 +14,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { backupLibraryDatabase, exportLibraryFile } from "./lib/libraryFile";
 import { miniBridgeInfo } from "./player/miniBridge";
-import { MINI_EVENTS, positionToGain, toggleAction } from "@bc/core";
+import { MINI_EVENTS, positionToGain, toggleAction, type Track } from "@bc/core";
 import { FAN_ITEMS_ENDPOINT, fanPageUrl, parseFanItemsResponse, parseFanPage, repos, type FanItem } from "@bc/core";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -309,8 +309,8 @@ async function windowCheck() {
  */
 async function hiddenPlaybackCheck() {
   const win = getCurrentWindow();
-  if (audioEl.muted) return { ok: true, status: "skipped (muted)", reason: "set VITE_SELFTEST_AUDIBLE=1 to measure" };
-  if (audioEl.paused) return { ok: true, status: "stalled", reason: "not playing" };
+  if (activeAudio().muted) return { ok: true, status: "skipped (muted)", reason: "set VITE_SELFTEST_AUDIBLE=1 to measure" };
+  if (activeAudio().paused) return { ok: true, status: "stalled", reason: "not playing" };
   let last = performance.now();
   let maxGapMs = 0;
   let reports = 0;
@@ -320,15 +320,16 @@ async function hiddenPlaybackCheck() {
     last = now;
     reports++;
   };
-  audioEl.addEventListener("timeupdate", onTick);
+  const tickEl = activeAudio();
+  tickEl.addEventListener("timeupdate", onTick);
   try {
     await win.hide();
     const visibility = document.visibilityState;
     last = performance.now();
-    const t0 = audioEl.currentTime, l0 = listenedSeconds(), w0 = last;
+    const t0 = activeAudio().currentTime, l0 = listenedSeconds(), w0 = last;
     await sleep(20000);
     const wallSec = (performance.now() - w0) / 1000;
-    const mediaSec = audioEl.currentTime - t0;
+    const mediaSec = activeAudio().currentTime - t0;
     const listenedSec = listenedSeconds() - l0;
     const r = (x: number) => Math.round(x * 100) / 100;
     const status = mediaSec < 1 ? "stalled" : listenedSec >= mediaSec * 0.9 ? "ok" : "failed";
@@ -337,7 +338,7 @@ async function hiddenPlaybackCheck() {
       visibility, wallSec: r(wallSec), mediaSec: r(mediaSec), listenedSec: r(listenedSec), reports, maxGapMs: Math.round(maxGapMs),
     };
   } finally {
-    audioEl.removeEventListener("timeupdate", onTick);
+    tickEl.removeEventListener("timeupdate", onTick);
     await win.show();
     await win.setFocus();
   }
@@ -357,23 +358,23 @@ async function mediaSessionCheck() {
   const cur = usePlayer.getState().current();
   const registered = want.every((a) => info.actions.includes(a as never));
   const metadata = !!cur && info.title === cur.title && info.album === cur.album_title && info.artwork.length > 0;
-  const base = { muted: audioEl.muted, registered, metadata, actions: info.actions, title: info.title, artwork0: info.artwork[0] ?? null, positionReports: info.positionReports, lastPosition: info.lastPosition };
+  const base = { muted: activeAudio().muted, registered, metadata, actions: info.actions, title: info.title, artwork0: info.artwork[0] ?? null, positionReports: info.positionReports, lastPosition: info.lastPosition };
   // Not playing (the stream didn't start): the registration and metadata were checked, the
   // handlers were not.
-  if (audioEl.paused) return { ok: registered && metadata, status: "handlers skipped (not playing)", handlers: "skipped", ...base, playbackState: info.playbackState };
+  if (activeAudio().paused) return { ok: registered && metadata, status: "handlers skipped (not playing)", handlers: "skipped", ...base, playbackState: info.playbackState };
   const playingState = info.playbackState === "playing";
   await win.hide();
   try {
     runMediaSessionAction("pause"); await sleep(600);
-    const paused = audioEl.paused && usePlayer.getState().status === "paused" && mediaSessionInfo().playbackState === "paused";
+    const paused = activeAudio().paused && usePlayer.getState().status === "paused" && mediaSessionInfo().playbackState === "paused";
     runMediaSessionAction("play"); await sleep(1500);
-    const resumed = !audioEl.paused && mediaSessionInfo().playbackState === "playing";
+    const resumed = !activeAudio().paused && mediaSessionInfo().playbackState === "playing";
     const target = Math.min(20, Math.max(1, (usePlayer.getState().duration || 30) - 5));
     runMediaSessionAction("seekto", { seekTime: target }); await sleep(800);
-    const seeked = Math.abs(audioEl.currentTime - target) < 3;
+    const seeked = Math.abs(activeAudio().currentTime - target) < 3;
     const reportedSeek = (mediaSessionInfo().lastPosition?.position ?? -1) >= target - 1;
     runMediaSessionAction("seekbackward"); await sleep(500);
-    const steppedBack = audioEl.currentTime < target - 5;
+    const steppedBack = activeAudio().currentTime < target - 5;
     const ok = registered && metadata && playingState && paused && resumed && seeked && reportedSeek && steppedBack && info.positionReports > 0;
     return { ok, status: "checked", ...base, playingState, paused, resumed, seeked, reportedSeek, steppedBack, hidden: document.visibilityState };
   } finally {
@@ -389,6 +390,77 @@ async function mediaSessionCheck() {
  * permissions work and that the database and app commands are refused to it. Muted like the
  * rest of the run; the mini window is hidden again at the end.
  */
+/**
+ * Gapless and crossfade (#35), muted: a queue of four tracks of the album where the last one
+ * poses as another album's, so the handovers are gapless, gapless, then a 3 s crossfade. Each
+ * time the playhead goes into the preload window, then (once the standby is ready) a few
+ * seconds before the point, and the check waits for the standby element to take over. It
+ * records whether the queue index, Now Playing's metadata and the play counter moved to the
+ * new track, whether the previous element was released, the fade's volumes, and how long the
+ * new element's clock took to start after play() (WKWebView's start latency, which is what is
+ * left of the gap). The saved settings are put back afterwards.
+ */
+async function transitionCheck(tracks: Track[]) {
+  if (tracks.length < 4) return { ok: false, error: `needs 4 streamable tracks, has ${tracks.length}` };
+  const p0 = usePlayer.getState();
+  const saved = { gapless: p0.gapless, crossfadeSec: p0.crossfadeSec };
+  const r = (x: number) => Math.round(x);
+  const handovers: Record<string, unknown>[] = [];
+  try {
+    usePlayer.getState().setPlayback({ gapless: true, crossfadeSec: 3 });
+    usePlayer.getState().playTracks([tracks[0], tracks[1], tracks[2], { ...tracks[3], album_id: -1 }], 0);
+    for (let i = 0; i < 100 && (activeAudio().paused || !(activeAudio().duration > 0)); i++) await sleep(100);
+    if (activeAudio().paused) return { ok: false, error: "the first track didn't start" };
+    for (const expect of ["gapless", "gapless", "crossfade"] as const) {
+      const n = transitionInfo().transitions.length;
+      const from = activeAudio();
+      const before = usePlayer.getState().index;
+      // Into the preload window first (as playback reaches it 30 s before the point), and once
+      // the standby is ready, a few seconds before the point (for the fade, before its 3 s).
+      usePlayer.getState().seek(from.duration - 32);
+      let t = 0;
+      for (; t < 75 && transitionInfo().phase !== "ready"; t++) await sleep(200);
+      const readyAfterMs = t * 200;
+      usePlayer.getState().seek(from.duration - (expect === "crossfade" ? 6 : 3));
+      for (t = 0; t < 400 && transitionInfo().transitions.length === n; t++) await sleep(20);
+      const rec = transitionInfo().transitions.at(-1);
+      if (!rec || transitionInfo().transitions.length === n) { handovers.push({ expect, happened: false, readyAfterMs, phase: transitionInfo().phase }); break; }
+      const to = activeAudio();
+      const cur = usePlayer.getState().current();
+      const titleNow = mediaSessionInfo().title;
+      // Mid-fade: both elements play, the outgoing one's gain falls while the incoming one's rises.
+      let fade: Record<string, unknown> | null = null;
+      if (expect === "crossfade") {
+        await sleep(1000);
+        const v1 = { out: from.volume, in: to.volume, bothPlaying: !from.paused && !to.paused };
+        await sleep(1000);
+        const v2 = { out: from.volume, in: to.volume };
+        fade = { ...v1, out2: v2.out, in2: v2.in, ramps: v2.out < v1.out && v2.in > v1.in, status: usePlayer.getState().status };
+      }
+      // When the new element's clock started, relative to the handover (play() was called then).
+      for (let k = 0; k < 100 && to.currentTime < 0.5; k++) await sleep(20);
+      const clockStart = performance.now() - to.currentTime * 1000;
+      await sleep(expect === "crossfade" ? 2500 : 1500);
+      handovers.push({
+        expect, kind: rec.kind, happened: true, readyAfterMs, fadeSec: rec.fadeSec,
+        prevRemainingMs: r(rec.prevRemaining * 1000), startLatencyMs: r(clockStart - rec.at),
+        index: [before, usePlayer.getState().index], metadata: !!cur && titleNow === cur.title, title: titleNow,
+        listened: Math.round(listenedSeconds() * 10) / 10,
+        released: from !== activeAudio() && !from.getAttribute("src"), phase: transitionInfo().phase,
+        playing: !to.paused && usePlayer.getState().status === "playing" && usePlayer.getState().wantsPlay,
+        gain: to.volume, ...(fade ? { fade } : {}),
+      });
+    }
+    const ok = handovers.length === 3 && handovers.every((h, i) =>
+      h.happened && h.kind === ["gapless", "gapless", "crossfade"][i] && (h.index as number[])[1] === (h.index as number[])[0] + 1
+      && h.metadata && h.released && h.playing && h.phase === "idle" && (h.listened as number) < 4)
+      && !!(handovers[2].fade as { ramps?: boolean } | undefined)?.ramps && !!(handovers[2].fade as { bothPlaying?: boolean } | undefined)?.bothPlaying;
+    return { ok, muted: activeAudio().muted, handovers };
+  } finally {
+    usePlayer.getState().setPlayback(saved);
+  }
+}
+
 async function miniPlayerCheck() {
   const { emitTo } = await import("@tauri-apps/api/event");
   const { getCurrentWebviewWindow, WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
@@ -417,14 +489,14 @@ async function miniPlayerCheck() {
     const cur = usePlayer.getState().current();
     out.report = report;
     const titleOk = !!report && !!cur && report.title === cur.title;
-    const wasPlaying = usePlayer.getState().status === "playing" && !audioEl.paused;
+    const wasPlaying = usePlayer.getState().status === "playing" && !activeAudio().paused;
     await win.hide(); await sleep(300);
     // Muted media in a hidden window can stall ("waiting" sets the store to loading; Play/Pause
     // then still pauses) or be paused by WebKit (then the press plays). Try to get it playing
     // again; if it won't, the pause/resume checks are skipped and the command path is checked.
-    const playingNow = () => usePlayer.getState().status === "playing" && !audioEl.paused;
+    const playingNow = () => usePlayer.getState().status === "playing" && !activeAudio().paused;
     for (let t = 0; wasPlaying && t < 4000 && !playingNow(); t += 100) await sleep(100);
-    if (wasPlaying && audioEl.muted && !playingNow()) {
+    if (wasPlaying && activeAudio().muted && !playingNow()) {
       usePlayer.getState().play();
       for (let t = 0; t < 3000 && !playingNow(); t += 100) await sleep(100);
     }
@@ -440,17 +512,17 @@ async function miniPlayerCheck() {
     const decidedRight = !!firstToggle && firstToggle.decision === toggleAction(firstToggle.before.status as never, firstToggle.before.wantsPlay);
     const actedRight = !!firstToggle && (firstToggle.decision === "pause" ? firstToggle.after.paused && !firstToggle.after.wantsPlay : firstToggle.after.wantsPlay);
     const heldRight = expectedFirst === "pause"
-      ? audioEl.paused && usePlayer.getState().status === "paused" && !usePlayer.getState().wantsPlay
+      ? activeAudio().paused && usePlayer.getState().status === "paused" && !usePlayer.getState().wantsPlay
       : usePlayer.getState().wantsPlay;
     Object.assign(out, { decidedRight, actedRight, heldRight });
     const firstOk = decidedRight && actedRight && heldRight;
-    const paused = audioEl.paused && usePlayer.getState().status === "paused";
+    const paused = activeAudio().paused && usePlayer.getState().status === "paused";
     const shownPaused = (await ask({ do: "state" }))?.status === "paused";
     await ask({ do: "click", cmd: "toggle" }); await sleep(1800);
-    const resumed = !audioEl.paused;
+    const resumed = !activeAudio().paused;
     const target = Math.min(15, Math.max(1, (usePlayer.getState().duration || 30) - 5));
     await ask({ do: "seek", sec: target }); await sleep(900);
-    const seeked = Math.abs(audioEl.currentTime - target) < 3;
+    const seeked = Math.abs(activeAudio().currentTime - target) < 3;
     // A malformed command (as if from the mini window) is dropped, not run.
     const rejected0 = miniBridgeInfo().rejected;
     await emitTo("main", MINI_EVENTS.command, { type: "setVolume", v: 0 }); await sleep(300);
@@ -554,13 +626,14 @@ export async function runSelfTest() {
     const playable = album?.tracks.filter((t) => t.streamable) ?? [];
     usePlayer.getState().playTracks(playable, 0);
     await sleep(7000);
-    out.audio = { currentTime: audioEl.currentTime, paused: audioEl.paused, readyState: audioEl.readyState, error: audioEl.error?.code ?? null, src: audioEl.src.slice(0, 48), storeStatus: usePlayer.getState().status, storeError: usePlayer.getState().error };
+    out.audio = { currentTime: activeAudio().currentTime, paused: activeAudio().paused, readyState: activeAudio().readyState, error: activeAudio().error?.code ?? null, src: activeAudio().src.slice(0, 48), storeStatus: usePlayer.getState().status, storeError: usePlayer.getState().error };
     out.mediaSession = await mediaSessionCheck().catch((e) => ({ ok: false, error: String(e) }));
     out.miniPlayer = await miniPlayerCheck().catch((e) => ({ ok: false, error: String(e) }));
     usePlayer.getState().next();
     await sleep(4000);
-    out.audioAfterNext = { currentTime: audioEl.currentTime, paused: audioEl.paused, index: usePlayer.getState().index, title: usePlayer.getState().current()?.title };
+    out.audioAfterNext = { currentTime: activeAudio().currentTime, paused: activeAudio().paused, index: usePlayer.getState().index, title: usePlayer.getState().current()?.title };
     out.hiddenPlayback = await hiddenPlaybackCheck().catch((e) => ({ ok: false, status: "failed", error: String(e) }));
+    out.transitions = await transitionCheck(playable).catch((e) => ({ ok: false, error: String(e) }));
     // Nothing below needs playback; stopping here keeps the track from reaching a counted play.
     usePlayer.getState().pause();
     const pl = await core.createPlaylist("Selftest");
@@ -575,8 +648,8 @@ export async function runSelfTest() {
     out.volume = await core.playState().then((s) => {
       const position = usePlayer.getState().volume;
       const gain = positionToGain(position);
-      const ok = Math.abs(s.volume - gain) < 1e-9 && Math.abs(audioEl.volume - gain) < 1e-6;
-      return { ok, saved: s.volume, position, gain: audioEl.volume };
+      const ok = Math.abs(s.volume - gain) < 1e-9 && Math.abs(activeAudio().volume - gain) < 1e-6;
+      return { ok, saved: s.volume, position, gain: activeAudio().volume };
     }, (e) => ({ ok: false, error: String(e) }));
     const results = await core.search("illuminati hotties");
     out.search = { count: results.length, inLibrary: results.filter((r) => r.in_library).length };
@@ -659,7 +732,7 @@ export async function runSelfTest() {
     out.dragPermission = await getCurrentWindow().startDragging().then(() => "ok", (e) => String(e));
     // Overall ok needs every block that reports its own `ok` to pass. The listed blocks must
     // be present as objects: one caught and stored as a string threw.
-    const required = ["libraryFilter", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "syncGuards", "newReleases", "preorder", "libraryFile", "window"];
+    const required = ["libraryFilter", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "syncGuards", "newReleases", "preorder", "libraryFile", "window"];
     const failed = Object.entries(out)
       .filter(([k, v]) => required.includes(k) || (!!v && typeof v === "object" && "ok" in v))
       .filter(([, v]) => (v as { ok?: unknown } | null)?.ok !== true)

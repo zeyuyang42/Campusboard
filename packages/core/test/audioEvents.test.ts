@@ -21,6 +21,10 @@ describe("audio events (#55)", () => {
   it("the store's own pause while loading or switching tracks keeps the intent", () => {
     expect(audioEventPatch("pause", el(true, { internal: true }))).toEqual({ status: "paused" });
   });
+  it("a stale pause handled while the element plays again changes nothing (#35: a late priming pause)", () => {
+    expect(audioEventPatch("pause", el(false))).toBeNull();
+    expect(audioEventPatch("pause", el(false, { internal: true }))).toBeNull();
+  });
   it("the pause before ended is left to the ended handler", () => {
     expect(audioEventPatch("pause", el(true, { ended: true }))).toBeNull();
   });

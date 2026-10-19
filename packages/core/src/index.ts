@@ -9,6 +9,12 @@ export {
 } from "./services/nowPlaying.js";
 export { toggleAction, type ToggleAction } from "./services/playerToggle.js";
 export { positionToGain, gainToPosition, stepVolume, toggleMute, UNMUTE_GAIN, VOLUME_STEP } from "./services/volume.js";
+export {
+  PLAYBACK_SETTING_KEY, CROSSFADE_MAX_SEC, CROSSFADE_MIN_SEC, PRELOAD_LEAD_SEC, GAPLESS_ARM_SEC, GAPLESS_START_LEAD_MS, PRELOAD_EXPIRY_MARGIN_MS, STANDBY_PRIME_MS,
+  DEFAULT_PLAYBACK, parsePlaybackSettings, upcomingIndex, fadeSeconds, transitionKind, transitionPoint, preloadDue, gaplessDelayMs,
+  fadeProgress, crossfadeGains, IDLE as TRANSITION_IDLE, transitionAfter, preloadStale, standbyUsable, elementRole, routeElementEvent,
+  type PlaybackSettings, type TransitionKind, type TransitionState, type TransitionEvent, type ElementRole, type ElementEventType,
+} from "./services/transition.js";
 export { audioEventPatch, swappingAfter, type SwapEvent, type AudioEventType, type AudioElementState, type AudioEventPatch } from "./services/audioEvents.js";
 export {
   MINI_EVENTS, parseMiniCommand, parseMiniState, buildMiniState, miniStateKey, MiniStateThrottle, extrapolatePosition, miniLiveAfter,

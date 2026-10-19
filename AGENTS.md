@@ -29,7 +29,7 @@ packages/core/src/
   scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, fan (collection/wishlist), schemas
   db/Db.ts                 async Db interface {select,get,run}; SQL uses "?" and toDollar() rewrites to $n for the Tauri plugin
   db/repos/                one module per table; booleans stored 0/1, converted at the repo boundary
-  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping), miniPlayer (mini window state/command protocol, throttle), libraryTransfer (library export/import file, VACUUM INTO backup)
+  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping), miniPlayer (mini window state/command protocol, throttle), transition (gapless/crossfade scheduling, fade curve, state machine), libraryTransfer (library export/import file, VACUUM INTO backup)
   theme/                   schema (zod), presets, color math (OKLCH, contrast), apply (CSS variables)
   palette/                 quantize + pick + extract (canvas) + fitPalette + artUrl
   core.ts                  createCore({db, fetch, onJobsChange}) -> every function the UI calls
@@ -37,7 +37,7 @@ packages/core/test/        vitest; helpers/nodeDb.ts runs src-tauri/migrations/*
 web/src/
   api/core.ts              getCore() singleton; Tauri plugins, or browserDb.ts when VITE_BROWSER_MODE=1
   api/queries.ts           TanStack Query hooks and mutations (names are stable; pages depend on them)
-  player/store.ts          zustand store owning the single <audio>; load() asks core for a fresh stream URL
+  player/store.ts          zustand store owning the two <audio> elements (audio.ts); load() asks core for a fresh stream URL; gapless/crossfade handover
   player/mediaSession.ts   Now Playing widget + media keys: navigator.mediaSession fed from the store, handlers call store actions
   player/miniBridge.ts     main-window side of the mini player: broadcasts MiniState, maps validated MiniCommands to store actions
   mini/                    the mini player window (mini.html entry): no store, no audio, no getCore; bus.ts = Tauri events or BroadcastChannel
@@ -163,6 +163,26 @@ src-tauri/
   periods weren't measured, so `PlayCounter` doesn't rely on frequent reports: a
   playhead step counts if it fits the wall-clock time since the last report at
   the current `playbackRate` (+1.5 s slack); anything larger is treated as a seek.
+- Gapless and crossfade (#35, measured 2026-10-19) use two `<audio>` elements
+  (`audio.ts`): the active one, and a standby that preloads the next track 30 s
+  before the transition point at volume 0. The rules are pure in core's
+  `services/transition.ts`; only the active element's events reach the store
+  (`routeElementEvent`). WebKit starts a second, preloaded AVPlayer slowly: in
+  Playwright's WebKit the new element's clock began ~130-300 ms after play(),
+  ~35-90 ms if it had been played (muted) and paused once first ("priming"), and
+  tearing the old element down in the same instant added ~100 ms, so the store
+  primes the standby muted and releases the old element 1 s later. A start lead
+  didn't help in WebKit (the clock still began ~120 ms after the old one ended);
+  in Chromium a 40 ms lead closed the gap to ~4 ms. In the app (muted selftest)
+  the new clock started ~350-440 ms after play(). `navigator.mediaSession` is per
+  document, so metadata and handlers follow the store's index whichever element
+  WebKit picks; the store moves the index when the next element starts. LAME
+  MP3s carry ~1105 samples of encoder delay plus end padding: Chromium trims them
+  (a 12 s file reports 12.000 s), WebKit doesn't (12.042 s), so ~40 ms of silence
+  stays between tracks in WebKit even with a perfect handover. The outgoing track's
+  crossfade tail is not counted toward listening history: the PlayCounter moves to
+  the new track when the fade starts. After priming the standby stays muted until
+  it takes over, so a paused standby is never Now Playing eligible.
 - Now Playing and media keys (researched 2026-10-18) come from WebKit's Media
   Session, with no native code. `MediaSessionEnabled` defaults to true for
   WKWebView since WebKit 612 (Safari 15) and is still on; no private preference
@@ -297,7 +317,7 @@ src-tauri/
   never `window.location.assign` (a reload drops the player state).
 - Chrome text is unselectable with the arrow cursor inside Tauri; add the
   `selectable` class to any new element whose text people should copy.
-- The player store is the only code that touches `audioEl`. UI calls store actions.
+- The player store is the only code that touches the audio elements (`audioEls`). UI calls store actions.
 - Keep it personal-use: always render the "Buy on Bandcamp" link on album pages.
 - The `sqlite3` CLI has foreign keys OFF by default; prefer the app's own
   functions over manual deletes in `library.db` / `library-dev.db`.

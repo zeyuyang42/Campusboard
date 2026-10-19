@@ -1,14 +1,13 @@
 import { loadPlayState, savePlayState } from "../api/queries";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { usePlayer } from "./store";
-import { audioEl } from "./audio";
+import { playbackPosition, usePlayer } from "./store";
 import { gainToPosition, positionToGain, type PlayState } from "@bc/core";
 
 function snapshot(): PlayState {
   const s = usePlayer.getState();
   return {
     current_track_id: s.queue[s.index]?.id ?? null,
-    position_sec: audioEl.currentTime || s.position || 0,
+    position_sec: playbackPosition() || s.position || 0,
     queue: s.queue,
     queue_index: s.index,
     shuffle: s.shuffle,
