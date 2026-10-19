@@ -69,6 +69,42 @@ describe("stale events and system pauses (#55)", () => {
   });
 });
 
+describe("skipping a track that fails (#67)", () => {
+  const setVisibility = (v: "visible" | "hidden") => Object.defineProperty(document, "visibilityState", { value: v, configurable: true });
+  afterEach(() => setVisibility("visible"));
+
+  it("shows the error for a moment in a visible window, then moves on", async () => {
+    const list = tracks(3);
+    h.core.failing.add(list[0].id);
+    h.state().playTracks(list);
+    await flush();
+    expect(h.state()).toMatchObject({ index: 0, status: "paused" });
+    expect(h.state().error).toContain(list[0].title);
+    vi.advanceTimersByTime(800);
+    await flush();
+    expect(h.state()).toMatchObject({ index: 1, wantsPlay: true });
+  });
+
+  it("moves on without a timer in a hidden window, where WebKit may never fire it", async () => {
+    setVisibility("hidden");
+    const list = tracks(3);
+    h.core.failing.add(list[0].id);
+    h.state().playTracks(list);
+    await flush();
+    expect(h.state()).toMatchObject({ index: 1, wantsPlay: true });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("a media error after the retry also moves on right away when hidden", async () => {
+    setVisibility("hidden");
+    const el = await h.startPlaying(tracks(2));
+    el.emit("error"); // first: retried with a fresh URL
+    await flush();
+    el.emit("error"); // again: give up on this track
+    expect(h.state().index).toBe(1);
+  });
+});
+
 describe("the swapping flag", () => {
   it("the pause caused by swapping a playing element's source keeps wantsPlay", async () => {
     const el = await h.startPlaying(tracks(3));

@@ -19,6 +19,8 @@
     "allow-library-db-url",
     "allow-backup-library",
     "allow-selftest-take-backup",
+    "allow-selftest-window",
+    "allow-selftest-sleep",
     "allow-toggle-mini-player",
     "allow-selftest-menu",
     "allow-set-menu-bar",

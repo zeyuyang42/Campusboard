@@ -7,6 +7,8 @@ fn main() {
             "library_db_url",
             "backup_library",
             "selftest_take_backup",
+            "selftest_window",
+            "selftest_sleep",
             "toggle_mini_player",
             "selftest_menu",
             "set_menu_bar",

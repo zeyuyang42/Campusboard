@@ -4,6 +4,7 @@ mod mini;
 mod tray;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::Manager;
 
 use tauri_plugin_sql::{Migration, MigrationKind};
@@ -159,6 +160,127 @@ fn selftest_take_backup(path: String) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&bytes[..bytes.len().min(15)]).into_owned())
 }
 
+/// Bumped by every `selftest_window` call, so only the latest armed guard can act.
+static GUARD_GEN: AtomicU64 = AtomicU64::new(0);
+/// How many times a guard had to show the main window again.
+static GUARD_SHOWS: AtomicU64 = AtomicU64::new(0);
+
+/// Selftest helper (debug builds only) for a page WebKit may stop running (#67): one whose
+/// window is hidden, or covered (the display asleep or locked), and whose media is muted.
+/// - `keep-awake` asks WebKit not to throttle or suspend the page for that (WebKit SPI, each
+///   checked with respondsToSelector first) and holds an App Nap activity for the app.
+///   Returns which of them applied.
+/// - `hide` hides the main window and arms a guard; `arm` only arms one (before something
+///   else hides or minimizes it). After `ms` (at most 60 s) the latest armed guard unminimizes
+///   and shows the window if it is still hidden, which wakes the page, so a step that hides,
+///   sleeps and shows it again can't stall for good.
+/// - `show` disarms the guard and shows the window.
+///
+/// Returns `{ guardShows, awake }`: how many times a guard had to fire.
+#[tauri::command]
+async fn selftest_window(app: tauri::AppHandle, action: String, ms: Option<u64>) -> Result<serde_json::Value, String> {
+    if !cfg!(debug_assertions) {
+        return Err("selftest only".into());
+    }
+    let generation = GUARD_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+    let win = app.get_webview_window("main").ok_or("no main window")?;
+    let mut awake = serde_json::Value::Null;
+    match action.as_str() {
+        "keep-awake" => awake = keep_awake(&win),
+        "show" => menu::show_main(&app),
+        "hide" | "arm" => {
+            if action == "hide" {
+                win.hide().map_err(|e| e.to_string())?;
+            }
+            let ms = ms.unwrap_or(15_000).min(60_000);
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+                if GUARD_GEN.load(Ordering::SeqCst) != generation {
+                    return;
+                }
+                let hidden = !win.is_visible().unwrap_or(true) || win.is_minimized().unwrap_or(false);
+                if hidden {
+                    GUARD_SHOWS.fetch_add(1, Ordering::SeqCst);
+                    eprintln!("selftest: the main window was still hidden after {ms} ms; showing it");
+                    menu::show_main(win.app_handle());
+                }
+            });
+        }
+        other => return Err(format!("unknown action {other}")),
+    }
+    Ok(serde_json::json!({ "guardShows": GUARD_SHOWS.load(Ordering::SeqCst), "awake": awake }))
+}
+
+#[cfg(target_os = "macos")]
+fn keep_awake(win: &tauri::WebviewWindow) -> serde_json::Value {
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send, sel};
+
+    /// `[obj setter:NO]` if obj responds to it; records whether it did.
+    macro_rules! turn_off {
+        ($obj:expr, $setter:ident, $out:ident) => {{
+            let ok: bool = msg_send![$obj, respondsToSelector: sel!($setter:)];
+            if ok {
+                let _: () = msg_send![$obj, $setter: false];
+            }
+            $out.insert(stringify!($setter).to_string(), serde_json::Value::Bool(ok));
+        }};
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let sent = win.with_webview(move |wv| {
+        let mut out = serde_json::Map::new();
+        // SAFETY: inner() is the live WKWebView, and with_webview runs this on the main thread.
+        unsafe {
+            if let Some(view) = (wv.inner() as *mut AnyObject).as_ref() {
+                turn_off!(view, _setWindowOcclusionDetectionEnabled, out);
+                let config: *mut AnyObject = msg_send![view, configuration];
+                if let Some(config) = config.as_ref() {
+                    let prefs: *mut AnyObject = msg_send![config, preferences];
+                    if let Some(prefs) = prefs.as_ref() {
+                        turn_off!(prefs, _setBackgroundWebContentRunningBoardThrottlingEnabled, out);
+                        turn_off!(prefs, _setPageVisibilityBasedProcessSuppressionEnabled, out);
+                        turn_off!(prefs, _setHiddenPageDOMTimerThrottlingEnabled, out);
+                    }
+                }
+            }
+            // NSActivityUserInitiatedAllowingIdleSystemSleep: no App Nap for the app process.
+            let info: *mut AnyObject = msg_send![class!(NSProcessInfo), processInfo];
+            let reason: *mut AnyObject = msg_send![class!(NSString), stringWithUTF8String: c"selftest".as_ptr()];
+            if let (Some(info), Some(reason)) = (info.as_ref(), reason.as_ref()) {
+                let token: *mut AnyObject = msg_send![info, beginActivityWithOptions: 0x00EF_FFFFu64, reason: reason];
+                // Held for the rest of the run.
+                std::mem::forget(Retained::retain(token));
+                out.insert("appNapActivity".into(), serde_json::Value::Bool(!token.is_null()));
+            }
+        }
+        let _ = tx.send(serde_json::Value::Object(out));
+    });
+    if sent.is_err() {
+        return serde_json::Value::Null;
+    }
+    rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap_or(serde_json::Value::Null)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn keep_awake(_win: &tauri::WebviewWindow) -> serde_json::Value {
+    serde_json::Value::Null
+}
+
+
+/// Selftest helper (debug builds only): resolve after `ms` (at most 5 min), timed on the Rust
+/// side, for waits that must end even if WebKit has stopped the page's timers (#67).
+#[tauri::command]
+async fn selftest_sleep(ms: u64) -> Result<(), String> {
+    if !cfg!(debug_assertions) {
+        return Err("selftest only".into());
+    }
+    let d = std::time::Duration::from_millis(ms.min(300_000));
+    tauri::async_runtime::spawn_blocking(move || std::thread::sleep(d)).await.map_err(|e| e.to_string())
+}
+
+
 const RELEASES_URL: &str = "https://github.com/zeyuyang42/bandcamp-player/releases/latest";
 
 /// Why startup failed, from the error `Builder::build` returned.
@@ -274,7 +396,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![library_db_url, backup_library, selftest_take_backup, mini::toggle_mini_player, menu::selftest_menu, tray::set_menu_bar])
+        .invoke_handler(tauri::generate_handler![library_db_url, backup_library, selftest_take_backup, selftest_window, selftest_sleep, mini::toggle_mini_player, menu::selftest_menu, tray::set_menu_bar])
         .build(context)
         .unwrap_or_else(|e| startup_failed(&e));
 
