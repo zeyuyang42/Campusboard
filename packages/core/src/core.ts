@@ -16,6 +16,7 @@ import { cachedFetchText } from "./services/pageCache.js";
 import { parseMusicPage } from "./scrape/parseMusic.js";
 import { normalizeBandcampUrl } from "./scrape/url.js";
 import { getFreshStreamUrl, refreshAlbum } from "./services/streamService.js";
+import { RadioService } from "./services/radio.js";
 import { vacuumOrphans } from "./services/importService.js";
 import { prunePageCache } from "./services/pageCache.js";
 import { ART_FETCH_TIMEOUT_MS, CHALLENGE_SETTING_KEY, RATE_LIMIT_MS } from "./config.js";
@@ -59,6 +60,7 @@ export function createCore(deps: CoreDeps) {
   const checker = new ReleaseChecker(db, queue, {
     ...deps.releaseCheck, onChange: () => deps.onReleasesChange?.(), onAlbumRefreshed: () => deps.onLibraryChange?.(),
   });
+  const radio = new RadioService(db, queue);
   const refresher = new CollectionRefresher(db, gate, runner, { ...deps.collectionRefresh, onChange: () => deps.onJobsChange?.() });
   void prunePageCache(db);
   void vacuumOrphans(db);
@@ -144,6 +146,13 @@ export function createCore(deps: CoreDeps) {
     // playback
     getFreshStreamUrl: (trackId: number, force = false) => getFreshStreamUrl(db, queue, trackId, force),
     playState: () => playState.getPlayState(db),
+    // Bandcamp Radio
+    /** The latest radio episodes (bandcamp.com/radio, read at most once a day). */
+    radioShows: () => radio.list(),
+    /** One episode with its tracklist and each entry's library album id. */
+    radioShow: (showId: number) => radio.show(showId),
+    /** An episode's audio URL; `force` reads its page again (after a media error). */
+    radioStreamUrl: (showId: number, force = false) => radio.streamUrl(showId, force),
     // listening history
     /** Record one counted play (see services/playRule.ts). Returns the row id, or null if the track is gone. */
     recordPlay: (trackId: number, seconds: number) => plays.recordPlay(db, trackId, seconds),

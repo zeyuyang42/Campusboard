@@ -10,6 +10,7 @@ import { ImportPage } from "./pages/ImportPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { BrowsePage } from "./pages/BrowsePage";
 import { NewReleasesPage } from "./pages/NewReleasesPage";
+import { RadioPage } from "./pages/RadioPage";
 
 export function App() {
   return (
@@ -27,6 +28,7 @@ export function App() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/browse" element={<BrowsePage />} />
         <Route path="/releases" element={<NewReleasesPage />} />
+        <Route path="/radio" element={<RadioPage />} />
         <Route path="*" element={<Navigate to="/library" replace />} />
       </Route>
     </Routes>

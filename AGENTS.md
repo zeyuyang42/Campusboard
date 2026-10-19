@@ -27,10 +27,10 @@ npm run smoke:live               # re-parse one known live page
 ```
 packages/core/src/
   types.ts                 DTOs shared by core and web (import "@bc/core")
-  scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, fan (collection/wishlist), schemas
+  scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, fan (collection/wishlist), radio (Bandcamp Radio list + episode), schemas
   db/Db.ts                 async Db interface {select,get,run}; SQL uses "?" and toDollar() rewrites to $n for the Tauri plugin
   db/repos/                one module per table; booleans stored 0/1, converted at the repo boundary
-  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping), miniPlayer (mini window state/command protocol, throttle), transition (gapless/crossfade scheduling, fade curve, state machine), libraryTransfer (library export/import file, VACUUM INTO backup)
+  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping), miniPlayer (mini window state/command protocol, throttle), transition (gapless/crossfade scheduling, fade curve, state machine), libraryTransfer (library export/import file, VACUUM INTO backup), radio (episodes, tracklists, stream URLs)
   theme/                   schema (zod), presets, color math (OKLCH, contrast), apply (CSS variables)
   palette/                 quantize + pick + extract (canvas) + fitPalette + artUrl
   core.ts                  createCore({db, fetch, onJobsChange}) -> every function the UI calls
@@ -276,6 +276,36 @@ src-tauri/
   and the live database by (device, inode) after canonicalizing, and copies
   through a temp file + rename. Stale snapshots are swept at startup. A backup
   contains the identity cookie; the export never does.
+- Bandcamp Radio (#44, verified 2026-10-19 with curl; fixtures `radio.html`,
+  `radio-show.html`): `https://bandcamp.com/radio` embeds `data-blob` with
+  `appData.shows` (20 latest episodes, newest first: `itemId`, `title`,
+  `franchiseName`, `date`, `description`, `imageId`, `itemUrl`) and `numPages`.
+  An episode page (`/radio?show=<id>` 302s to `/radio/<programme-slug>/<id>`)
+  has `appData.show` with `compiledTrack.{streamUrl,duration}` (one mp3 for the
+  whole episode, 60-90 min) and `tracks[]` each with `timecode` (seconds into
+  that file), `title`, `artistName`, `url`, `artId` and `album.{title,url,artId}`
+  (`album` is null for a standalone track). `streamUrl` is
+  `https://bandcamp.com/stream_redirect?enc=mp3-128&track_id=..&ts=<issued>&t=<sig>`:
+  `ts` is the issue time (not an expiry), the signature is checked (a changed
+  `ts` gives 404), one 25 min old still redirected, and it 302s to a normal
+  `t4.bcbits.com/stream/...mp3-128` URL whose own `ts` is +24 h. Images use
+  `f4.bcbits.com/img/<10-digit imageId>_<size>.jpg` with no `a` prefix
+  (`radioImageUrl`). The old `api/bcweekly/3/list` still answers (977 episodes
+  back to 2013, 640 KB, programme names wrong for new shows) but
+  `api/bcweekly/3/getshow` says "bad function"; use the pages. Costs: the list
+  page at most once a day (page cache), an episode page once per play (page
+  cache 10 min, tracklist kept in memory) plus one `stream_redirect` request.
+  Core resolves that redirect itself through `FetchQueue.resolveRedirect`
+  (`redirect: "manual"`, which `api/core.ts` maps to plugin-http's
+  `maxRedirections: 0` = reqwest `Policy::none`, so the 302 and its Location come
+  back unfollowed; the browser-mode proxy reports it as `x-bc-location`). The
+  Location must match `RADIO_CDN_URL` (https, `*.bcbits.com/stream/`). The
+  `<audio>` element only ever gets the CDN URL, so the CSP is unchanged, and the
+  URL carries the CDN's real 24 h `ts`; it is reused in memory until an hour
+  before that. An episode restored at launch is not resolved until Play. An
+  episode is a queue entry with `id = album_id = -showId` and a `radio` field;
+  it is not counted in listening history (`plays` keys library tracks) and
+  can't be added to a playlist.
 
 ## Collection sync facts (verified 2026-10-17 with curl against a public profile)
 

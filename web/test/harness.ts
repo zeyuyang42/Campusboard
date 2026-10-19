@@ -16,6 +16,10 @@ export function makeFakeCore() {
       if (core.failing.has(trackId)) throw new Error("no stream");
       return { url: `https://t4.bcbits.test/stream/${trackId}${force ? "?force" : ""}`, expires_at: Date.now() + DAY_MS };
     }),
+    radioStreamUrl: vi.fn(async (showId: number, force = false) => {
+      if (core.failing.has(-showId)) throw new Error("no stream");
+      return { url: `https://bandcamp.test/stream_redirect?show=${showId}${force ? "&force" : ""}`, expires_at: Date.now() + 3600_000 };
+    }),
     playState: vi.fn(async () => core.state),
     savePlayState: vi.fn(async (_s: PlayState) => undefined),
     savePlayPosition: vi.fn(async (_trackId: number | null, _sec: number, _index: number) => undefined),

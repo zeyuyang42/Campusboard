@@ -21,6 +21,7 @@ export {
   type MiniState, type MiniCommand, type MiniTrack, type MiniPalette, type MiniStatus, type MiniSource,
 } from "./services/miniPlayer.js";
 export { getFreshStreamUrl, refreshAlbum } from "./services/streamService.js";
+export { RadioService, radioQueueTrack, isRadioTrack, isQueueRadio, RADIO_LIST_CACHE_MS } from "./services/radio.js";
 export { JobRunner, type ImportRequest, type ImportSelectionRequest } from "./services/jobRunner.js";
 export { cachedFetchText, prunePageCache } from "./services/pageCache.js";
 export { ReleaseChecker, type ReleaseCheckerOptions, type SkipReason, type PreorderCheckResult } from "./services/releaseWatch.js";

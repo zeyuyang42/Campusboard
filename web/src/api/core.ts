@@ -31,7 +31,9 @@ export function getCore(): Promise<Core> {
         fetchImpl = b.browserFetch;
       } else {
         db = await openDb();
-        fetchImpl = (input, init) => tauriFetch(input, { ...init, maxRedirections: 5 });
+        // redirect: "manual" (FetchQueue.resolveRedirect) maps to the plugin's maxRedirections: 0,
+        // which answers with the 3xx itself and its Location header (reqwest Policy::none).
+        fetchImpl = (input, init) => tauriFetch(input, { ...init, maxRedirections: init?.redirect === "manual" ? 0 : 5 });
       }
       const core = createCore({
         db,

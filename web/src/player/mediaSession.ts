@@ -8,8 +8,9 @@
 //
 // Handlers only call player store actions, and the state comes from the store, never from
 // the audio element.
-import { finiteDuration, nowPlayingMetadata, positionState, PositionThrottle, sessionPlaybackState, type SessionPlaybackState } from "@bc/core";
+import { finiteDuration, nowPlayingMetadata, positionState, PositionThrottle, radioEntryAt, sessionPlaybackState, type RadioEntry, type SessionPlaybackState } from "@bc/core";
 import { usePlayer } from "./store";
+import { getCore } from "../api/core";
 
 const ACTIONS = ["play", "pause", "previoustrack", "nexttrack", "seekto", "seekbackward", "seekforward"] as const;
 type Action = (typeof ACTIONS)[number];
@@ -77,14 +78,37 @@ export function initMediaSession() {
   const throttle = new PositionThrottle();
   let lastId: number | null = null;
   let state: SessionPlaybackState = "none";
+  // A radio episode (#44): its tracklist, read once per episode (core keeps it in memory), so
+  // the artist line can follow the featured track. Metadata changes only when that does.
+  let radioFor: number | null = null;
+  let radioTracks: RadioEntry[] | null = null;
+  let lastEntry = -1;
   const sync = (s: ReturnType<typeof usePlayer.getState>) => {
     const cur = s.queue[s.index] ?? null;
+    const showId = cur?.radio?.show_id ?? null;
+    // A restored episode waits for Play: its tracklist costs a Bandcamp request.
+    if (showId !== radioFor && (!showId || s.wantsPlay || s.status === "playing")) {
+      radioFor = showId;
+      radioTracks = null;
+      if (showId) {
+        void getCore().then((c) => c.radioShow(showId)).then((show) => {
+          if (radioFor !== showId) return;
+          radioTracks = show.tracks;
+          sync(usePlayer.getState());
+        }).catch(() => undefined); // no tracklist: the programme stays as the artist line
+      }
+    }
+    const entry = radioTracks ? radioEntryAt(radioTracks, s.position) : -1;
     if ((cur?.id ?? null) !== lastId) {
       lastId = cur?.id ?? null;
+      lastEntry = entry;
       throttle.reset();
       lastPosition = null;
       try { ms.setPositionState(); } catch { /* ignore */ }
-      ms.metadata = cur ? new MediaMetadata(nowPlayingMetadata(cur)) : null;
+      ms.metadata = cur ? new MediaMetadata(nowPlayingMetadata(cur, radioTracks?.[entry])) : null;
+    } else if (cur?.radio && entry !== lastEntry) {
+      lastEntry = entry;
+      ms.metadata = new MediaMetadata(nowPlayingMetadata(cur, radioTracks?.[entry]));
     }
     // Buffering mid-track (a "waiting" stall): the playhead isn't moving.
     const midTrack = s.status === "loading" && s.position > 0 && Number.isFinite(s.duration) && s.duration > 0;

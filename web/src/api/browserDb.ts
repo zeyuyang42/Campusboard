@@ -57,8 +57,17 @@ export async function openBrowserDb(): Promise<Db> {
 export async function browserFetch(input: string, init?: RequestInit): Promise<Response> {
   const headers = { ...((init?.headers ?? {}) as Record<string, string>) };
   if (headers.Cookie) { headers["x-bc-cookie"] = headers.Cookie; delete headers.Cookie; }
-  const res = await fetch(`/bc-proxy/${encodeURIComponent(input)}`, { ...init, headers });
+  // redirect: "manual": the proxy doesn't follow and reports the hop as x-bc-location (a real
+  // 3xx from the proxy would be followed by this page's own fetch).
+  const manual = init?.redirect === "manual";
+  if (manual) headers["x-bc-redirect"] = "manual";
+  const res = await fetch(`/bc-proxy/${encodeURIComponent(input)}`, { ...init, redirect: "follow", headers });
   // The proxy refused the URL or a redirect hop: fail the way the Tauri http plugin does.
   if (res.headers.get("x-bc-proxy-denied")) throw new Error(`url not allowed on the configured scope: ${res.headers.get("x-bc-proxy-denied")}`);
+  const location = manual ? res.headers.get("x-bc-location") : null;
+  if (location) {
+    void res.body?.cancel().catch(() => undefined);
+    return new Response(null, { status: Number(res.headers.get("x-bc-status")) || 302, headers: { location } });
+  }
   return res;
 }

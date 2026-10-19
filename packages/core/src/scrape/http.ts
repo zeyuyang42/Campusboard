@@ -82,6 +82,44 @@ export class FetchQueue {
     });
   }
 
+  /**
+   * Request `url` without following a redirect and return the absolute Location of its 3xx
+   * answer (a radio episode's stream_redirect, #44). The body is never read: it is cancelled.
+   * Same queue slot, headers and challenge handling as fetchText; no retries.
+   */
+  async resolveRedirect(url: string, init: RequestInit = {}): Promise<string> {
+    await this.gate.ready();
+    this.gate.assertClear();
+    return this.schedule(async () => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+      try {
+        let res: Response;
+        try {
+          res = await this.fetchImpl(url, {
+            ...init,
+            redirect: "manual",
+            signal: ctrl.signal,
+            headers: { "User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9", ...(init.headers ?? {}) },
+          });
+        } catch (e) {
+          throw new ScrapeError("fetch_failed", `Failed to fetch ${url}: ${String(e)}`);
+        }
+        const location = res.headers.get("location");
+        if (res.status >= 300 && res.status < 400 && location) {
+          void res.body?.cancel().catch(() => undefined);
+          try { return new URL(location, url).toString(); } catch { throw new ScrapeError("fetch_failed", `Bad redirect from ${url}`); }
+        }
+        const body = await res.text().catch(() => "");
+        if (isChallengePage(body)) throw await this.challenged(url);
+        if (res.status === 404) throw new ScrapeError("not_found", `404 for ${url}`);
+        throw new ScrapeError("fetch_failed", `HTTP ${res.status} (no redirect) for ${url}`);
+      } finally {
+        clearTimeout(timer);
+      }
+    });
+  }
+
   /** Start (or extend) the cooldown and build the error for this request. */
   private async challenged(url: string): Promise<ScrapeError> {
     const until = await this.gate.trip();

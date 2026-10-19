@@ -5,7 +5,8 @@
  * it can be tested in Node; web/src/player/mediaSession.ts applies it.
  */
 import { artUrl, type ArtSize } from "../palette/index.js";
-import type { QueueTrack } from "../types.js";
+import { radioImageUrl } from "../scrape/radio.js";
+import type { QueueTrack, RadioEntry } from "../types.js";
 
 export interface NowPlayingArtwork { src: string; sizes: string; type: string }
 export interface NowPlayingMetadata { title: string; artist: string; album: string; artwork: NowPlayingArtwork[] }
@@ -25,11 +26,22 @@ const ARTWORK_SIZES: { size: ArtSize; px: number }[] = [
   { size: 7, px: 160 },
 ];
 
-export function nowPlayingMetadata(t: Pick<QueueTrack, "title" | "track_artist" | "artist_name" | "album_title" | "art_id">): NowPlayingMetadata {
+/**
+ * For a radio episode (`t.radio`) the title is the episode, the album its programme and the
+ * artist line the featured track under the playhead (`featured`), else the programme.
+ */
+export function nowPlayingMetadata(
+  t: Pick<QueueTrack, "title" | "track_artist" | "artist_name" | "album_title" | "art_id" | "radio">,
+  featured?: Pick<RadioEntry, "title" | "artist"> | null,
+): NowPlayingMetadata {
   const artwork: NowPlayingArtwork[] = [];
   for (const { size, px } of ARTWORK_SIZES) {
-    const src = artUrl(t.art_id, size);
+    const src = artUrl(t.art_id, size) ?? radioImageUrl(t.radio?.image_id, size);
     if (src) artwork.push({ src, sizes: `${px}x${px}`, type: "image/jpeg" });
+  }
+  if (t.radio) {
+    const now = featured ? [featured.artist, featured.title].filter(Boolean).join(" – ") : "";
+    return { title: t.title, artist: now || t.radio.program, album: t.radio.program, artwork };
   }
   return { title: t.title, artist: t.track_artist || t.artist_name || "", album: t.album_title || "", artwork };
 }
