@@ -1,11 +1,11 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { AlbumWithTracks, Job } from "@bc/core";
+import { removeAlbumWithUndo } from "../lib/removals";
 import { cancelJob, useAlbum, useAlbumMutations, useJobs, useOfflineMutations, useOfflineStats } from "../api/queries";
 import { ArtImage } from "../components/ArtImage";
 import { TrackList, PlayPauseAll } from "../components/TrackList";
 import { ExternalIcon, MoreIcon } from "../components/Icons";
 import { ExternalLink } from "../components/ExternalLink";
-import { ConfirmButton } from "../components/ConfirmButton";
 import { AlbumNotes } from "../components/AlbumNotes";
 import { TagLinks } from "../components/TagLinks";
 import { formatReleaseDate, formatTotal } from "../lib/format";
@@ -66,7 +66,7 @@ function OfflineAction({ album }: { album: AlbumWithTracks }) {
 export function AlbumPage() {
   const id = Number(useParams().id);
   const { data: album, isLoading, error } = useAlbum(id);
-  const { remove, refresh } = useAlbumMutations();
+  const { refresh } = useAlbumMutations();
   const nav = useNavigate();
   const actions = useTrackActions();
   if (error) return <div className="notice error">Couldn't load this album. {friendlyError(error)}</div>;
@@ -100,7 +100,7 @@ export function AlbumPage() {
             <ExternalLink className="btn" href={album.url}>Buy on Bandcamp <ExternalIcon /></ExternalLink>
             <OfflineAction album={album} />
             <button className="btn" onClick={() => refresh.mutate(album.id)} disabled={refresh.isPending}>{refresh.isPending ? "Refreshing…" : "Refresh"}</button>
-            <ConfirmButton label="Remove" confirmLabel="Remove" question={`Remove "${album.title}" from your library?`} onConfirm={async () => { await remove.mutateAsync(album.id); nav("/library"); }} />
+            <button className="btn danger" onClick={async () => { if (await removeAlbumWithUndo(album)) nav("/library"); }}>Remove</button>
           </div>
         </div>
       </div>

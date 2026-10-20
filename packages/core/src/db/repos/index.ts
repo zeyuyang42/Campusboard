@@ -13,3 +13,4 @@ export * from "./importPending.js";
 export * from "./albumNotes.js";
 export * from "./resumePositions.js";
 export * from "./smartPlaylists.js";
+export * from "./albumRemoval.js";

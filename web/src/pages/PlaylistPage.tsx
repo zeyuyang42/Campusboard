@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { usePlaylist, usePlaylistMutations } from "../api/queries";
 import { getCore } from "../api/core";
 import { TrackList, PlayPauseAll } from "../components/TrackList";
-import { ConfirmButton } from "../components/ConfirmButton";
+import { deletePlaylistWithUndo, removePlaylistTrackWithUndo } from "../lib/removals";
 import { PlaylistCover } from "../components/PlaylistCover";
 import { SmartRuleEditor } from "../components/SmartRuleEditor";
 import { formatTotal } from "../lib/format";
@@ -16,8 +16,9 @@ import { PlayIcon, ShuffleIcon } from "../components/Icons";
 export function PlaylistPage() {
   const id = Number(useParams().id);
   const { data: pl, isLoading, error } = usePlaylist(id);
-  const { rename, remove, reorder, removeTrack } = usePlaylistMutations();
+  const { rename, reorder } = usePlaylistMutations();
   const nav = useNavigate();
+  const onDelete = async () => { if (pl && (await deletePlaylistWithUndo(pl))) nav("/playlists"); };
   const [editing, setEditing] = useState<string | null>(null);
   const playTracks = usePlayer((s) => s.playTracks);
   const shuffle = usePlayer((s) => s.shuffle);
@@ -56,14 +57,14 @@ export function PlaylistPage() {
           <span className="actions">
             <PlayPauseAll tracks={pl.tracks} />
             <button className="btn" onClick={shufflePlay} disabled={!pl.tracks.some((t) => t.streamable)}><ShuffleIcon /> Shuffle</button>
-            <ConfirmButton label="Delete" confirmLabel="Delete playlist" question={`Delete "${pl.name}"?`} onConfirm={async () => { await remove.mutateAsync(id); nav("/playlists"); }} />
+            <button className="btn danger" onClick={() => void onDelete()}>Delete</button>
           </span>
         )}
       </div>
-      {pl.smart ? <SmartBody pl={pl} onDelete={async () => { await remove.mutateAsync(id); nav("/playlists"); }} /> : pl.tracks.length === 0 ? (
+      {pl.smart ? <SmartBody pl={pl} onDelete={onDelete} /> : pl.tracks.length === 0 ? (
         <div className="empty">Nothing here yet. Add tracks from any album or the Tracks tab using the ··· menu, or select several and choose Add to playlist.</div>
       ) : (
-        <TrackList tracks={pl.tracks} showAlbum reorder={{ onMove, onRemove: (i) => removeTrack.mutate({ id, ptid: pl.tracks[i].playlist_track_id }), removeLabel: "Remove from playlist" }} />
+        <TrackList tracks={pl.tracks} showAlbum reorder={{ onMove, onRemove: (i) => { void removePlaylistTrackWithUndo(id, pl.tracks[i]); }, removeLabel: "Remove from playlist" }} />
       )}
     </>
   );
@@ -100,7 +101,7 @@ function SmartBody({ pl, onDelete }: { pl: PlaylistWithTracks; onDelete: () => P
         <button className="btn sm" disabled={busy || !playable} onClick={() => void run(playAllTracks)}><PlayIcon size={14} /> Play</button>
         <button className="btn sm" disabled={busy || !playable} onClick={() => void run(shuffleAllTracks)}><ShuffleIcon /> Shuffle</button>
         {!editingRule && <button className="btn sm" onClick={() => setEditingRule(true)}>Edit rule</button>}
-        <ConfirmButton label="Delete" className="btn sm danger" confirmClassName="btn sm danger" confirmLabel="Delete playlist" question={`Delete "${pl.name}"?`} onConfirm={onDelete} />
+        <button className="btn sm danger" onClick={() => void onDelete()}>Delete</button>
         {error && <span className="error" role="alert">{error}</span>}
         {note && !error && <span className="muted" role="status">{note}</span>}
       </div>

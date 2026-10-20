@@ -8,6 +8,7 @@ import { MenuHost } from "./MenuHost";
 import { CommandPalette } from "./CommandPalette";
 import { NowPlaying } from "./NowPlaying";
 import { DropLink } from "./DropLink";
+import { UndoNote } from "./UndoNote";
 import { usePlayer } from "../player/store";
 import { useUi } from "../ui/store";
 import { isTauri } from "../lib/env";
@@ -47,6 +48,8 @@ export function AppShell() {
     <>
       <Ambient />
       {isTauri && <div className="titlebar-drag" data-tauri-drag-region />}
+      {/* First in the tab order, so the Undo button is one Tab away. */}
+      <UndoNote />
       <div className="shell">
         <Sidebar open={sidebarOpen} />
         <main className="main">

@@ -22,6 +22,8 @@ export function refreshAlbum(db: Db, queue: FetchQueue, albumId: number, url: st
       const owned = await ownedFetchUrl(db, albumId);
       const headers = owned ? await identityHeaders(db, owned) : {};
       const html = await queue.fetchText(headers.Cookie ? owned! : url, { headers }, retries);
+      // Removed while the page was on its way: don't bring the album back.
+      if (!(await db.get("SELECT 1 AS x FROM albums WHERE id = ?", [albumId]))) return;
       await upsertTralbum(db, parseTralbumPage(html));
     })().finally(() => inflight.delete(albumId));
     inflight.set(albumId, p);

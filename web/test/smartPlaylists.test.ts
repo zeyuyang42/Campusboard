@@ -30,7 +30,7 @@ const core = {
   smartTracks: vi.fn(async () => evaluated),
   createSmartPlaylist: vi.fn(async (name: string, rule: repos.SmartRule) => ({ ...smartList, id: 9, name, rule })),
   setSmartRule: vi.fn(async () => true),
-  deletePlaylist: vi.fn(async () => true),
+  deletePlaylistWithUndo: vi.fn(async (id: number) => ({ playlist: { id, name: "Faves", created_at: "", updated_at: "" }, rule_json: "{}", tracks: [], imported: [], pending: [] })),
   playlistsContaining: vi.fn(async () => new Set<number>()),
 };
 const player = { playTracks: vi.fn((t: Track[]) => Math.min(MAX_QUEUE, t.filter((x) => x.streamable).length)), toggleShuffle: vi.fn(), shuffle: false };
@@ -154,7 +154,7 @@ describe("a smart playlist's page (#84)", () => {
     expect(host.querySelector(".bulk-bar [role=status]")?.textContent).toBe(`Queued the first ${MAX_QUEUE.toLocaleString()} of ${(MAX_QUEUE + 5).toLocaleString()} tracks: the queue holds at most ${MAX_QUEUE.toLocaleString()}.`);
   });
 
-  it("edits the rule inline and deletes with a confirm", async () => {
+  it("edits the rule inline and deletes at once (Undo brings it back, #93)", async () => {
     render("/playlists/1");
     await flush();
     await click(button("Edit rule"));
@@ -166,9 +166,7 @@ describe("a smart playlist's page (#84)", () => {
     expect(host.querySelector(".smart-editor")).toBeNull();
 
     await click(button("Delete"));
-    expect(core.deletePlaylist).not.toHaveBeenCalled();
-    await click(button("Delete playlist"));
-    expect(core.deletePlaylist).toHaveBeenCalledWith(1);
+    expect(core.deletePlaylistWithUndo).toHaveBeenCalledWith(1);
     expect(path).toBe("/playlists");
   });
 

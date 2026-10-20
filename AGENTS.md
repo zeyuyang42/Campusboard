@@ -45,6 +45,7 @@ web/src/
   mini/                    the mini player window (mini.html entry): no store, no audio, no getCore; bus.ts = Tauri events or BroadcastChannel
   theme/store.ts           theme state, persisted in settings.key='theme'; usePalette.ts maps art colors to CSS vars
   ui/menu.ts + components/MenuHost.tsx   the one context menu / playlist picker for the whole app
+  ui/undo.ts + components/UndoNote.tsx   the one "Removed X. Undo" note; lib/removals.ts starts removals with it
   components/, pages/      plain CSS in styles.css driven by tokens on :root
 src-tauri/
   src/lib.rs               registers sql/http/dialog/fs/opener/notification/window-state plugins, migrations, Dock reopen
@@ -467,6 +468,17 @@ src-tauri/
   `ThemeSchema` with bounds, and bump `version` only for breaking changes.
 - No `window.prompt`/`confirm`/`alert`: WKWebView handles them badly. Use inline
   inputs and `ConfirmButton`.
+- Removing an album, a playlist or a playlist entry offers Undo instead of asking
+  first (#93; `web/src/lib/removals.ts`, one note at a time, ~8 s, ⌘Z while it
+  shows). Playlists and entries are restored from a snapshot; an album's delete
+  waits for the note to go (marked in `settings.key='albums_removing'`, finished on
+  window close or at the next start; a private key). A marked album counts as not in
+  the library for user imports (search, browse, discography imports; a library-file
+  import still counts it as present), and a user import that brings it in again
+  unmarks it; a collection sync or a stream refresh never does. A new query listing albums or
+  their tracks must add `NOT_REMOVING` (repos/albumRemoval.ts) unless it goes
+  through `albumWhere`.
+  `ConfirmButton` stays for bulk and irreversible actions.
 - Navigate from non-React code with `navigateTo()` in `web/src/lib/navigation.ts`;
   never `window.location.assign` (a reload drops the player state).
 - Chrome text is unselectable with the arrow cursor inside Tauri; add the

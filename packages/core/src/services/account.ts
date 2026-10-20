@@ -6,6 +6,7 @@ import { mayCarryIdentity, normalizeFanUsername } from "../scrape/fan.js";
 import { ScrapeError } from "../scrape/errors.js";
 import type { AccountInfo, SyncSummary } from "../types.js";
 import { COLLECTION_REFRESH_LAST_KEY } from "../config.js";
+import { REMOVING_KEY } from "../db/repos/albumRemoval.js";
 
 /** settings keys. The cookie has a key of its own so nothing that reads the account reads it by accident. */
 export const ACCOUNT_KEY = "bandcamp_account";
@@ -84,8 +85,11 @@ export async function clearAccount(db: Db): Promise<AccountInfo> {
   return getAccount(db);
 }
 
-/** Settings keys core's generic getSetting/setSetting refuse; they have their own functions here. */
-export const PRIVATE_SETTING_KEYS: ReadonlySet<string> = new Set([ACCOUNT_KEY, IDENTITY_KEY, SYNC_KEY]);
+/**
+ * Settings keys core's generic getSetting/setSetting refuse; they have their own functions
+ * (here, and the album removal marks of #93 in repos/albumRemoval.ts).
+ */
+export const PRIVATE_SETTING_KEYS: ReadonlySet<string> = new Set([ACCOUNT_KEY, IDENTITY_KEY, SYNC_KEY, REMOVING_KEY]);
 
 /**
  * The Cookie header for `url`, or nothing. Only https bandcamp.com and *.bandcamp.com

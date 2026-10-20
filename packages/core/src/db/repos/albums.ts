@@ -1,6 +1,7 @@
 import type { Db } from "../Db.js";
 import { likeContains } from "../Db.js";
 import { dismissAlbum } from "./fanItems.js";
+import { NOT_REMOVING } from "./albumRemoval.js";
 import { TRACK_SELECT, rowToTrack, type TrackRow } from "./tracks.js";
 import type { Album, AlbumWithTracks, Track } from "../../types.js";
 import { preorderRecheckDue, releaseTime } from "../../services/preorder.js";
@@ -115,7 +116,7 @@ const positive = (n: number | undefined): n is number => typeof n === "number" &
 
 /** The WHERE clause (or "") and its parameters for the Show filter, the filter text, a tag and any extra conditions. */
 function albumWhere(filter: AlbumFilter, q: string, tag = "", c: AlbumConditions = {}): { sql: string; params: unknown[] } {
-  const where: string[] = [];
+  const where: string[] = [NOT_REMOVING];
   const params: unknown[] = [];
   const f = FILTERS[filter];
   if (f) where.push(f);
@@ -258,8 +259,12 @@ export async function deleteAlbum(db: Db, id: number): Promise<boolean> {
   return r.changes > 0;
 }
 
+/**
+ * The library's album URLs. An album waiting for its delete (#93) is left out: search,
+ * discography imports and new releases treat it as removed, and importing it again keeps it.
+ */
 export async function albumUrlsInLibrary(db: Db): Promise<Set<string>> {
-  return new Set((await db.select<{ url: string }>("SELECT url FROM albums")).map((r) => r.url));
+  return new Set((await db.select<{ url: string }>(`SELECT al.url FROM albums al WHERE ${NOT_REMOVING}`)).map((r) => r.url));
 }
 
 export async function artistUrlsInLibrary(db: Db): Promise<Set<string>> {

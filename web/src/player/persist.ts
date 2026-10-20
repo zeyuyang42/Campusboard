@@ -1,6 +1,7 @@
 import { loadPlayState, savePlayPosition, savePlayState } from "../api/queries";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { playbackPosition, saveResumePoint, usePlayer } from "./store";
+import { finishUndo } from "../ui/undo";
 import { gainToPosition, positionToGain, type PlayState } from "@bc/core";
 
 function snapshot(): PlayState {
@@ -64,6 +65,8 @@ export async function initPersistence() {
       timer = null;
       await savePlayState(snapshot()).catch(() => undefined);
       await saveResumePoint().catch(() => undefined);
+      // A removal still offering Undo (#93) becomes final: the note goes with the window.
+      await finishUndo();
       await win.hide().catch(() => undefined);
     });
   } catch { /* not inside Tauri */ }

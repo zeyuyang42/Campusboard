@@ -2,6 +2,7 @@ import type { Db } from "../db/Db.js";
 import { now } from "../db/Db.js";
 import * as jobs from "../db/repos/jobs.js";
 import { albumUrlsInLibrary } from "../db/repos/albums.js";
+import { unmarkRemoving } from "../db/repos/albumRemoval.js";
 import type { FetchQueue } from "../scrape/http.js";
 import { normalizeBandcampUrl } from "../scrape/url.js";
 import { parseMusicPage } from "../scrape/parseMusic.js";
@@ -252,6 +253,7 @@ export class JobRunner {
           await jobs.setItemResult(this.db, item.id, job.id, true, albumId, null);
           // An imported release is no longer new (New releases), even if it's removed again later.
           await this.settle(item.url, albumId);
+          if (job.kind !== "collection") await this.keep(albumId);
           // Playlist entries, plays and preferences from an imported library that waited for this album.
           await this.resolveImports(albumId);
         } catch (e) {
@@ -315,6 +317,20 @@ export class JobRunner {
       await settleRelease(this.db, url, albumId);
     } catch (e) {
       console.error(`[jobs] settling new release ${url}: ${String(e)}`);
+    }
+  }
+
+  /**
+   * An album the user imports again while it waits for its delete (#93) stays: its removal
+   * mark goes, so the delete the Undo note runs skips it. Only user imports (album, track,
+   * discography, library file) do this: a collection sync never cancels a removal (the delete
+   * then records the dismissal so later syncs leave it out), nor does a stream refresh.
+   */
+  private async keep(albumId: number): Promise<void> {
+    try {
+      await unmarkRemoving(this.db, [albumId]);
+    } catch (e) {
+      console.error(`[jobs] keeping album ${albumId}: ${String(e)}`);
     }
   }
 
