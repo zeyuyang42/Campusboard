@@ -97,8 +97,24 @@ const MATCH = `(al.title LIKE ? ESCAPE '\\' OR ar.name LIKE ? ESCAPE '\\'
 const TAGS_OF_AL = "json_each(CASE WHEN json_valid(al.tags_json) THEN al.tags_json ELSE '[]' END)";
 const HAS_TAG = `EXISTS (SELECT 1 FROM ${TAGS_OF_AL} j WHERE j.type = 'text' AND trim(j.value) = ? COLLATE NOCASE)`;
 
-/** The WHERE clause (or "") and its parameters for the Show filter, the filter text and a tag. */
-function albumWhere(filter: AlbumFilter, q: string, tag = ""): { sql: string; params: unknown[] } {
+/**
+ * Extra album conditions smart playlists add (#84) on top of the Library's Show filter, text
+ * and tag: a minimum rating, and a play (of any of the album's tracks) within, or none
+ * within, the last N days. Missing, zero or invalid values add nothing.
+ */
+export interface AlbumConditions {
+  minRating?: number;
+  playedWithinDays?: number;
+  notPlayedWithinDays?: number;
+}
+
+const DAY_MS = 86_400_000;
+/** played_at of N days ago, in the stored format (UTC `YYYY-MM-DD HH:MM:SS`). */
+const daysAgo = (days: number) => new Date(Date.now() - days * DAY_MS).toISOString().replace("T", " ").slice(0, 19);
+const positive = (n: number | undefined): n is number => typeof n === "number" && Number.isFinite(n) && n > 0;
+
+/** The WHERE clause (or "") and its parameters for the Show filter, the filter text, a tag and any extra conditions. */
+function albumWhere(filter: AlbumFilter, q: string, tag = "", c: AlbumConditions = {}): { sql: string; params: unknown[] } {
   const where: string[] = [];
   const params: unknown[] = [];
   const f = FILTERS[filter];
@@ -113,6 +129,18 @@ function albumWhere(filter: AlbumFilter, q: string, tag = ""): { sql: string; pa
     const like = likeContains(term);
     where.push(MATCH);
     params.push(like, like, like, like);
+  }
+  if (positive(c.minRating)) {
+    where.push(`${RATING} >= ?`);
+    params.push(c.minRating);
+  }
+  if (positive(c.playedWithinDays)) {
+    where.push(`EXISTS (SELECT 1 ${ALBUM_PLAYS} AND p.played_at >= ?)`);
+    params.push(daysAgo(c.playedWithinDays));
+  }
+  if (positive(c.notPlayedWithinDays)) {
+    where.push(`NOT EXISTS (SELECT 1 ${ALBUM_PLAYS} AND p.played_at >= ?)`);
+    params.push(daysAgo(c.notPlayedWithinDays));
   }
   return { sql: where.length ? `WHERE ${where.join(" AND ")}` : "", params };
 }
@@ -130,20 +158,54 @@ export async function listAlbums(db: Db, sort: AlbumSort = "added", filter: Albu
   return (await db.select<AlbumRow>(sql, limit ? [...w.params, limit] : w.params)).map(rowToAlbum);
 }
 
+/** Options for listAlbumTracks and albumTracksSummary: extra album conditions and a cap on tracks. */
+export interface AlbumTrackOptions extends AlbumConditions {
+  /** Keep only the first this many tracks (a positive integer); all by default. */
+  limit?: number;
+}
+
+/** The selected albums in order (fa) and their tracks in order, capped at the limit (ft), as CTEs. */
+function orderedTracks(sort: AlbumSort, filter: AlbumFilter, q: string, tag: string, o: AlbumTrackOptions): { sql: string; params: unknown[] } {
+  const w = albumWhere(filter, q, tag, o);
+  const limit = o.limit !== undefined && Number.isInteger(o.limit) && o.limit > 0 ? o.limit : null;
+  return {
+    sql: `
+    WITH fa AS (
+      SELECT al.id AS album_id, ROW_NUMBER() OVER (ORDER BY ${INLINE_SORTS[sort] ?? INLINE_SORTS.added}) AS ord
+      FROM albums al JOIN artists ar ON ar.id = al.artist_id ${w.sql}),
+    ft AS (
+      SELECT t.id AS tid, fa.ord, t.track_num FROM tracks t JOIN fa ON fa.album_id = t.album_id
+      ORDER BY fa.ord, t.track_num, t.id${limit ? " LIMIT ?" : ""})`,
+    params: limit ? [...w.params, limit] : w.params,
+  };
+}
+
 /**
  * Every track of the albums listAlbums returns for the same arguments: the albums in that
  * order, each album's tracks in track order. Unstreamable tracks are included (the player
- * skips them; a playlist keeps them). No stream URLs are fetched.
+ * skips them; a playlist keeps them). No stream URLs are fetched. `opts` adds the smart
+ * playlist conditions (#84) and a track limit.
  */
-export async function listAlbumTracks(db: Db, sort: AlbumSort = "added", filter: AlbumFilter = "all", q = "", tag = ""): Promise<Track[]> {
-  const w = albumWhere(filter, q, tag);
-  const sql = `
-    WITH fa AS (
-      SELECT al.id AS album_id, ROW_NUMBER() OVER (ORDER BY ${INLINE_SORTS[sort] ?? INLINE_SORTS.added}) AS ord
-      FROM albums al JOIN artists ar ON ar.id = al.artist_id ${w.sql})
-    ${TRACK_SELECT} JOIN fa ON fa.album_id = t.album_id
-    ORDER BY fa.ord, t.track_num, t.id`;
-  return (await db.select<TrackRow>(sql, w.params)).map(rowToTrack);
+export async function listAlbumTracks(db: Db, sort: AlbumSort = "added", filter: AlbumFilter = "all", q = "", tag = "", opts: AlbumTrackOptions = {}): Promise<Track[]> {
+  const o = orderedTracks(sort, filter, q, tag, opts);
+  const sql = `${o.sql}
+    ${TRACK_SELECT} JOIN ft ON ft.tid = t.id
+    ORDER BY ft.ord, ft.track_num, t.id`;
+  return (await db.select<TrackRow>(sql, o.params)).map(rowToTrack);
+}
+
+/** How many tracks listAlbumTracks returns for the same arguments, and up to four distinct art ids in that order (for covers). */
+export async function albumTracksSummary(db: Db, sort: AlbumSort = "added", filter: AlbumFilter = "all", q = "", tag = "", opts: AlbumTrackOptions = {}): Promise<{ track_count: number; art_ids: number[] }> {
+  const o = orderedTracks(sort, filter, q, tag, opts);
+  const r = await db.get<{ n: number; arts: string | null }>(
+    `${o.sql}
+    SELECT (SELECT COUNT(*) FROM ft) AS n,
+      (SELECT GROUP_CONCAT(art_id) FROM (
+         SELECT al.art_id, MIN(ft.ord) AS o FROM ft JOIN tracks t ON t.id = ft.tid JOIN albums al ON al.id = t.album_id
+         WHERE al.art_id IS NOT NULL GROUP BY al.art_id ORDER BY o LIMIT 4)) AS arts`,
+    o.params,
+  );
+  return { track_count: r?.n ?? 0, art_ids: (r?.arts ?? "").split(",").filter(Boolean).map(Number) };
 }
 
 export interface TagCount { tag: string; album_count: number }

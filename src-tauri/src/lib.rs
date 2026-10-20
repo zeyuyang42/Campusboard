@@ -74,6 +74,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0010_resume_positions.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 11,
+            description: "smart playlists",
+            sql: include_str!("../migrations/0011_smart_playlists.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 
@@ -517,6 +523,24 @@ mod tests {
     fn build_error(e: MigrateError) -> String {
         let plugin = tauri_plugin_sql::Error::Migration(e);
         tauri::Error::PluginInitialization("sql".into(), plugin.to_string()).to_string()
+    }
+
+    #[test]
+    fn registers_every_migration_file_in_order() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        let mut files: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+            .filter(|f| f.ends_with(".sql"))
+            .collect();
+        files.sort();
+        let ms = migrations();
+        assert_eq!(ms.len(), files.len());
+        for (i, (m, f)) in ms.iter().zip(&files).enumerate() {
+            assert_eq!(m.version, i as i64 + 1);
+            assert!(f.starts_with(&format!("{:04}_", i + 1)), "{f}");
+        }
+        assert!(ms.last().unwrap().sql.contains("smart_playlists"));
     }
 
     #[test]

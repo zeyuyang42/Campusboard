@@ -5,3 +5,6 @@ data/
 .DS_Store
 src-tauri/target/
 src-tauri/gen/schemas/
+
+# Written and removed by packages/core/test/smartPlaylists.test.ts (an older build's module).
+*.v050.tmp.ts

@@ -6,22 +6,10 @@ import { useMenu } from "../ui/menu";
 import { friendlyError } from "../lib/errors";
 import { ConfirmButton } from "./ConfirmButton";
 import { PlayIcon, ShuffleIcon } from "./Icons";
+import { cappedNote, countStreamable, playAllTracks, plural, shuffleAllTracks } from "../lib/bulkPlay";
 
 /** Above this many tracks, a bulk action asks first (inline, with ConfirmButton). */
 export const BULK_CONFIRM_TRACKS = 500;
-
-const countStreamable = (t: Track[]) => t.reduce((n, x) => n + (x.streamable ? 1 : 0), 0);
-
-function shuffled<T>(arr: T[]): T[] {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
 
 /**
  * Play, shuffle, queue or add to a playlist every album the filtered Library grid shows, in
@@ -50,26 +38,14 @@ export function BulkBar({ albums, sort, filter, q, tag = "" }: { albums: Album[]
       setBusy(false);
     }
   };
-  const { playTracks, enqueueLast } = usePlayer.getState();
-  const capped = (n: number, of: number, what: string) =>
-    n < of ? `${what} ${n.toLocaleString()} of ${plural(of, "track")}: the queue holds at most ${MAX_QUEUE.toLocaleString()}.` : null;
-  const playAll = () => run((t) => capped(playTracks(t), countStreamable(t), "Queued the first"));
-  const shuffleAll = () => run((t) => {
-    const p = usePlayer.getState();
-    if (!p.shuffle) p.toggleShuffle();
-    const n = countStreamable(t);
-    // Over the cap, queue a random sample rather than the first albums in sort order.
-    if (n > MAX_QUEUE) return capped(playTracks(shuffled(t.filter((x) => x.streamable))), n, "Queued a random");
-    // playTracks keeps its start track first and shuffles the rest; start somewhere random.
-    const streamable = t.flatMap((x, i) => (x.streamable ? [i] : []));
-    playTracks(t, streamable[Math.floor(Math.random() * streamable.length)] ?? 0);
-    return null;
-  });
+  const playAll = () => run(playAllTracks);
+  // Over the cap, shuffle queues a random sample rather than the first albums in sort order.
+  const shuffleAll = () => run(shuffleAllTracks);
   const queueAll = () => run((t) => {
     const n = countStreamable(t);
-    const added = enqueueLast(t);
+    const added = usePlayer.getState().enqueueLast(t);
     if (n && !added) return `The queue is full (${MAX_QUEUE.toLocaleString()} tracks).`;
-    return capped(added, n, "Added");
+    return cappedNote(added, n, "Added");
   });
   const addToPlaylist = () => run((t) => {
     // Anchored on the button's slot: after a confirm the button itself has been re-rendered.

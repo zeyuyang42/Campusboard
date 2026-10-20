@@ -75,7 +75,9 @@ function PlaylistPicker({ trackIds }: { trackIds: number[] }) {
   const [error, setError] = useState<string | null>(null);
   const [containing, setContaining] = useState<Set<number>>(new Set());
   useEffect(() => { void getCore().then((c) => c.playlistsContaining(trackIds)).then(setContaining); }, [trackIds]);
-  const shown = (playlists ?? []).filter((p) => !filter || p.name.toLowerCase().includes(filter.toLowerCase()));
+  // Smart playlists (#84) fill themselves from a rule: they take no tracks by hand.
+  const manual = (playlists ?? []).filter((p) => !p.smart);
+  const shown = manual.filter((p) => !filter || p.name.toLowerCase().includes(filter.toLowerCase()));
   const add = async (id: number) => { close(); await addTracks.mutateAsync({ id, trackIds }); };
   // Guards against a second Enter while a create is in flight, and remembers a playlist
   // that was created but not filled so a retry only re-adds the tracks.
@@ -111,7 +113,7 @@ function PlaylistPicker({ trackIds }: { trackIds: number[] }) {
   return (
     <>
       <div className="label">Add {n === 1 ? "to playlist" : `${n} tracks to playlist`}</div>
-      {(playlists?.length ?? 0) > 8 && <input placeholder="Filter playlists" value={filter} onChange={(e) => setFilter(e.target.value)} />}
+      {manual.length > 8 && <input placeholder="Filter playlists" value={filter} onChange={(e) => setFilter(e.target.value)} />}
       {shown.map((p) => (
         <button key={p.id} role="menuitem" onClick={() => void add(p.id)}>
           <span style={{ width: 14, display: "inline-block" }}>{containing.has(p.id) ? "✓" : ""}</span>

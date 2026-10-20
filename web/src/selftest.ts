@@ -1043,6 +1043,24 @@ export async function runSelfTest() {
       await core.deletePlaylist(pl.id);
       return { tracks: got?.tracks.length, art_ids: got?.art_ids };
     }, 30_000);
+    // Smart playlists (#84): the rule is stored through the real plugin (migration 0011) and
+    // evaluated on open; it takes no tracks by hand; deleting it removes the rule.
+    out.smartPlaylist = await block("smartPlaylist", async () => {
+      const a = album;
+      if (!a) return { ok: false, error: "no album" };
+      const pl = await core.createSmartPlaylist("Selftest smart", { text: a.title, sort: "title", limit: 2 });
+      await core.addToPlaylist(pl.id, playable.slice(0, 1).map((t) => t.id));
+      const got = await core.playlist(pl.id);
+      const stored = await core.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM playlist_tracks WHERE playlist_id = ?", [pl.id]);
+      const listed = (await core.playlists()).find((p) => p.id === pl.id);
+      await core.setSmartRule(pl.id, { text: a.title });
+      const all = await core.playlist(pl.id);
+      await core.deletePlaylist(pl.id);
+      const left = await core.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM smart_playlists WHERE playlist_id = ?", [pl.id]);
+      const ok = !!got?.smart && got.tracks.length === Math.min(2, a.tracks.length) && got.tracks.every((t) => t.album_id === a.id)
+        && stored?.n === 0 && listed?.track_count === got.tracks.length && all?.tracks.length === a.tracks.length && left?.n === 0;
+      return { ok, tracks: got?.tracks.length, all: all?.tracks.length, albumTracks: a.tracks.length, stored: stored?.n, listed: listed?.track_count, left: left?.n };
+    }, 30_000);
     out.playState = await block("playState", async () => {
       await sleep(1500);
       return core.playState().then((s) => ({ queue: s.queue.length, index: s.queue_index, pos: s.position_sec }));

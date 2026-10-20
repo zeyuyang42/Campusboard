@@ -8,6 +8,7 @@ import { friendlyError } from "../lib/errors";
 import { formatPlays } from "../lib/format";
 import { AlbumCard } from "../components/AlbumCard";
 import { BulkBar } from "../components/BulkBar";
+import { SHOW_LABELS, SORT_LABELS } from "../lib/bulkPlay";
 import { TrackList, PlayPauseAll } from "../components/TrackList";
 import { PlayHistory } from "../components/PlayHistory";
 
@@ -40,8 +41,6 @@ const FILTER_EMPTY: Record<string, string> = {
 };
 const FILTER_NAME: Record<string, string> = { purchased: "your purchases", wishlist: "your wishlist", downloaded: "your downloads", rated: "your rated albums" };
 
-// Offered in ALBUM_SORTS order; a new sort in core needs a label here.
-const SORT_LABELS: Record<repos.AlbumSort, string> = { added: "Date added", played: "Recently played", plays: "Most played", artist: "Artist", title: "Album title", release: "Release date", rating: "Rating" };
 
 /** A rating as quiet text under a card, e.g. "★★★★"; nothing when unrated. */
 const starsText = (r = 0) => (r > 0 ? "★".repeat(r) : "");
@@ -113,11 +112,7 @@ function AlbumGrid({ sort: savedSort, filter, set }: LibraryView & { set: (p: Pa
         <span className="spacer" />
         <label className="muted" htmlFor="album-filter">Show</label>
         <select id="album-filter" value={filter} onChange={(e) => set({ filter: e.target.value as repos.AlbumFilter })}>
-          <option value="all">All</option>
-          <option value="purchased">Purchased</option>
-          <option value="wishlist">Wishlist</option>
-          <option value="downloaded">Downloaded</option>
-          <option value="rated">Rated</option>
+          {(Object.keys(SHOW_LABELS) as repos.AlbumFilter[]).map((f) => <option key={f} value={f}>{SHOW_LABELS[f]}</option>)}
         </select>
         <label className="muted" htmlFor="album-sort">Sort</label>
         <select id="album-sort" value={sort} onChange={(e) => { setTempSort(null); set({ sort: e.target.value as repos.AlbumSort }); }}>

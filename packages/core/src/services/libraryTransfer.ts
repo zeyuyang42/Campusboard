@@ -14,6 +14,7 @@ import { recomputeOwned } from "../db/repos/fanItems.js";
 import { addPending, resolvePending, type PendingRow } from "../db/repos/importPending.js";
 import { normalizePlaylistName } from "../db/repos/playlists.js";
 import { addPendingNotes, exportAlbumNotes, NOTE_MAX, RATING_MAX } from "../db/repos/albumNotes.js";
+import { parseRuleJson, parseSmartRule, SmartRuleSchema } from "../db/repos/smartPlaylists.js";
 import { isBandcampHost, normalizeBandcampUrl } from "../scrape/url.js";
 import { normalizeFanUsername } from "../scrape/fan.js";
 import { releasePath } from "../db/repos/releases.js";
@@ -72,6 +73,14 @@ const PlaylistSchema = z.object({
   tracks: z.array(TrackRefSchema).max(MAX_ITEMS),
 });
 
+/** A smart playlist (#84): its rule, never its tracks. Older builds drop the whole field. */
+const SmartPlaylistSchema = z.object({
+  key: str(200),
+  name: str(1000),
+  created_at: str(40),
+  rule: SmartRuleSchema,
+});
+
 const PlaySchema = TrackRefSchema.extend({ played_at: sqlTime, seconds: z.number().min(0).max(86_400) });
 
 /**
@@ -116,6 +125,8 @@ export const LibraryExportSchema = z.object({
   }),
   /** Added after version 1 shipped; optional so older files still parse. */
   notes: z.array(NoteSchema).max(MAX_ITEMS).optional(),
+  /** Smart playlists (#84), added after version 1 shipped; a separate field so older builds ignore them entirely. */
+  smart_playlists: z.array(SmartPlaylistSchema).max(10_000).optional(),
   account: z.object({
     username: str(100).nullable().refine((u) => {
       if (u === null) return true;
@@ -180,13 +191,23 @@ export async function exportLibrary(db: Db, opts: { history?: boolean; appVersio
   )).map((a) => ({ ...a, owned: !!a.owned, wishlisted: !!a.wishlisted }));
 
   const playlists: LibraryExport["playlists"] = [];
-  for (const p of await db.select<{ id: number; name: string; created_at: string }>("SELECT id, name, created_at FROM playlists ORDER BY created_at, id")) {
+  for (const p of await db.select<{ id: number; name: string; created_at: string }>(
+    "SELECT id, name, created_at FROM playlists WHERE id NOT IN (SELECT playlist_id FROM smart_playlists) ORDER BY created_at, id",
+  )) {
     const tracks = await db.select<LibraryExport["playlists"][number]["tracks"][number]>(
       `SELECT ${TRACK_REF} FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id JOIN albums al ON al.id = t.album_id
        WHERE pt.playlist_id = ? ORDER BY pt.position, pt.id`,
       [p.id],
     );
     playlists.push({ key: `${lib}:${p.id}`, name: p.name, created_at: p.created_at, tracks });
+  }
+
+  const smart: NonNullable<LibraryExport["smart_playlists"]> = [];
+  for (const p of await db.select<{ id: number; name: string; created_at: string; rule_json: string }>(
+    "SELECT p.id, p.name, p.created_at, s.rule_json FROM playlists p JOIN smart_playlists s ON s.playlist_id = p.id ORDER BY p.created_at, p.id",
+  )) {
+    const rule = parseRuleJson(p.rule_json);
+    if (rule) smart.push({ key: `${lib}:${p.id}`, name: p.name, created_at: p.created_at, rule });
   }
 
   const history = opts.history === false ? null : await db.select<NonNullable<LibraryExport["history"]>[number]>(
@@ -229,6 +250,7 @@ export async function exportLibrary(db: Db, opts: { history?: boolean; appVersio
     },
     account: { username: account?.username ?? null },
     notes: await exportAlbumNotes(db),
+    smart_playlists: smart,
   };
 }
 
@@ -238,7 +260,10 @@ interface LibraryState {
   trackIds: Set<number>;
   queued: Set<string>;
   names: Map<string, number[]>;
-  mapped: Set<string>;
+  /** source_key -> playlist id, for playlists an earlier import created. */
+  mapped: Map<string, number>;
+  /** Smart playlists here (#84), with their rule as stored. */
+  smart: Map<number, string>;
   /** Playlists an interrupted import claimed (name chosen) but may not have finished creating. */
   claims: Map<string, string>;
   libraryId: string | null;
@@ -256,7 +281,8 @@ async function libraryState(db: Db): Promise<LibraryState> {
   const playlists = await db.select<{ id: number; name: string; created_at: string }>("SELECT id, name, created_at FROM playlists");
   const names = new Map<string, number[]>();
   for (const p of playlists) names.set(p.name.toLowerCase(), [...(names.get(p.name.toLowerCase()) ?? []), p.id]);
-  const mapped = await db.select<{ source_key: string }>("SELECT source_key FROM imported_playlists WHERE playlist_id IN (SELECT id FROM playlists)");
+  const mapped = await db.select<{ source_key: string; playlist_id: number }>("SELECT source_key, playlist_id FROM imported_playlists WHERE playlist_id IN (SELECT id FROM playlists)");
+  const smart = await db.select<{ playlist_id: number; rule_json: string }>("SELECT playlist_id, rule_json FROM smart_playlists");
   const claims = await db.select<{ source_key: string; name: string }>("SELECT source_key, name FROM imported_playlists WHERE playlist_id IS NULL");
   return {
     urls: new Set(albums.map((a) => a.url)),
@@ -264,7 +290,8 @@ async function libraryState(db: Db): Promise<LibraryState> {
     trackIds: new Set(tracks.map((t) => t.track_id)),
     queued: new Set(queued.map((q) => q.url)),
     names,
-    mapped: new Set(mapped.map((m) => m.source_key)),
+    mapped: new Map(mapped.map((m) => [m.source_key, m.playlist_id])),
+    smart: new Map(smart.map((r) => [r.playlist_id, JSON.stringify(parseRuleJson(r.rule_json))])),
     claims: new Map(claims.map((c) => [c.source_key, c.name])),
     libraryId: await libraryId(db, false),
     playlistIds: new Map(playlists.map((p) => [p.id, p.created_at])),
@@ -319,6 +346,13 @@ async function trackSequence(db: Db, playlistId: number): Promise<string> {
 }
 
 type PlaylistPlan = { key: string; name: string; status: "present" } | { key: string; name: string; status: "new"; createAs: string };
+type FilePlaylist = Pick<LibraryExport["playlists"][number], "key" | "name" | "created_at"> & (
+  | { tracks: LibraryExport["playlists"][number]["tracks"]; rule?: undefined }
+  | { tracks?: undefined; rule: NonNullable<LibraryExport["smart_playlists"]>[number]["rule"] }
+);
+
+/** The file's playlists, then its smart playlists (#84), in the order planPlaylists plans them. */
+const filePlaylists = (data: LibraryExport): FilePlaylist[] => [...data.playlists, ...(data.smart_playlists ?? [])];
 
 /**
  * Which playlists already exist here: created by an earlier import of this library, the
@@ -329,14 +363,18 @@ type PlaylistPlan = { key: string; name: string; status: "present" } | { key: st
 async function planPlaylists(db: Db, data: LibraryExport, s: LibraryState): Promise<PlaylistPlan[]> {
   const taken = new Set(s.names.keys());
   const plans: PlaylistPlan[] = [];
-  for (const p of data.playlists) {
+  for (const p of filePlaylists(data)) {
     const name = normalizePlaylistName(p.name) ?? "Imported playlist";
     const ownId = data.library_id === s.libraryId ? Number(p.key.slice(p.key.lastIndexOf(":") + 1)) : NaN;
     let present = s.mapped.has(p.key) || (Number.isInteger(ownId) && s.playlistIds.get(ownId) === p.created_at);
-    if (!present) {
+    if (!present && p.rule) {
+      // A smart playlist of the same name with the same rule.
+      const want = JSON.stringify(parseSmartRule(p.rule));
+      present = (s.names.get(name.toLowerCase()) ?? []).some((c) => s.smart.get(c) === want);
+    } else if (!present && p.tracks) {
       const want = p.tracks.map((t) => (t.track_id != null ? String(t.track_id) : `${t.album_url}#${t.title}`)).join(",");
       for (const candidate of s.names.get(name.toLowerCase()) ?? []) {
-        if ((await trackSequence(db, candidate)) === want) { present = true; break; }
+        if (!s.smart.has(candidate) && (await trackSequence(db, candidate)) === want) { present = true; break; }
       }
     }
     if (present) { plans.push({ key: p.key, name, status: "present" }); continue; }
@@ -450,9 +488,19 @@ export async function importLibrary(db: Db, runner: JobRunner, data: LibraryExpo
 
   let playlistsCreated = 0;
   const plans = await planPlaylists(db, data, s);
+  const inFile = filePlaylists(data);
   for (const [i, plan] of plans.entries()) {
+    const p = inFile[i];
+    if (p.rule) {
+      // The rule goes in after the playlist, with INSERT OR IGNORE: a rerun after an
+      // interruption gives the playlist an earlier run created (mapped) its rule, and an
+      // existing rule is never replaced.
+      const pid = plan.status === "new" ? await createImportedPlaylist(db, p.key, plan.createAs) : s.mapped.get(p.key);
+      if (pid !== undefined) await db.run("INSERT OR IGNORE INTO smart_playlists (playlist_id, rule_json) VALUES (?, ?)", [pid, JSON.stringify(parseSmartRule(p.rule))]);
+      if (plan.status === "new") playlistsCreated++;
+      continue;
+    }
     if (plan.status !== "new") continue;
-    const p = data.playlists[i];
     const pid = await createImportedPlaylist(db, p.key, plan.createAs);
     await addPending(db, p.tracks.map((t, position): PendingRow => ({
       kind: "playlist_track", playlist_id: pid, position, album_url: t.album_url, track_bcid: t.track_id, track_num: t.track_num, track_title: t.title,

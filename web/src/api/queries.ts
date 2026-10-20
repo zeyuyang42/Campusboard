@@ -166,8 +166,15 @@ export function usePlaylistMutations() {
     addTracks: useMutation({ mutationFn: async ({ id, trackIds }: { id: number; trackIds: number[] }) => (await core()).addToPlaylist(id, trackIds), onSuccess: (_d, v) => inv(v.id) }),
     reorder: useMutation({ mutationFn: async ({ id, ids }: { id: number; ids: number[] }) => (await core()).reorderPlaylist(id, ids), onSuccess: (_d, v) => inv(v.id) }),
     removeTrack: useMutation({ mutationFn: async ({ id, ptid }: { id: number; ptid: number }) => (await core()).removeFromPlaylist(id, ptid), onSuccess: (_d, v) => inv(v.id) }),
+    /** A smart playlist (#84) from a name and a rule. */
+    createSmart: useMutation({ mutationFn: async ({ name, rule }: { name: string; rule: repos.SmartRuleInput }) => (await core()).createSmartPlaylist(name, rule), onSuccess: () => inv() }),
+    setRule: useMutation({ mutationFn: async ({ id, rule }: { id: number; rule: repos.SmartRuleInput }) => (await core()).setSmartRule(id, rule), onSuccess: (_d, v) => inv(v.id) }),
   };
 }
+
+/** How many tracks a smart playlist rule matches right now (#84); disabled while the rule is invalid. */
+export const useSmartCount = (rule: repos.SmartRule | null) =>
+  useQuery({ queryKey: ["smartCount", rule], queryFn: async () => (await core()).smartCount(rule), enabled: !!rule, placeholderData: keepPreviousData });
 
 /** Your note and rating for an album (#73). */
 export const useAlbumNote = (id: number) => useQuery({ queryKey: keys.albumNote(id), queryFn: async () => (await core()).albumNote(id), enabled: id > 0 });
