@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, NavLink, useParams } from "react-router-dom";
+import { Link, NavLink, useParams, useSearchParams } from "react-router-dom";
 import { repos } from "@bc/core";
-import { useAlbums, useArtists, useLibraryView, useRecentlyPlayed, useTracks, type LibraryView } from "../api/queries";
+import { useAlbums, useArtists, useLibraryView, useRecentlyPlayed, useTags, useTracks, type LibraryView } from "../api/queries";
+import { libraryTagPath } from "../lib/navigation";
 import { useUi } from "../ui/store";
 import { friendlyError } from "../lib/errors";
 import { formatPlays } from "../lib/format";
@@ -18,10 +19,12 @@ export function LibraryPage() {
         <NavLink to="/library/albums" className={tab === "albums" ? "active" : ""}>Albums</NavLink>
         <NavLink to="/library/artists" className={tab === "artists" ? "active" : ""}>Artists</NavLink>
         <NavLink to="/library/tracks" className={tab === "tracks" ? "active" : ""}>Tracks</NavLink>
+        <NavLink to="/library/tags" className={tab === "tags" ? "active" : ""}>Tags</NavLink>
       </nav>
       {tab === "albums" && <Albums />}
       {tab === "artists" && <Artists />}
       {tab === "tracks" && <Tracks />}
+      {tab === "tags" && <LibraryTags />}
     </>
   );
 }
@@ -79,20 +82,30 @@ function AlbumGrid({ sort: savedSort, filter, set }: LibraryView & { set: (p: Pa
   const q = useUi((s) => s.libraryQuery);
   const setQ = useUi((s) => s.setLibraryQuery);
   const term = useDebounced(q, 150).trim();
-  const { data, isLoading, error } = useAlbums(sort, filter, term);
+  // A tag (#71) lives in the address (?tag=), so album pages and the Tags tab can link to it.
+  const [params, setParams] = useSearchParams();
+  const tag = params.get("tag")?.trim() ?? "";
+  const clearTag = () => setParams((p) => { p.delete("tag"); return p; });
+  const { data, isLoading, error } = useAlbums(sort, filter, term, tag);
   if (error) return <div className="notice error">Couldn't load your library. {friendlyError(error)}</div>;
   if (isLoading) return <div className="empty">Loading…</div>;
-  if (!data?.length && filter === "all" && !term && !q.trim()) return <div className="empty">Your library is empty. Paste a Bandcamp album, track or artist link on the Import page to get started.<br /><Link className="btn primary" to="/import">Go to Import</Link></div>;
+  if (!data?.length && filter === "all" && !term && !q.trim() && !tag) return <div className="empty">Your library is empty. Paste a Bandcamp album, track or artist link on the Import page to get started.<br /><Link className="btn primary" to="/import">Go to Import</Link></div>;
   const n = data?.length ?? 0;
   // The Recently played row sits over the plain library view only: not while filtering, and
   // not when the grid itself is already ordered by listening.
-  const shelf = filter === "all" && !term && !q.trim() && sort !== "played" && sort !== "plays";
-  // Bulk actions only while the filter or Show narrows the list (the bar carries the count then).
-  const bulk = (filter !== "all" || !!term) && n > 0;
+  const shelf = filter === "all" && !term && !q.trim() && !tag && sort !== "played" && sort !== "plays";
+  // Bulk actions only while the filter, a tag or Show narrows the list (the bar carries the count then).
+  const bulk = (filter !== "all" || !!term || !!tag) && n > 0;
   return (
     <>
       <div className="toolbar">
         <FilterInput value={q} onChange={setQ} placeholder="Filter albums, artists, tracks" />
+        {tag && (
+          <span className="tag-filter">
+            Tagged <span className="selectable">{tag}</span>
+            <button className="icon-btn sm" onClick={clearTag} aria-label={`Clear tag ${tag}`} title="Clear tag">×</button>
+          </span>
+        )}
         {!bulk && <span className="muted">{n} album{n === 1 ? "" : "s"}</span>}
         <span className="spacer" />
         <label className="muted" htmlFor="album-filter">Show</label>
@@ -108,13 +121,16 @@ function AlbumGrid({ sort: savedSort, filter, set }: LibraryView & { set: (p: Pa
           {repos.ALBUM_SORTS.map((s) => <option key={s} value={s}>{SORT_LABELS[s]}</option>)}
         </select>
       </div>
-      {bulk && <BulkBar albums={data!} sort={sort} filter={filter} q={term} />}
+      {bulk && <BulkBar albums={data!} sort={sort} filter={filter} q={term} tag={tag} />}
       {shelf && <RecentlyPlayed libraryCount={n} onShowAll={() => setTempSort("played")} />}
       {n ? <div className="grid">{data!.map((a) => <AlbumCard key={a.id} album={a} detail={sort === "plays" ? (a.play_count ? formatPlays(a.play_count) : "") : sort === "rating" ? starsText(a.rating) : undefined} />)}</div>
-        : term ? (
+        : term || tag ? (
           <div className="empty">
-            Nothing in {FILTER_NAME[filter] ?? "your library"} matches <span className="selectable">“{term}”</span>.<br />
-            <button className="btn" onClick={() => setQ("")}>Clear filter</button>
+            Nothing in {FILTER_NAME[filter] ?? "your library"}
+            {tag && <> is tagged <span className="selectable">“{tag}”</span>{term ? " and" : ""}</>}
+            {term && <> matches <span className="selectable">“{term}”</span></>}.<br />
+            {term && <button className="btn" onClick={() => setQ("")}>Clear filter</button>}
+            {tag && <>{term ? " " : ""}<button className="btn" onClick={clearTag}>Clear tag</button></>}
             {filter !== "all" && <> <button className="btn" onClick={() => set({ filter: "all" })}>Search all albums</button></>}
           </div>
         )
@@ -180,6 +196,46 @@ function Artists() {
         </Link>
       ))}
     </div>
+  );
+}
+
+/** Every tag in the library with its album count (#71); a tag opens the album grid narrowed to it. */
+export function LibraryTags() {
+  const { view, set } = useLibraryView();
+  if (!view) return <div className="empty">Loading…</div>;
+  return <TagList key={view.filter} filter={view.filter} showAll={() => set({ filter: "all" })} />;
+}
+
+function TagList({ filter, showAll }: { filter: repos.AlbumFilter; showAll: () => void }) {
+  // Counted under the same Show choice as the album grid, so a tag's number is what it opens.
+  const { data, isLoading, error } = useTags(filter);
+  const setQ = useUi((s) => s.setLibraryQuery);
+  if (isLoading) return <div className="empty">Loading…</div>;
+  if (error) return <div className="notice error">Couldn't load your tags. {friendlyError(error)}</div>;
+  const scope = filter !== "all" && (
+    <p className="muted tag-scope">
+      Counting albums in {FILTER_NAME[filter]}. <button className="btn ghost sm" onClick={showAll}>Count all albums</button>
+    </p>
+  );
+  if (!data?.length) {
+    return filter === "all"
+      ? <div className="empty">No tags yet. Albums bring their Bandcamp tags with them when you import them.</div>
+      : <>{scope}<div className="empty">No tags in {FILTER_NAME[filter]}.</div></>;
+  }
+  return (
+    <>
+    {scope}
+    <ul className="tag-list">
+      {data.map((t) => (
+        <li key={t.tag}>
+          <Link to={libraryTagPath(t.tag)} onClick={() => setQ("")}>
+            <span className="name">{t.tag}</span>
+            <span className="muted" aria-label={`${t.album_count} album${t.album_count === 1 ? "" : "s"}`}>{t.album_count}</span>
+          </Link>
+        </li>
+      ))}
+    </ul>
+    </>
   );
 }
 

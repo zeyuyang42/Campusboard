@@ -57,7 +57,10 @@ Requires macOS 13.3 or later. Your library lives in
 - **Playlists**: right-click any track or album, or select several tracks
   (click, Shift-click, Cmd-click) and use the bar that appears. Drag rows to
   reorder.
-- **Filtered library**: when the filter field or the **Show** menu narrows the
+- **Tags**: Library → Tags lists the Bandcamp tags of your albums with how
+  many carry each; a tag (there, or under an album's title) opens the album
+  grid narrowed to it, together with the filter field, Show and Sort.
+- **Filtered library**: when the filter field, a tag or the **Show** menu narrows the
   Library, a bar above the grid plays, shuffles, queues or adds to a playlist
   every matching album in the current sort order (it asks first above 500 tracks).
 - **Now playing**: press `N` or click the artwork in the dock for a full view

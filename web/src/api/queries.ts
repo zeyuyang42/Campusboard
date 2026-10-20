@@ -3,7 +3,9 @@ import { getCore } from "./core";
 import { repos, type Job, type PlayState } from "@bc/core";
 
 export const keys = {
-  albums: (sort: string, filter = "all", q = "") => ["albums", sort, filter, q] as const,
+  albums: (sort: string, filter = "all", q = "", tag = "") => ["albums", sort, filter, q, tag] as const,
+  // Under "albums" so an import or a removal refreshes the counts.
+  tags: (filter = "all") => ["albums", "tags", filter] as const,
   album: (id: number) => ["album", id] as const,
   // Under "album" so a refresh or an imported library (which invalidate "album") reload it.
   albumNote: (id: number) => ["album", id, "note"] as const,
@@ -36,8 +38,10 @@ export const keys = {
 
 const core = getCore;
 /** Library albums; while the filter text changes, the previous result stays on screen. */
-export const useAlbums = (sort: string, filter = "all", q = "") =>
-  useQuery({ queryKey: keys.albums(sort, filter, q.trim()), queryFn: async () => (await core()).albums(sort as never, filter as never, q), placeholderData: keepPreviousData });
+export const useAlbums = (sort: string, filter = "all", q = "", tag = "") =>
+  useQuery({ queryKey: keys.albums(sort, filter, q.trim(), tag), queryFn: async () => (await core()).albums(sort as never, filter as never, q, tag), placeholderData: keepPreviousData });
+/** The library's tags with album counts under the Show filter (#71), so they match the grid. */
+export const useTags = (filter: repos.AlbumFilter = "all") => useQuery({ queryKey: keys.tags(filter), queryFn: async () => (await core()).tags(filter) });
 
 export type LibraryView = { sort: repos.AlbumSort; filter: repos.AlbumFilter };
 const LIBRARY_VIEW_KEY = "library_view";

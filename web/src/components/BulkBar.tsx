@@ -28,7 +28,7 @@ const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n ==
  * its sort order. The tracks are read from the library only when an action runs, and stream
  * URLs stay lazy: the player fetches each one when its track loads, as for any queue.
  */
-export function BulkBar({ albums, sort, filter, q }: { albums: Album[]; sort: repos.AlbumSort; filter: repos.AlbumFilter; q: string }) {
+export function BulkBar({ albums, sort, filter, q, tag = "" }: { albums: Album[]; sort: repos.AlbumSort; filter: repos.AlbumFilter; q: string; tag?: string }) {
   const anchor = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -43,7 +43,7 @@ export function BulkBar({ albums, sort, filter, q }: { albums: Album[]; sort: re
     setError(null);
     setNote(null);
     try {
-      setNote(act(await (await getCore()).albumTracks(sort, filter, q)) ?? null);
+      setNote(act(await (await getCore()).albumTracks(sort, filter, q, tag)) ?? null);
     } catch (e) {
       setError(friendlyError(e, "Couldn't read these albums' tracks."));
     } finally {

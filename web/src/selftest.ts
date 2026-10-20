@@ -103,6 +103,23 @@ async function libraryFilterCheck(core: Awaited<ReturnType<typeof getCore>>, alb
 }
 
 /**
+ * Browse by tag (#71) through the real SQL plugin: json_each over albums.tags_json for the tag
+ * counts and the tag filter, against the album the selftest just imported. Read-only.
+ */
+async function tagsCheck(core: Awaited<ReturnType<typeof getCore>>, album: Awaited<ReturnType<Awaited<ReturnType<typeof getCore>>["album"]>>) {
+  if (!album) return { ok: false, error: "no album" };
+  const t0 = performance.now();
+  const tags = await core.tags();
+  const countsMs = Math.round(performance.now() - t0);
+  const listed = album.tags.every((t) => tags.some((x) => x.tag.toLowerCase() === t.toLowerCase() && x.album_count >= 1));
+  const first = album.tags[0] ?? "";
+  const filtered = first ? (await core.albums("title", "all", "", first.toUpperCase())).some((a) => a.id === album.id) : false;
+  const tracks = first ? (await core.albumTracks("title", "all", "", first)).filter((t) => t.album_id === album.id).length : 0;
+  const ok = album.tags.length > 0 && listed && filtered && tracks === album.tracks.length;
+  return { ok, albumTags: album.tags, libraryTags: tags.length, listed, filtered, tracks, countsMs };
+}
+
+/**
  * Album notes and ratings (#73) through the real SQL plugin and migration 0009: write a rating
  * and a note on the selftest album, read them back (also through the Rating sort and the Rated
  * filter), then put back what was there before.
@@ -951,6 +968,7 @@ export async function runSelfTest() {
       return { ok: !!album && playable.length > 0 };
     }, 120_000);
     out.libraryFilter = await block("libraryFilter", () => libraryFilterCheck(core, album));
+    out.tags = await block("tags", () => tagsCheck(core, album));
     out.albumNotes = await block("albumNotes", () => albumNotesCheck(core, album?.id));
     out.history = await block("history", () => historyCheck(core, album));
     out.audio = await block("audio", async (s) => {
