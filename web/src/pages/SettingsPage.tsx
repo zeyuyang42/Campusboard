@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { friendlyError } from "../lib/errors";
 import { CROSSFADE_MAX_SEC, PRESETS, parseThemeJson, type Theme } from "@bc/core";
 import { usePlayer } from "../player/store";
@@ -256,12 +257,13 @@ function ListeningHistory() {
       <h2>Listening history</h2>
       <p className="muted">
         A track counts as played once you have listened to half of it or four minutes, whichever comes first.
-        History is stored in your local library and feeds Recently played and Most played in the Library.
+        History is stored in your local library and feeds Recently played, Most played and the History tab in the Library. Radio episodes are not recorded.
       </p>
       <div className="row">
         {n ? (
           <>
             <span>{formatPlays(n)} recorded</span>
+            <Link className="btn" to="/library/history">Show history</Link>
             <ConfirmButton label="Clear listening history" confirmLabel="Clear history" question={n === 1 ? "Forget the 1 play?" : `Forget all ${n} plays?`} onConfirm={() => clear.mutateAsync().then(() => undefined)} />
           </>
         ) : <span className="muted">Nothing recorded yet.</span>}

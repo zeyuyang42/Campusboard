@@ -34,7 +34,7 @@ import {
   backupDatabase, exportLibrary, importLibrary, parseLibraryExport, previewLibraryImport,
   type LibraryExport, type LibraryImportOptions,
 } from "./services/libraryTransfer.js";
-import type { BrowseResult, PlayState, SearchResult } from "./types.js";
+import type { BrowseResult, HistoryCursor, PlayState, SearchResult } from "./types.js";
 
 export interface CoreDeps {
   db: Db;
@@ -209,6 +209,8 @@ export function createCore(deps: CoreDeps) {
     recentlyPlayed: (limit = 12) => plays.recentlyPlayedAlbums(db, limit),
     mostPlayed: (limit = 12) => plays.mostPlayedAlbums(db, limit),
     playCount: () => plays.countPlays(db),
+    /** One page of the History view (#86), newest first; pass the previous page's `next`. */
+    history: (before: HistoryCursor | null = null, limit = 50) => plays.listPlays(db, before, limit),
     /** Forget all plays, and plays an imported library still has waiting (so they don't come back). */
     clearHistory: async () => { await importPending.clearPendingPlays(db); return plays.clearPlays(db); },
     savePlayState: (s: PlayState) => playState.setPlayState(db, s),

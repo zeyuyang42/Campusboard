@@ -140,6 +140,24 @@ h2 { font-family: var(--font-display); font-size: 18px; font-weight: 600; letter
 .tag-list a .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag-list a .muted { font-variant-numeric: tabular-nums; font-size: 13px; }
 .tag-list a:hover .name { text-decoration: underline; }
+/* History tab (#86): one quiet row per play, small art first, grouped under plain day headings. */
+.history section { margin-bottom: 22px; }
+.history h2 { font-size: 15px; margin: 0 0 6px; }
+.history ul { list-style: none; margin: 0; padding: 0; }
+.history li { display: grid; grid-template-columns: 40px minmax(0, 2fr) minmax(0, 1.4fr) 76px 28px; align-items: center; gap: 12px; padding: 5px 8px; margin: 0 -8px; border-radius: var(--radius-sm); }
+.history li:hover { background: var(--surface-hover); }
+.history li.current .title { color: var(--accent); }
+.history li.disabled { color: var(--text-muted); }
+.history .art { width: 40px; height: 40px; padding: 0; border: 0; border-radius: 4px; overflow: hidden; background: var(--surface-hover); }
+.history .art img, .history .art div { width: 100%; height: 100%; object-fit: cover; display: block; }
+.history .t { min-width: 0; }
+.history .title, .history .sub, .history .album { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.history .sub, .history .album { color: var(--text-muted); font-size: 13px; }
+.history .album:hover { color: var(--text); text-decoration: underline; }
+.history .when { text-align: right; color: var(--text-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.history li .icon-btn { opacity: 0; }
+.history li:hover .icon-btn, .history li:focus-within .icon-btn { opacity: 1; }
+@media (max-width: 640px) { .history li { grid-template-columns: 40px minmax(0, 1fr) 76px 28px; } .history .album { display: none; } }
 .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 16px; }
 .chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-raised); font-weight: 500; }

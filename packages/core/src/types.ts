@@ -65,6 +65,25 @@ export interface Track {
   downloaded?: boolean;
 }
 
+/** One counted play in the History view (#86): the track as it is now, plus when it was played. */
+export interface HistoryEntry extends Track {
+  play_id: number;
+  /** UTC, "YYYY-MM-DD HH:MM:SS". */
+  played_at: string;
+}
+
+/** Where the next History page starts: just older than this play. */
+export interface HistoryCursor {
+  played_at: string;
+  id: number;
+}
+
+export interface HistoryPage {
+  entries: HistoryEntry[];
+  /** null when this page reaches the oldest play. */
+  next: HistoryCursor | null;
+}
+
 export interface AlbumWithTracks extends Album {
   tracks: Track[];
 }

@@ -9,6 +9,7 @@ import { formatPlays } from "../lib/format";
 import { AlbumCard } from "../components/AlbumCard";
 import { BulkBar } from "../components/BulkBar";
 import { TrackList, PlayPauseAll } from "../components/TrackList";
+import { PlayHistory } from "../components/PlayHistory";
 
 export function LibraryPage() {
   const { tab = "albums" } = useParams();
@@ -20,11 +21,13 @@ export function LibraryPage() {
         <NavLink to="/library/artists" className={tab === "artists" ? "active" : ""}>Artists</NavLink>
         <NavLink to="/library/tracks" className={tab === "tracks" ? "active" : ""}>Tracks</NavLink>
         <NavLink to="/library/tags" className={tab === "tags" ? "active" : ""}>Tags</NavLink>
+        <NavLink to="/library/history" className={tab === "history" ? "active" : ""}>History</NavLink>
       </nav>
       {tab === "albums" && <Albums />}
       {tab === "artists" && <Artists />}
       {tab === "tracks" && <Tracks />}
       {tab === "tags" && <LibraryTags />}
+      {tab === "history" && <PlayHistory />}
     </>
   );
 }
