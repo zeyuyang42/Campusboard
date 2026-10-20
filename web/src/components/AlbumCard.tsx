@@ -8,12 +8,13 @@ import { formatReleaseDate, yearOf } from "../lib/format";
 import { useTrackActions } from "../lib/useTrackActions";
 import { useMenu } from "../ui/menu";
 import { useAlbumMutations } from "../api/queries";
+import { removeAlbumWithUndo } from "../lib/removals";
 
 /** `detail` replaces the release year under the title (e.g. a play count); "" shows nothing there. */
 export function AlbumCard({ album, showArtist = true, detail }: { album: Album; showArtist?: boolean; detail?: string }) {
   const playTracks = usePlayer((s) => s.playTracks);
   const actions = useTrackActions();
-  const { remove, refresh } = useAlbumMutations();
+  const { refresh } = useAlbumMutations();
   const play = async (e: React.MouseEvent) => {
     e.preventDefault();
     const full = await (await getCore()).album(album.id);
@@ -25,7 +26,7 @@ export function AlbumCard({ album, showArtist = true, detail }: { album: Album; 
     const at = e.type === "contextmenu" ? { x: e.clientX, y: e.clientY } : (e.currentTarget as HTMLElement);
     const full = await (await getCore()).album(album.id);
     if (!full) return;
-    const content = actions(full.tracks, { onAlbumPage: false, remove: { label: "Remove from library", onSelect: () => remove.mutate(album.id) } });
+    const content = actions(full.tracks, { onAlbumPage: false, remove: { label: "Remove from library", onSelect: () => { void removeAlbumWithUndo(album); } } });
     if ("items" in content) content.items.splice(content.items.length - 2, 0, { label: "Refresh from Bandcamp", onSelect: () => refresh.mutate(album.id) });
     useMenu.getState().show(at, content);
   };

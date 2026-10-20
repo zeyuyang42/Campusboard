@@ -13,6 +13,7 @@ import * as palettes from "./db/repos/palettes.js";
 import * as plays from "./db/repos/plays.js";
 import * as albumNotes from "./db/repos/albumNotes.js";
 import * as resumePositions from "./db/repos/resumePositions.js";
+import * as albumRemoval from "./db/repos/albumRemoval.js";
 import { artUrl, extractPalette, type ArtPalette } from "./palette/index.js";
 import { JobRunner, type ImportRequest, type ImportSelectionRequest } from "./services/jobRunner.js";
 import { cachedFetchText } from "./services/pageCache.js";
@@ -71,8 +72,33 @@ export function createCore(deps: CoreDeps) {
   });
   const radio = new RadioService(db, queue);
   const refresher = new CollectionRefresher(db, gate, runner, { ...deps.collectionRefresh, onChange: () => deps.onJobsChange?.() });
+  /** The full delete: queued downloads cancelled, rows (notes, plays, resume points with them), then offline files. */
+  const deleteAlbumNow = async (id: number) => {
+    const a = await albums.getAlbum(db, id);
+    if (a) await runner.cancelDownloads(a.url);
+    return albums.deleteAlbum(db, id);
+  };
+  // Removals with Undo (#93) run one after another; each deletes only albums still marked,
+  // so an Undo that came first wins. Delete first, unmark last: interrupted, it runs again.
+  let finishing: Promise<number> = Promise.resolve(0);
+  const finishRemovals = (only?: number[]) => (finishing = finishing.catch(() => 0).then(async () => {
+    const marked = await albumRemoval.removingAlbumIds(db);
+    const ids = only ? marked.filter((id) => only.includes(id)) : marked;
+    for (const id of ids) {
+      await deleteAlbumNow(id);
+      await albumRemoval.unmarkRemoving(db, [id]);
+    }
+    // Resume points have no foreign key to their track (#85): the vacuum takes them, then the files go.
+    if (ids.length) { await vacuumOrphans(db); await sweepOffline(); }
+    return ids.length;
+  }));
   void prunePageCache(db);
-  void vacuumOrphans(db).then(sweepOffline, () => undefined);
+  // Removals left marked by a quit (or a kill) inside the Undo window are finished now: the
+  // note that offered Undo is gone, so the removal stands. Queued before anything else runs.
+  void finishRemovals()
+    .catch(() => 0)
+    .then(() => vacuumOrphans(db))
+    .then(sweepOffline, () => undefined);
   // Cheap, and repairs flags if the app quit between a sync's membership and flag writes.
   void recomputeOwned(db).catch(() => {});
 
@@ -92,12 +118,21 @@ export function createCore(deps: CoreDeps) {
     setAlbumRating: (id: number, rating: number) => albumNotes.setAlbumRating(db, id, rating),
     setAlbumNote: (id: number, note: string) => albumNotes.setAlbumNote(db, id, note),
     deleteAlbum: async (id: number) => {
-      const a = await albums.getAlbum(db, id);
-      if (a) await runner.cancelDownloads(a.url);
-      const r = await albums.deleteAlbum(db, id);
+      const r = await deleteAlbumNow(id);
       await sweepOffline();
       return r;
     },
+    /**
+     * Remove an album with Undo (#93): it is hidden from the Library, tags, search, artists
+     * and smart playlists at once, and deleted by finishAlbumRemovals (the UI calls it when
+     * the Undo window ends or the window closes; the next start finishes any left). False
+     * when there is no such album.
+     */
+    removeAlbumLater: (id: number) => albumRemoval.markRemoving(db, id),
+    /** Undo removeAlbumLater, while its delete has not run. */
+    undoRemoveAlbum: (id: number) => albumRemoval.unmarkRemoving(db, [id]),
+    /** Delete the albums removed with removeAlbumLater (all, or just `ids`). Returns how many. */
+    finishAlbumRemovals: (ids?: number[]) => finishRemovals(ids),
     refreshAlbum: async (id: number) => {
       const a = await albums.getAlbum(db, id);
       if (a) await refreshAlbum(db, queue, id, a.url);
@@ -168,6 +203,13 @@ export function createCore(deps: CoreDeps) {
     addToPlaylist: (id: number, trackIds: number[]) => playlists.addTracks(db, id, trackIds),
     reorderPlaylist: (id: number, playlistTrackIds: number[]) => playlists.reorder(db, id, playlistTrackIds),
     removeFromPlaylist: (id: number, playlistTrackId: number) => playlists.removeTrack(db, id, playlistTrackId),
+    /** Remove entries and get what restorePlaylistTracks needs to put them back (#93), or null. */
+    removeFromPlaylistWithUndo: (id: number, playlistTrackIds: number[]) => playlists.removeTracksWithUndo(db, id, playlistTrackIds),
+    restorePlaylistTracks: (snap: playlists.RemovedPlaylistTracks) => playlists.restoreTracks(db, snap),
+    /** Delete a playlist and get what restorePlaylist needs (#93), or null when there was none. */
+    deletePlaylistWithUndo: (id: number) => playlists.deletePlaylistWithUndo(db, id),
+    /** Recreate a deleted playlist (its old id when free); returns its id. */
+    restorePlaylist: (snap: playlists.DeletedPlaylist) => playlists.restorePlaylist(db, snap),
     playlistsContaining: (trackIds: number[]) => playlists.playlistsContaining(db, trackIds),
     // search
     search: async (q: string): Promise<SearchResult[]> => {

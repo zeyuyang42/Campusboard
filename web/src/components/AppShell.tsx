@@ -8,6 +8,7 @@ import { MenuHost } from "./MenuHost";
 import { CommandPalette } from "./CommandPalette";
 import { NowPlaying } from "./NowPlaying";
 import { DropLink } from "./DropLink";
+import { UndoNote } from "./UndoNote";
 import { usePlayer } from "../player/store";
 import { useUi } from "../ui/store";
 import { isTauri } from "../lib/env";
@@ -59,6 +60,7 @@ export function AppShell() {
       <MenuHost />
       <CommandPalette />
       <DropLink />
+      <UndoNote />
     </>
   );
 }

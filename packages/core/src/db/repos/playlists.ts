@@ -193,3 +193,155 @@ export async function playlistsContaining(db: Db, trackIds: number[]): Promise<S
   );
   return new Set(rows.map((r) => r.playlist_id));
 }
+
+// Undo (#93). A removal takes a snapshot first and hands it to the UI, which gives it back to
+// put things where they were. No transactions: each restore is a few ordered statements that
+// skip what is already back, and an interruption between them leaves a readable playlist.
+
+/** Playlist entries taken out: enough to put them back where they were. */
+export interface RemovedPlaylistTracks {
+  playlist_id: number;
+  /** `k` is the entry's place (0-based) in the playlist's order when it was removed. */
+  rows: { id: number; track_id: number; added_at: string; k: number }[];
+}
+
+/** Remove entries and return what was removed (null when nothing was), for restoreTracks. */
+export async function removeTracksWithUndo(db: Db, playlistId: number, playlistTrackIds: number[]): Promise<RemovedPlaylistTracks | null> {
+  if (!playlistTrackIds.length) return null;
+  const ids = JSON.stringify(playlistTrackIds);
+  const rows = await db.select<RemovedPlaylistTracks["rows"][number]>(
+    `SELECT id, track_id, added_at, k FROM (
+       SELECT id, track_id, added_at, ROW_NUMBER() OVER (ORDER BY position, id) - 1 AS k FROM playlist_tracks WHERE playlist_id = ?)
+     WHERE id IN (SELECT j.value FROM json_each(?) AS j) ORDER BY k`,
+    [playlistId, ids],
+  );
+  if (!rows.length) return null;
+  const r = await db.run("DELETE FROM playlist_tracks WHERE playlist_id = ? AND id IN (SELECT j.value FROM json_each(?) AS j)", [playlistId, ids]);
+  if (!r.changes) return null;
+  await db.run("UPDATE playlists SET updated_at = ? WHERE id = ?", [now(), playlistId]);
+  return { playlist_id: playlistId, rows };
+}
+
+/** The snapshot's rows as a table r(id, track_id, added_at, k, position), from one JSON parameter. */
+const SNAP_ROWS = `(SELECT json_extract(j.value, '$.id') AS id, json_extract(j.value, '$.track_id') AS track_id,
+  json_extract(j.value, '$.added_at') AS added_at, json_extract(j.value, '$.k') AS k, json_extract(j.value, '$.position') AS position
+  FROM json_each(?) AS j) r`;
+
+/** An entry of the snapshot is back already: its own id, playlist and track. */
+const ALREADY_BACK = "EXISTS (SELECT 1 FROM playlist_tracks x WHERE x.id = r.id AND x.playlist_id = ? AND x.track_id = r.track_id)";
+
+/**
+ * Put removed entries back at their places, under their old ids when those are free. Entries
+ * whose track has gone since are skipped. Two statements: the rows (with their old place as
+ * the position), then one renumbering of the playlist that slots them in; running the whole
+ * restore again adds nothing. Returns how many entries came back.
+ */
+export async function restoreTracks(db: Db, snap: RemovedPlaylistTracks): Promise<number> {
+  const pid = snap.playlist_id;
+  const json = JSON.stringify(snap.rows);
+  const placed = await db.select<{ id: number; k: number }>(
+    `INSERT INTO playlist_tracks (id, playlist_id, track_id, position, added_at)
+     SELECT CASE WHEN EXISTS (SELECT 1 FROM playlist_tracks x WHERE x.id = r.id) THEN NULL ELSE r.id END, ?, r.track_id, r.k, r.added_at
+     FROM ${SNAP_ROWS}
+     WHERE EXISTS (SELECT 1 FROM playlists p WHERE p.id = ?)
+       AND NOT EXISTS (SELECT 1 FROM smart_playlists s WHERE s.playlist_id = ?)
+       AND EXISTS (SELECT 1 FROM tracks t WHERE t.id = r.track_id)
+       AND NOT ${ALREADY_BACK}
+     RETURNING id, position AS k`,
+    [pid, json, pid, pid, pid],
+  );
+  // Back already (the same snapshot restored twice): place the snapshot's own rows again.
+  const at = placed.length ? placed : await db.select<{ id: number; k: number }>(`SELECT r.id, r.k FROM ${SNAP_ROWS} WHERE ${ALREADY_BACK}`, [json, pid]);
+  if (!at.length) return 0;
+  await placeAt(db, pid, at);
+  await db.run("UPDATE playlists SET updated_at = ? WHERE id = ?", [now(), pid]);
+  return placed.length;
+}
+
+/**
+ * Renumber a playlist 0..n-1 with the given entries at their places `k` and every other entry
+ * in its current order around them. Entry i (in k order) has k_i - i other entries before it,
+ * so another entry of rank r ends up i places later for every i with k_i - i <= r. One statement.
+ */
+async function placeAt(db: Db, playlistId: number, at: { id: number; k: number }[]): Promise<void> {
+  await db.run(
+    `WITH s AS MATERIALIZED (SELECT json_extract(j.value, '$.id') AS id, json_extract(j.value, '$.k') AS k FROM json_each(?) AS j),
+     d AS MATERIALIZED (SELECT k - (ROW_NUMBER() OVER (ORDER BY k) - 1) AS d FROM s),
+     o AS MATERIALIZED (SELECT id, ROW_NUMBER() OVER (ORDER BY position, id) - 1 AS rk FROM playlist_tracks
+                        WHERE playlist_id = ? AND id NOT IN (SELECT id FROM s)),
+     f AS MATERIALIZED (SELECT id, rk + (SELECT COUNT(*) FROM d WHERE d.d <= o.rk) AS pos FROM o UNION ALL SELECT id, k FROM s)
+     UPDATE playlist_tracks SET position = f.pos FROM f WHERE playlist_tracks.id = f.id AND playlist_tracks.playlist_id = ?`,
+    [JSON.stringify(at), playlistId, playlistId],
+  );
+}
+
+/** A deleted playlist: its row, smart rule (#84), entries, and the library-import bookkeeping (#91) that went with it. */
+export interface DeletedPlaylist {
+  playlist: { id: number; name: string; created_at: string; updated_at: string };
+  rule_json: string | null;
+  tracks: { id: number; track_id: number; position: number; added_at: string }[];
+  /** imported_playlists rows, so importing the same library file again still finds it. */
+  imported: { source_key: string; name: string; claimed_at: string }[];
+  /** Its import_pending entries, still waiting for their album. */
+  pending: { dedupe_key: string; position: number | null; album_url: string | null; track_bcid: number | null; track_num: number | null; track_title: string | null; created_at: string }[];
+}
+
+/** Delete a playlist and return what restorePlaylist needs, or null when there was none. */
+export async function deletePlaylistWithUndo(db: Db, id: number): Promise<DeletedPlaylist | null> {
+  const playlist = await db.get<DeletedPlaylist["playlist"]>("SELECT id, name, created_at, updated_at FROM playlists WHERE id = ?", [id]);
+  if (!playlist) return null;
+  const rule = await db.get<{ rule_json: string }>("SELECT rule_json FROM smart_playlists WHERE playlist_id = ?", [id]);
+  const tracks = await db.select<DeletedPlaylist["tracks"][number]>("SELECT id, track_id, position, added_at FROM playlist_tracks WHERE playlist_id = ? ORDER BY position, id", [id]);
+  const imported = await db.select<DeletedPlaylist["imported"][number]>("SELECT source_key, name, claimed_at FROM imported_playlists WHERE playlist_id = ?", [id]);
+  const pending = await db.select<DeletedPlaylist["pending"][number]>(
+    "SELECT dedupe_key, position, album_url, track_bcid, track_num, track_title, created_at FROM import_pending WHERE kind = 'playlist_track' AND playlist_id = ?",
+    [id],
+  );
+  if (!(await deletePlaylist(db, id))) return null;
+  return { playlist, rule_json: rule?.rule_json ?? null, tracks, imported, pending };
+}
+
+/**
+ * Recreate a deleted playlist under its old id when that is still free (its library file key,
+ * "<library>:<id>" or the smart key with created_at, is then the same as before), else under a
+ * new one. Parent first, then its rule, entries and import bookkeeping; each step skips what
+ * is there already, and the playlist itself is found again by id, name and created_at.
+ * Returns the playlist's id.
+ */
+export async function restorePlaylist(db: Db, snap: DeletedPlaylist): Promise<number> {
+  const p = snap.playlist;
+  const again = await db.get<{ id: number }>("SELECT id FROM playlists WHERE id = ? AND name = ? AND created_at = ?", [p.id, p.name, p.created_at]);
+  const id = again?.id ?? (await db.get<{ id: number }>(
+    `INSERT INTO playlists (id, name, created_at, updated_at)
+     VALUES (CASE WHEN EXISTS (SELECT 1 FROM playlists WHERE id = ?) THEN NULL ELSE ? END, ?, ?, ?) RETURNING id`,
+    [p.id, p.id, p.name, p.created_at, p.updated_at],
+  ))!.id;
+  if (snap.rule_json !== null) await db.run("INSERT OR IGNORE INTO smart_playlists (playlist_id, rule_json) VALUES (?, ?)", [id, snap.rule_json]);
+  if (snap.tracks.length) {
+    await db.run(
+      `INSERT INTO playlist_tracks (id, playlist_id, track_id, position, added_at)
+       SELECT CASE WHEN EXISTS (SELECT 1 FROM playlist_tracks x WHERE x.id = r.id) THEN NULL ELSE r.id END, ?, r.track_id, r.position, r.added_at
+       FROM ${SNAP_ROWS}
+       WHERE EXISTS (SELECT 1 FROM tracks t WHERE t.id = r.track_id) AND NOT ${ALREADY_BACK}`,
+      [id, JSON.stringify(snap.tracks), id],
+    );
+  }
+  for (const m of snap.imported) {
+    await db.run(
+      `INSERT INTO imported_playlists (source_key, name, claimed_at, playlist_id) VALUES (?, ?, ?, ?)
+       ON CONFLICT(source_key) DO UPDATE SET playlist_id = excluded.playlist_id
+       WHERE imported_playlists.playlist_id IS NULL OR imported_playlists.playlist_id NOT IN (SELECT id FROM playlists)`,
+      [m.source_key, m.name, m.claimed_at, id],
+    );
+  }
+  if (snap.pending.length) {
+    await db.run(
+      `INSERT OR IGNORE INTO import_pending (kind, dedupe_key, playlist_id, position, album_url, track_bcid, track_num, track_title, created_at)
+       SELECT 'playlist_track', json_extract(j.value, '$.dedupe_key'), ?, json_extract(j.value, '$.position'), json_extract(j.value, '$.album_url'),
+              json_extract(j.value, '$.track_bcid'), json_extract(j.value, '$.track_num'), json_extract(j.value, '$.track_title'), json_extract(j.value, '$.created_at')
+       FROM json_each(?) AS j`,
+      [id, JSON.stringify(snap.pending)],
+    );
+  }
+  return id;
+}
