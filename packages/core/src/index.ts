@@ -25,7 +25,7 @@ export {
   type MiniState, type MiniCommand, type MiniTrack, type MiniPalette, type MiniStatus, type MiniSource,
 } from "./services/miniPlayer.js";
 export { getFreshStreamUrl, refreshAlbum } from "./services/streamService.js";
-export { resumeEligible, resumePoint, formatResumeAt, RESUME_MIN_TRACK_SEC, RESUME_EDGE_SEC, RESUME_MAX_ROWS } from "./services/resume.js";
+export { resumeEligible, resumeLookupWanted, resumePoint, formatResumeAt, RESUME_MIN_TRACK_SEC, RESUME_EDGE_SEC, RESUME_MAX_ROWS } from "./services/resume.js";
 export { RadioService, radioQueueTrack, isRadioTrack, isQueueRadio, RADIO_LIST_CACHE_MS } from "./services/radio.js";
 export { OfflineService, offlineFileName, isOfflineFileName, downloadItemUrl, downloadItemTrack, type OfflineFiles, type OfflineSettings } from "./services/offline.js";
 export { JobRunner, type ImportRequest, type ImportSelectionRequest } from "./services/jobRunner.js";

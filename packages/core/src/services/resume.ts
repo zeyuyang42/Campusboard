@@ -12,15 +12,25 @@ export const RESUME_MAX_ROWS = 200;
 
 interface Entry { id: number; radio?: unknown; duration?: number | null }
 
+const longer = (d: number | null | undefined) => d != null && Number.isFinite(d) && d > RESUME_MIN_TRACK_SEC;
+const known = (d: number | null | undefined) => d != null && Number.isFinite(d) && d > 0;
+
 /**
- * A Radio episode always resumes; a library track when it is over RESUME_MIN_TRACK_SEC (the
- * element's duration when known, else the queue entry's).
+ * The one rule for reading and saving a point: a Radio episode always, a library track when
+ * either its queue entry's duration or the element's (when known) is over RESUME_MIN_TRACK_SEC.
  */
-export function resumeEligible(t: Entry | null | undefined, duration?: number): boolean {
+export function resumeEligible(t: Entry | null | undefined, duration?: number | null): boolean {
   if (!t) return false;
-  if (isRadioTrack(t)) return true;
-  const d = duration != null && Number.isFinite(duration) && duration > 0 ? duration : t.duration ?? 0;
-  return d > RESUME_MIN_TRACK_SEC;
+  return isRadioTrack(t) || longer(t.duration) || longer(duration);
+}
+
+/**
+ * Whether to look a point up before playing: when the track is eligible, or when no duration
+ * is known yet (a null queue duration may still be a long track whose point was saved).
+ */
+export function resumeLookupWanted(t: Entry | null | undefined, duration?: number | null): boolean {
+  if (!t) return false;
+  return resumeEligible(t, duration) || (!known(t.duration) && !known(duration));
 }
 
 /**

@@ -208,6 +208,97 @@ describe("resuming", () => {
   });
 });
 
+describe("follow-ups from review", () => {
+  it("one rule: a null queue duration with a long element is saved, looked up and resumed", async () => {
+    const t = track({ duration: null });
+    let el = await h.startPlaying([t], 0, LONG);
+    el.emit("timeupdate", { currentTime: 1500 });
+    pause(el);
+    await flush();
+    expect(h.core.resume.get(t.id)).toBe(1500);
+    await h.startPlaying([track()], 0, 100);
+    el = await h.startPlaying([t], 0, LONG);
+    expect(el.currentTime).toBe(1500);
+  });
+
+  it("one rule: a short queue duration but a long element is read back once the element said so", async () => {
+    const t = track({ duration: 300 });
+    let el = await h.startPlaying([t], 0, LONG);
+    el.emit("timeupdate", { currentTime: 1500 });
+    await h.startPlaying([track()], 0, 100);
+    await flush();
+    expect(h.core.resume.get(t.id)).toBe(1500);
+    el = await h.startPlaying([t], 0, LONG);
+    expect(el.currentTime).toBe(1500);
+  });
+
+  it("the end disarms: with a non-finite duration the next load can't save the end as a point", async () => {
+    const [a, b] = [long(), track()];
+    const el = await h.startPlaying([a, b], 0, Infinity);
+    el.emit("timeupdate", { currentTime: 3500 });
+    el.end({ currentTime: 3500 });
+    await flush();
+    expect(h.state().current()?.id).toBe(b.id);
+    expect(h.core.resume.has(a.id)).toBe(false);
+    expect(h.core.saveResumePosition).not.toHaveBeenCalled();
+  });
+
+  it("repeat-one re-arms the replay: a pause in it saves again", async () => {
+    const t = long();
+    const el = await h.startPlaying([t], 0, LONG);
+    h.state().cycleRepeat(); h.state().cycleRepeat();
+    el.end();
+    await flush();
+    el.emit("timeupdate", { currentTime: 900 });
+    pause(el);
+    await flush();
+    expect(h.core.resume.get(t.id)).toBe(900);
+  });
+
+  it("picking the playing long track again restarts it and forgets its point", async () => {
+    const t = long();
+    let el = await h.startPlaying([t], 0, LONG);
+    el.emit("timeupdate", { currentTime: 1500 });
+    el = await h.startPlaying([t], 0, LONG);
+    await flush();
+    expect(el.currentTime).toBe(0);
+    expect(h.state().resumedAt).toBeNull();
+    expect(h.core.resume.has(t.id)).toBe(false);
+  });
+
+  it("a lookup slower than 300 ms starts at 0", async () => {
+    const t = long();
+    h.core.resume.set(t.id, 2480);
+    h.core.resumePosition.mockImplementationOnce(() => new Promise((r) => setTimeout(() => r(2480), 2000)));
+    h.state().playTracks([t]);
+    await flush();
+    expect(h.active().src).toBe(""); // waiting, at most 300 ms
+    vi.advanceTimersByTime(300);
+    await flush();
+    const el = h.active();
+    expect(el.src).toContain(`/stream/${t.id}`);
+    el.emit("loadedmetadata", { duration: LONG, readyState: 1 });
+    expect(el.currentTime).toBe(0);
+    expect(h.state().resumedAt).toBeNull();
+  });
+
+  it("the hint's 8 s start when the track plays, not at its metadata", async () => {
+    const t = long();
+    h.core.resume.set(t.id, 2480);
+    h.state().playTracks([t]);
+    await flush();
+    const el = h.active();
+    el.emit("loadedmetadata", { duration: LONG, readyState: 1 });
+    vi.advanceTimersByTime(20_000);
+    expect(h.state().resumedAt).toBe(2480);
+    el.emit("playing");
+    vi.advanceTimersByTime(7900);
+    expect(h.state().resumedAt).toBe(2480);
+    vi.advanceTimersByTime(100);
+    expect(h.state().resumedAt).toBeNull();
+  });
+});
+
 describe("with gapless and crossfade (#57)", () => {
   it("a next track with a saved point is not preloaded: it loads the plain way and starts there", async () => {
     h.state().setPlayback({ gapless: true, crossfadeSec: 0 });
@@ -285,6 +376,7 @@ describe("a Radio episode (#76)", () => {
     await flush();
     expect(h.core.resume.get(-SHOW.id)).toBe(1900);
 
+    await h.startPlaying([track()], 0, 100); // something else in between
     el = await h.startPlaying([track(), episode()], 1, SHOW.duration);
     expect(h.core.radioStreamUrl).toHaveBeenLastCalledWith(SHOW.id, false);
     expect(el.currentTime).toBe(1900);

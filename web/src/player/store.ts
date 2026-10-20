@@ -4,7 +4,7 @@ import {
   crossfadeGains, elementRole, fadeProgress, fadeSeconds, gaplessDelayMs, parsePlaybackSettings, preloadDue, preloadStale, routeElementEvent,
   standbyUsable, transitionAfter, isQueueRadio, transitionKind, transitionPoint, upcomingIndex,
   sleepGain, sleepScale, sleepSecondsLeft, sleepStopsAtEnd, sleepTimerFor, type SleepChoice, type SleepTimer,
-  resumeEligible, resumePoint,
+  resumeEligible, resumeLookupWanted, resumePoint,
   CROSSFADE_MIN_SEC, DEFAULT_PLAYBACK, GAPLESS_ARM_SEC, GAPLESS_START_LEAD_MS, PLAYBACK_SETTING_KEY, STANDBY_PRIME_MS, TRANSITION_IDLE,
   type AudioEventType, type CountedPlay, type ElementEventType, type PlaybackSettings, type QueueTrack, type RepeatMode, type Track,
   type TransitionEvent, type TransitionKind, type TransitionState,
@@ -183,6 +183,18 @@ let resumeArmed: number | null = null;
 let resumeWrites: Promise<unknown> = Promise.resolve();
 const RESUME_HINT_MS = 8000;
 let resumeHintTimer: ReturnType<typeof setTimeout> | null = null;
+/** Playback never waits longer than this for the lookup: a slow database starts at 0 instead. */
+const RESUME_LOOKUP_MS = 300;
+/**
+ * Durations the elements reported this session, by queue id: the read uses the same rule as
+ * the save (queue or element duration over 20 min) even when the queue's duration is wrong.
+ */
+const seenDurations = new Map<number, number>();
+function rememberDuration(id: number, d: number) {
+  if (!Number.isFinite(d) || d <= 0) return;
+  if (seenDurations.size >= 1000) seenDurations.clear();
+  seenDurations.set(id, d);
+}
 
 function resumeWrite(f: (c: Awaited<ReturnType<typeof getCore>>) => Promise<unknown>): Promise<unknown> {
   resumeWrites = resumeWrites.then(async () => f(await getCore())).catch(() => undefined);
@@ -190,7 +202,7 @@ function resumeWrite(f: (c: Awaited<ReturnType<typeof getCore>>) => Promise<unkn
 }
 /** The saved point of a long track or episode, or null (never rejects). */
 function readResume(track: QueueTrack): Promise<number | null> {
-  if (!resumeEligible(track)) return Promise.resolve(null);
+  if (!resumeLookupWanted(track, seenDurations.get(track.id))) return Promise.resolve(null);
   return resumeWrites.then(async () => (await getCore()).resumePosition(track.id)).catch(() => null);
 }
 /** Save the armed track's playhead as its point, or forget it near the start or the end. */
@@ -201,10 +213,20 @@ function saveResume(): Promise<unknown> {
   const at = resumePoint(el.currentTime, el.duration);
   return resumeWrite((c) => (at == null ? c.clearResumePosition(id) : c.saveResumePosition(id, at)));
 }
+/** readResume, or null if it takes longer than RESUME_LOOKUP_MS. */
+function readResumeBounded(track: QueueTrack): Promise<number | null> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const late = new Promise<null>((r) => { timer = setTimeout(() => r(null), RESUME_LOOKUP_MS); });
+  return Promise.race([readResume(track), late]).finally(() => { if (timer) clearTimeout(timer); });
+}
+/** Show (or hide, with null) the hint. Its RESUME_HINT_MS start once the track plays (startResumeHintTimer). */
 function setResumeHint(at: number | null) {
   if (resumeHintTimer) { clearTimeout(resumeHintTimer); resumeHintTimer = null; }
-  if (at != null) resumeHintTimer = setTimeout(() => { resumeHintTimer = null; usePlayer.setState({ resumedAt: null }); }, RESUME_HINT_MS);
   if (usePlayer.getState().resumedAt !== at) usePlayer.setState({ resumedAt: at });
+}
+function startResumeHintTimer() {
+  if (usePlayer.getState().resumedAt == null || resumeHintTimer) return;
+  resumeHintTimer = setTimeout(() => { resumeHintTimer = null; usePlayer.setState({ resumedAt: null }); }, RESUME_HINT_MS);
 }
 
 /**
@@ -257,10 +279,15 @@ function load(track: QueueTrack, force = false) {
   if (pendingSeek && pendingSeek.trackId !== track.id) pendingSeek = null;
   // Leaving a long track or episode: where it was is where it resumes (#85). A retry (force)
   // continues the same playback from its pending seek, so it saves nothing.
-  if (!force) { void saveResume(); setResumeHint(null); }
+  // The track that is playing, picked again: a restart from the top, as before #85, so its
+  // point is forgotten rather than saved and read straight back.
+  const repick = !force && resumeArmed === track.id;
+  if (repick) { const id = track.id; void resumeWrite((c) => c.clearResumePosition(id)); }
+  else if (!force) void saveResume();
+  if (!force) setResumeHint(null);
   resumeArmed = null;
   // A pending seek (a seek before the source, the restore at launch, a retry) wins over the saved point.
-  const resumeLookup = force || pendingSeek ? Promise.resolve(null) : readResume(track);
+  const resumeLookup = force || repick || pendingSeek ? Promise.resolve(null) : readResumeBounded(track);
   // A load the listener asked for starts counting failures afresh and wins over a pending skip.
   if (!force && !skippingError) { failStreak = 0; cancelPendingSkip(); }
   void (async () => {
@@ -824,6 +851,8 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     if (auto && repeat === "one") {
       startPlayback(queue[index]);
       el.currentTime = 0;
+      // The same source from the top: no load (no metadata) re-arms it, so it is re-armed here.
+      resumeArmed = resumeEligible(queue[index], el.duration) ? queue[index].id : null;
       void el.play().catch(() => undefined);
       return;
     }
@@ -991,7 +1020,7 @@ const onAudioEvent = (type: AudioEventType) => {
   const patch = audioEventPatch(type, { paused: el.paused, ended: el.ended, internal: loading || swapping });
   if (type === "pause") swapping = swappingAfter(swapping, { type: "pause" });
   if (type === "playing") swapping = swappingAfter(swapping, { type: "playing", paused: el.paused });
-  if (type === "playing") failStreak = 0;
+  if (type === "playing") { failStreak = 0; startResumeHintTimer(); }
   if (type === "playing" && suspectCopy != null) {
     // The stream retry plays where the local file failed: the file is the problem, so it goes.
     // Not while offline (that retry can't have streamed), and only for the same track.
@@ -1024,6 +1053,7 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
     usePlayer.setState({ duration: el.duration, airplayReady: true });
     plays.setDuration(el.duration);
     const cur = usePlayer.getState().current();
+    if (cur) rememberDuration(cur.id, el.duration);
     if (pendingSeek != null && pendingSeek.trackId === cur?.id) {
       plays.seeked();
       el.currentTime = pendingSeek.sec;
@@ -1054,8 +1084,10 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
   // Gapless: the standby starts here if the early start didn't happen; otherwise the plain way.
   // The sleep timer stops here (its track's end, or any end during its fade) before anything follows.
   ended: () => {
-    // Finished: a long track or episode starts from the top next time (repeat-one replays it so).
+    // Finished: a long track or episode starts from the top next time. Disarmed, so the load of
+    // the next track can't save this one's end (with no known duration, resumePoint keeps it).
     if (resumeArmed != null) { const id = resumeArmed; void resumeWrite((c) => c.clearResumePosition(id)); }
+    resumeArmed = null;
     if (usePlayer.getState().sleep && (sleepFade < 1 || sleepStopsHere())) return stopForSleep(true);
     if (!stepTransition(true)) usePlayer.getState().next(true);
   },

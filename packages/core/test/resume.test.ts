@@ -5,7 +5,7 @@ import { parseTralbumPage } from "../src/scrape/parseTralbum.js";
 import { upsertTralbum, vacuumOrphans } from "../src/services/importService.js";
 import { deleteAlbum } from "../src/db/repos/albums.js";
 import { clearResumePosition, getResumePosition, setResumePosition } from "../src/db/repos/resumePositions.js";
-import { formatResumeAt, resumeEligible, resumePoint, RESUME_MAX_ROWS } from "../src/services/resume.js";
+import { formatResumeAt, resumeEligible, resumeLookupWanted, resumePoint, RESUME_MAX_ROWS } from "../src/services/resume.js";
 import { radioQueueTrack } from "../src/services/radio.js";
 import { exportLibrary } from "../src/services/libraryTransfer.js";
 
@@ -19,6 +19,18 @@ describe("resume rules (#85)", () => {
     expect(resumeEligible({ id: 1, duration: 3600 }, NaN)).toBe(true);
     expect(resumeEligible(radioQueueTrack({ id: 1008, title: "x", program: "p", image_id: null, url: "u" }))).toBe(true);
     expect(resumeEligible(null)).toBe(false);
+    // Either duration over 20 min qualifies, the queue's or the element's.
+    expect(resumeEligible({ id: 1, duration: null }, 3600)).toBe(true);
+    expect(resumeEligible({ id: 1, duration: 3600 }, 300)).toBe(true);
+  });
+
+  it("looks a point up when eligible or when no duration is known", () => {
+    expect(resumeLookupWanted({ id: 1, duration: null })).toBe(true);
+    expect(resumeLookupWanted({ id: 1, duration: 0 }, NaN)).toBe(true);
+    expect(resumeLookupWanted({ id: 1, duration: 300 })).toBe(false);
+    expect(resumeLookupWanted({ id: 1, duration: 300 }, 3600)).toBe(true);
+    expect(resumeLookupWanted({ id: 1, duration: null }, 300)).toBe(false);
+    expect(resumeLookupWanted(null)).toBe(false);
   });
 
   it("drops points in the first or the last 30 s", () => {
@@ -52,6 +64,19 @@ describe("resume_positions repo (#85)", () => {
     await clearResumePosition(db, 5); // idempotent
     expect(await getResumePosition(db, 5)).toBeNull();
     expect(await getResumePosition(db, -1008)).toBe(1900);
+  });
+
+  it("runs the cap DELETE only when a new row was inserted", async () => {
+    const deletes: string[] = [];
+    const run = db.run.bind(db);
+    db.run = async (sql: string, params?: unknown[]) => { if (/^\s*DELETE/i.test(sql)) deletes.push(sql); return run(sql, params); };
+    await setResumePosition(db, 1, 100);
+    expect(deletes).toHaveLength(1);
+    for (let i = 0; i < 5; i++) await setResumePosition(db, 1, 100 + i * 5);
+    expect(deletes).toHaveLength(1);
+    expect(await getResumePosition(db, 1)).toBe(120);
+    await setResumePosition(db, 2, 100);
+    expect(deletes).toHaveLength(2);
   });
 
   it("ignores a position that is not a finite non-negative number", async () => {
