@@ -195,10 +195,15 @@ describe("installDropLink", () => {
     expect(core.import).toHaveBeenCalledTimes(1);
   });
 
-  it("cancels a drag carrying files even with the in-page marker", () => {
-    const odd = dt({ [INTERNAL_TYPE]: "1" }, ["Files"]);
-    expect(fire("dragover", odd).defaultPrevented).toBe(true);
-    expect(fire("drop", odd).defaultPrevented).toBe(true);
+  it("leaves an in-page drag that carries files (album art) to the page, not the file rule", async () => {
+    const art = dt({ [INTERNAL_TYPE]: "1", "text/uri-list": "https://f4.bcbits.com/img/a1_10.jpg" }, ["Files"]);
+    expect(fire("dragenter", art).defaultPrevented).toBe(false);
+    expect(fire("dragover", art).defaultPrevented).toBe(false);
+    expect(fire("drop", art).defaultPrevented).toBe(false);
+    await flush();
+    expect(onActive).not.toHaveBeenCalledWith(true);
+    expect(onNote).not.toHaveBeenCalled();
+    expect(core.import).not.toHaveBeenCalled();
   });
 
   it("leaves plain text dropped on a text field to WebKit, but still takes a link there", async () => {

@@ -91,7 +91,7 @@ const isEditable = (t: EventTarget | null) =>
 
 /**
  * Window-level listeners for the main window. A drag that starts in the page carries
- * INTERNAL_TYPE and is left to its targets (queue rows); a drag carrying files is always
+ * INTERNAL_TYPE and is left to its targets (queue rows); any other drag carrying files is
  * cancelled, so WebKit never opens a file in the window; plain text dragged onto a text
  * field is left to WebKit, which inserts it. Every other outside drag is taken over.
  */
@@ -102,8 +102,10 @@ export function installDropLink(target: Window, h: DropHandlers): () => void {
   const claim = (e: DragEvent): string[] | null => {
     if (!e.dataTransfer) return null;
     const t = types(e);
-    if (t.includes("Files")) return t;
+    // A drag that started in the page (album art can carry Files in WebKit) is never an
+    // outside file drop; the navigation guard in lib.rs stays the backstop.
     if (t.includes(INTERNAL_TYPE)) return null;
+    if (t.includes("Files")) return t;
     if (isEditable(e.target) && !extractDroppedUrl(e.dataTransfer)) return null;
     return t;
   };

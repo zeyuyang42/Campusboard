@@ -181,7 +181,7 @@ src-tauri/
   shows a copy badge even where the page sets `dropEffect = "none"` (over files); the
   drop then reaches the page, which ignores it. `lib/dropLink.ts` reads only text and
   never files. It has no drag state: in-page drags carry `application/x-bc-internal`
-  (set in a capture `dragstart`) and are left to their targets, a drag with `Files`
+  (set in a capture `dragstart`) and are left to their targets, any other drag with `Files`
   is always cancelled, plain text over a text field is left to WebKit, and every
   other outside drag is cancelled so WebKit never opens it in the webview. The
   backstop is `navigation_guard` in lib.rs: the main window may only load the app's

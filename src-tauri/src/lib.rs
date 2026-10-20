@@ -463,7 +463,6 @@ fn startup_failed(err: &tauri::Error) -> ! {
     std::process::exit(failure.exit_code());
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Whether the main webview may load `url`: only the app's own pages (`tauri://localhost`,
 /// `http://tauri.localhost`, or the dev server in debug builds). A backstop for #92: a file or
 /// link that WebKit would otherwise open in the window can never replace the app (and drop
@@ -493,6 +492,7 @@ fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
         .build()
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db = db_url();
     let mut context = tauri::generate_context!();
