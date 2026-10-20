@@ -31,7 +31,7 @@ Requires macOS 13.3 or later. Your library lives in
 identifier is kept from the app's earlier name, Bandcamp Player, so an update
 keeps the same library, downloads and settings).
 
-Coming from Bandcamp Player 0.6.2 or earlier: the app is now called
+Coming from Bandcamp Player (0.6.2 or earlier): the app is now called
 **Campusboard.app**. Quit the old app, drag the new one to Applications, then
 delete **Bandcamp Player.app** (and re-pin Campusboard in the Dock if you kept the old one there).
 
