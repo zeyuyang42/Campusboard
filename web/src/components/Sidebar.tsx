@@ -34,7 +34,7 @@ export function Sidebar({ open }: { open: boolean }) {
   };
   return (
     <aside className={`sidebar nav ${open ? "open" : ""}`}>
-      <div className="brand" data-tauri-drag-region><span className="dot" /><span>Bandcamp Player</span></div>
+      <div className="brand" data-tauri-drag-region><span className="dot" /><span>Campusboard</span></div>
       <NavLink to="/library" title="Library"><IconLibrary /><span className="label">Library</span></NavLink>
       <NavLink to="/search" title="Search"><IconSearch /><span className="label">Search</span></NavLink>
       <NavLink to="/import" title="Import"><IconImport /><span className="label">Import</span></NavLink>

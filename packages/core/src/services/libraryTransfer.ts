@@ -148,12 +148,12 @@ export function parseLibraryExport(text: string): ParsedLibrary {
     return { error: "This file isn't a library export: it isn't valid JSON." };
   }
   const head = (raw && typeof raw === "object" ? raw : {}) as { format?: unknown; version?: unknown };
-  if (head.format !== LIBRARY_FORMAT) return { error: "This file isn't a Bandcamp Player library export." };
+  if (head.format !== LIBRARY_FORMAT) return { error: "This file isn't a Campusboard library export." };
   if (typeof head.version !== "number" || !Number.isInteger(head.version) || head.version < 1) {
     return { error: "This library file is damaged: its version is missing or invalid." };
   }
   if (head.version > LIBRARY_EXPORT_VERSION) {
-    return { error: "This library file was made by a newer version of Bandcamp Player. Update the app, then import it again." };
+    return { error: "This library file was made by a newer version of Campusboard. Update the app, then import it again." };
   }
   const r = LibraryExportSchema.safeParse(raw);
   if (!r.success) {

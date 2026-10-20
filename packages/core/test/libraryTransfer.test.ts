@@ -289,13 +289,13 @@ describe("library import", () => {
 describe("library file validation", () => {
   it("rejects files that aren't library exports, with a sentence", () => {
     expect(parseLibraryExport("{not json").error).toMatch(/isn't valid JSON/);
-    expect(parseLibraryExport(JSON.stringify({ name: "Midnight", version: 1 })).error).toMatch(/isn't a Bandcamp Player library export/);
-    expect(parseLibraryExport("[]").error).toMatch(/isn't a Bandcamp Player library export/);
+    expect(parseLibraryExport(JSON.stringify({ name: "Midnight", version: 1 })).error).toMatch(/isn't a Campusboard library export/);
+    expect(parseLibraryExport("[]").error).toMatch(/isn't a Campusboard library export/);
   });
 
   it("rejects a file from a newer version with a clear message", () => {
     const r = parseLibraryExport(JSON.stringify({ ...data, version: LIBRARY_EXPORT_VERSION + 1 }));
-    expect(r.error).toMatch(/newer version of Bandcamp Player/);
+    expect(r.error).toMatch(/newer version of Campusboard/);
     expect(parseLibraryExport(JSON.stringify({ ...data, version: "1" })).error).toMatch(/version is missing or invalid/);
   });
 

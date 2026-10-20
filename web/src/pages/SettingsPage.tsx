@@ -377,7 +377,7 @@ function BackgroundSettings() {
         <input type="checkbox" checked={notify.enabled} onChange={(e) => void notify.setEnabled(e.target.checked)} />
         Show a notification when the track changes
       </label>
-      {notify.denied && <p className="muted">Notifications are turned off for Bandcamp Player in System Settings → Notifications.</p>}
+      {notify.denied && <p className="muted">Notifications are turned off for Campusboard in System Settings → Notifications.</p>}
     </section>
   );
 }

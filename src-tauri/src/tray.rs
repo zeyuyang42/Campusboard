@@ -43,7 +43,7 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>, track: Option<&str>) -> tauri::Res
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, SHOW_ID, "Show Window", true, None::<&str>)?,
             // The same terminate: as Cmd+Q in the app menu.
-            &PredefinedMenuItem::quit(app, Some("Quit Bandcamp Player"))?,
+            &PredefinedMenuItem::quit(app, Some("Quit Campusboard"))?,
         ],
     )
 }
@@ -60,7 +60,7 @@ fn apply<R: Runtime>(app: &AppHandle<R>, enabled: bool, track: Option<&str>) -> 
         None => TrayIconBuilder::with_id(TRAY_ID)
             .icon(tauri::include_image!("icons/tray.png"))
             .icon_as_template(true)
-            .tooltip("Bandcamp Player")
+            .tooltip("Campusboard")
             .menu(&menu)
             .build(app)
             .map(|_| ()),
