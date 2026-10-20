@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCore } from "./core";
-import { repos, type HistoryCursor, type Job, type PlayState } from "@bc/core";
+import { repos, type HistoryCursor, type Job, type PlayState, type StatsPeriod } from "@bc/core";
 
 export const keys = {
   albums: (sort: string, filter = "all", q = "", tag = "") => ["albums", sort, filter, q, tag] as const,
@@ -26,6 +26,7 @@ export const keys = {
   playCount: ["history", "count"] as const,
   // Under "history" (plays recorded, history cleared) and refreshed with the library (album removed).
   historyList: ["history", "list"] as const,
+  historyStats: (period: StatsPeriod) => ["history", "stats", period] as const,
   newReleases: ["releases", "list"] as const,
   newReleaseCount: ["releases", "count"] as const,
   releaseStatus: ["releases", "status"] as const,
@@ -92,6 +93,10 @@ export const usePlayHistory = () =>
     initialPageParam: null as HistoryCursor | null,
     getNextPageParam: (last) => last.next,
   });
+
+/** Listening stats for a period (#94); the previous period stays on screen while the next loads. */
+export const useListeningStats = (period: StatsPeriod) =>
+  useQuery({ queryKey: keys.historyStats(period), queryFn: async () => (await core()).listeningStats(period), placeholderData: keepPreviousData });
 
 /** Forget all listening history, then refresh everything that shows it. */
 export function useClearHistory() {

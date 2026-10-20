@@ -85,6 +85,30 @@ export interface HistoryPage {
   next: HistoryCursor | null;
 }
 
+/** A Listening stats period (#94), in the user's local time. */
+export type StatsPeriod = "month" | "year" | "all";
+
+/**
+ * Plays and listening time for one ranked row. `seconds` is the full length of each counted
+ * play's track (a missing duration counts as 0), not seconds_listened, which stops at the
+ * play threshold.
+ */
+export interface StatsCounts {
+  plays: number;
+  seconds: number;
+}
+export interface StatsArtist extends StatsCounts { artist_id: number; name: string; art_id: number | null }
+export interface StatsAlbum extends StatsCounts { album_id: number; title: string; artist_name: string; art_id: number | null }
+/** A tag, in the spelling that sorts first among ASCII-case variants (as the Tags tab shows it). */
+export interface StatsTag extends StatsCounts { tag: string; art_id: number | null }
+
+export interface ListeningStats {
+  totals: StatsCounts & { albums: number };
+  artists: StatsArtist[];
+  albums: StatsAlbum[];
+  tags: StatsTag[];
+}
+
 export interface AlbumWithTracks extends Album {
   tracks: Track[];
 }
