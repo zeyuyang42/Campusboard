@@ -14,8 +14,9 @@
       {
         "label": "main",
         "title": "Bandcamp Player",
-        "width": 1180,
-        "height": 760,
+        "width": 1280,
+        "height": 820,
+        "visible": false,
         "minWidth": 480,
         "minHeight": 400,
         "titleBarStyle": "Overlay",

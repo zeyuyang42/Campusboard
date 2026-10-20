@@ -25,7 +25,6 @@ tauri-plugin-http = { version = "2", default-features = false, features = ["rust
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-opener = "2"
-tauri-plugin-window-state = "2"
 # Track-change notifications (Settings, off by default). Desktop: notify-rust, which on
 # macOS is mac-notification-sys.
 tauri-plugin-notification = "2"
