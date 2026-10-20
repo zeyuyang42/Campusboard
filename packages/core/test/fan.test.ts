@@ -468,8 +468,8 @@ describe("collection sync", () => {
     const core = createCore({ db, fetch: fakeBandcamp().fetch });
     await setIdentityCookie(db, COOKIE);
     for (const key of ["bandcamp_identity", "bandcamp_sync", "bandcamp_account"]) {
-      await expect(core.getSetting(key)).rejects.toThrow(/account functions/);
-      await expect(core.setSetting(key, "x")).rejects.toThrow(/account functions/);
+      await expect(core.getSetting(key)).rejects.toThrow(/its own functions/);
+      await expect(core.setSetting(key, "x")).rejects.toThrow(/its own functions/);
     }
     await core.setSetting("theme", { a: 1 });
     expect(await core.getSetting("theme")).toEqual({ a: 1 });

@@ -472,8 +472,11 @@ src-tauri/
   first (#93; `web/src/lib/removals.ts`, one note at a time, ~8 s, ⌘Z while it
   shows). Playlists and entries are restored from a snapshot; an album's delete
   waits for the note to go (marked in `settings.key='albums_removing'`, finished on
-  window close or at the next start). A new query listing albums or their tracks must
-  add `NOT_REMOVING` (repos/albumRemoval.ts) unless it goes through `albumWhere`.
+  window close or at the next start; a private key). A marked album counts as not in
+  the library (search, browse, discography imports), and an import job that brings
+  it in again unmarks it; a stream refresh never does. A new query listing albums or
+  their tracks must add `NOT_REMOVING` (repos/albumRemoval.ts) unless it goes
+  through `albumWhere`.
   `ConfirmButton` stays for bulk and irreversible actions.
 - Navigate from non-React code with `navigateTo()` in `web/src/lib/navigation.ts`;
   never `window.location.assign` (a reload drops the player state).

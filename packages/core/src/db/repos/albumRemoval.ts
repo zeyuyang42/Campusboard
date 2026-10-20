@@ -10,9 +10,11 @@ export const REMOVING_KEY = "albums_removing";
 /**
  * Leaves out albums waiting for their delete (#93; expects `al`): the Library, its tags, bulk
  * actions and smart playlists all go through albumWhere; track search and artists add it.
- * A damaged value hides nothing rather than failing the query.
+ * A damaged value (not JSON, or entries that are not whole numbers) hides nothing rather than
+ * failing the query or hiding everything.
  */
-export const NOT_REMOVING = `al.id NOT IN (SELECT rm.value FROM settings s, json_each(CASE WHEN json_valid(s.value) THEN s.value ELSE '[]' END) rm WHERE s.key = '${REMOVING_KEY}')`;
+export const NOT_REMOVING = `al.id NOT IN (SELECT rm.value FROM settings s, json_each(CASE WHEN json_valid(s.value) THEN s.value ELSE '[]' END) rm
+  WHERE s.key = '${REMOVING_KEY}' AND rm.type = 'integer')`;
 
 
 /** Mark an album for removal (one statement). False when there is no such album or it is marked already. */
@@ -40,8 +42,8 @@ export async function unmarkRemoving(db: Db, albumIds: number[]): Promise<void> 
 /** The albums marked for removal, without duplicates. */
 export async function removingAlbumIds(db: Db): Promise<number[]> {
   const rows = await db.select<{ id: number }>(
-    `SELECT DISTINCT CAST(rm.value AS INTEGER) AS id FROM settings s, json_each(CASE WHEN json_valid(s.value) THEN s.value ELSE '[]' END) rm
-     WHERE s.key = ? AND rm.type IN ('integer', 'real')`,
+    `SELECT DISTINCT rm.value AS id FROM settings s, json_each(CASE WHEN json_valid(s.value) THEN s.value ELSE '[]' END) rm
+     WHERE s.key = ? AND rm.type = 'integer'`,
     [REMOVING_KEY],
   );
   return rows.map((r) => r.id);

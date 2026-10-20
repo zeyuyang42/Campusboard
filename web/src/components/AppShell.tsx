@@ -48,6 +48,8 @@ export function AppShell() {
     <>
       <Ambient />
       {isTauri && <div className="titlebar-drag" data-tauri-drag-region />}
+      {/* First in the tab order, so the Undo button is one Tab away. */}
+      <UndoNote />
       <div className="shell">
         <Sidebar open={sidebarOpen} />
         <main className="main">
@@ -60,7 +62,6 @@ export function AppShell() {
       <MenuHost />
       <CommandPalette />
       <DropLink />
-      <UndoNote />
     </>
   );
 }

@@ -152,7 +152,8 @@ export function createCore(deps: CoreDeps) {
       const n = normalizeBandcampUrl(input);
       const url = n.kind === "artist" ? n.url : `https://${n.host}/music`;
       const parsed = parseMusicPage(await cachedFetchText(db, queue, url), `https://${n.host}`);
-      const rows = await db.select<{ id: number; url: string }>("SELECT id, url FROM albums");
+      // An album waiting for its delete (#93) reads as not in the library, as everywhere else.
+      const rows = await db.select<{ id: number; url: string }>(`SELECT al.id, al.url FROM albums al WHERE ${albumRemoval.NOT_REMOVING}`);
       const byUrl = new Map(rows.map((r) => [r.url, r.id]));
       // Report the canonical address (custom domain if any), not whichever one was typed.
       return { url: `${parsed.origin}/music`, band: parsed.band, items: parsed.items.map((i) => ({ ...i, album_id: byUrl.get(i.url) ?? null })) };
@@ -326,7 +327,7 @@ export function createCore(deps: CoreDeps) {
 }
 
 function refusePrivate(key: string): void {
-  if (PRIVATE_SETTING_KEYS.has(key)) throw new Error(`Setting "${key}" is only available through the account functions`);
+  if (PRIVATE_SETTING_KEYS.has(key)) throw new Error(`Setting "${key}" is only available through its own functions`);
 }
 
 export type Core = ReturnType<typeof createCore>;

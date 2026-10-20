@@ -15,6 +15,11 @@ import { exportLibrary, importLibrary, parseLibraryExport } from "../src/service
 import { FetchQueue } from "../src/scrape/http.js";
 import { JobRunner } from "../src/services/jobRunner.js";
 import type { OfflineFiles } from "../src/services/offline.js";
+import { fixture } from "./helpers.js";
+import { parseTralbumPage } from "../src/scrape/parseTralbum.js";
+import { upsertTralbum } from "../src/services/importService.js";
+import { refreshAlbum } from "../src/services/streamService.js";
+import { albumUrlsInLibrary, deleteAlbum } from "../src/db/repos/albums.js";
 
 let db: NodeDb;
 let nextId = 1;
@@ -297,5 +302,63 @@ describe("removing an album with Undo (#93)", () => {
     expect(await next.album(b.id)).toBeNull();
     expect(await removingAlbumIds(db)).toEqual([]);
     expect((await next.albums()).map((x) => x.id)).toEqual([a.id]);
+  });
+});
+
+describe("review follow-ups (#93)", () => {
+  it("keeps the marks private and ignores entries that are not album ids", async () => {
+    const core = createCore({ db, fetch: async () => new Response("") });
+    await expect(core.getSetting(REMOVING_KEY)).rejects.toThrow();
+    await expect(core.setSetting(REMOVING_KEY, [a.id])).rejects.toThrow();
+    const put = (v: string) => db.raw.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(REMOVING_KEY, v);
+    for (const junk of ["[null]", '["x", 1.5, {"a": 1}, [2]]', "null", '"2"', "{}", "oops"]) {
+      put(junk);
+      expect((await listAlbums(db)).length, junk).toBe(2);
+      expect(await removingAlbumIds(db), junk).toEqual([]);
+    }
+    put(`[null, ${b.id}]`);
+    expect((await listAlbums(db)).map((x) => x.id)).toEqual([a.id]);
+    expect(await removingAlbumIds(db)).toEqual([b.id]);
+  });
+
+  it("an album imported again inside its Undo window stays, and reads as not in the library meanwhile", async () => {
+    const fresh = new NodeDb();
+    const html = fixture("album");
+    const id = await upsertTralbum(fresh, parseTralbumPage(html));
+    const url = (await fresh.get<{ url: string }>("SELECT url FROM albums WHERE id = ?", [id]))!.url;
+    const core = createCore({ db: fresh, fetch: async () => new Response(html) });
+    await core.finishAlbumRemovals();
+    expect(await core.removeAlbumLater(id)).toBe(true);
+    expect(await albumUrlsInLibrary(fresh)).not.toContain(url);
+
+    const job = await core.import({ url });
+    for (let i = 0; i < 100; i++) {
+      const j = await core.job(job.id);
+      if (j && (j.status === "done" || j.status === "failed")) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect((await core.job(job.id))!.status).toBe("done");
+    expect(await removingAlbumIds(fresh)).toEqual([]);
+    // The note's delete, when it comes, finds nothing to do.
+    expect(await core.finishAlbumRemovals([id])).toBe(0);
+    expect((await core.albums()).map((x) => x.id)).toEqual([id]);
+    expect(await albumUrlsInLibrary(fresh)).toContain(url);
+  });
+
+  it("a refresh that returns after the album was deleted does not bring it back", async () => {
+    const fresh = new NodeDb();
+    const html = fixture("album");
+    const id = await upsertTralbum(fresh, parseTralbumPage(html));
+    const url = (await fresh.get<{ url: string }>("SELECT url FROM albums WHERE id = ?", [id]))!.url;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const queue = new FetchQueue(async () => { await gate; return new Response(html); }, 0);
+    const pending = refreshAlbum(fresh, queue, id, url);
+    await new Promise((r) => setTimeout(r, 10));
+    await deleteAlbum(fresh, id);
+    release();
+    await pending;
+    expect(await fresh.get("SELECT id FROM albums WHERE id = ?", [id])).toBeNull();
+    expect((await fresh.select("SELECT id FROM tracks")).length).toBe(0);
   });
 });

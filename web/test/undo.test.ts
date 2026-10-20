@@ -107,6 +107,26 @@ describe("the Undo note (#93)", () => {
     expect(later.undo).not.toHaveBeenCalled();
   });
 
+  it("stops the clock while hovered or focused, then gives back the time left", () => {
+    const o = offer();
+    act(() => { vi.advanceTimersByTime(7000); });
+    const el = note() as HTMLElement;
+    act(() => { el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })); });
+    act(() => { (el.querySelector("button") as HTMLButtonElement).focus(); });
+    act(() => { vi.advanceTimersByTime(60_000); });
+    expect(note()).not.toBeNull();
+    act(() => { el.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body })); });
+    act(() => { vi.advanceTimersByTime(60_000); });
+    expect(o.finish).not.toHaveBeenCalled(); // still focused
+    act(() => { (el.querySelector("button") as HTMLButtonElement).blur(); });
+    // 1 s was left; it gets at least 2 s back.
+    act(() => { vi.advanceTimersByTime(1999); });
+    expect(o.finish).not.toHaveBeenCalled();
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(o.finish).toHaveBeenCalledTimes(1);
+    expect(note()).toBeNull();
+  });
+
   it("says so when an Undo fails", async () => {
     const err = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const o = { text: "Removed A.", undo: vi.fn(async () => { throw new Error("db"); }) };

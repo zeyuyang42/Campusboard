@@ -164,10 +164,8 @@ export function usePlaylistMutations() {
   return {
     create: useMutation({ mutationFn: async (name: string) => (await core()).createPlaylist(name), onSuccess: () => inv() }),
     rename: useMutation({ mutationFn: async ({ id, name }: { id: number; name: string }) => (await core()).renamePlaylist(id, name), onSuccess: (_d, v) => inv(v.id) }),
-    remove: useMutation({ mutationFn: async (id: number) => (await core()).deletePlaylist(id), onSuccess: () => inv() }),
     addTracks: useMutation({ mutationFn: async ({ id, trackIds }: { id: number; trackIds: number[] }) => (await core()).addToPlaylist(id, trackIds), onSuccess: (_d, v) => inv(v.id) }),
     reorder: useMutation({ mutationFn: async ({ id, ids }: { id: number; ids: number[] }) => (await core()).reorderPlaylist(id, ids), onSuccess: (_d, v) => inv(v.id) }),
-    removeTrack: useMutation({ mutationFn: async ({ id, ptid }: { id: number; ptid: number }) => (await core()).removeFromPlaylist(id, ptid), onSuccess: (_d, v) => inv(v.id) }),
     /** A smart playlist (#84) from a name and a rule. */
     createSmart: useMutation({ mutationFn: async ({ name, rule }: { name: string; rule: repos.SmartRuleInput }) => (await core()).createSmartPlaylist(name, rule), onSuccess: () => inv() }),
     setRule: useMutation({ mutationFn: async ({ id, rule }: { id: number; rule: repos.SmartRuleInput }) => (await core()).setSmartRule(id, rule), onSuccess: (_d, v) => inv(v.id) }),
@@ -213,7 +211,6 @@ export function useAlbumNoteWriter(id: number) {
 export function useAlbumMutations() {
   const inv = useInvalidateLibrary();
   return {
-    remove: useMutation({ mutationFn: async (id: number) => (await core()).deleteAlbum(id), onSuccess: inv }),
     refresh: useMutation({ mutationFn: async (id: number) => (await core()).refreshAlbum(id), onSuccess: inv }),
   };
 }

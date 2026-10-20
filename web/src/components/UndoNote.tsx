@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { isUndoKey, undoNow, useUndo } from "../ui/undo";
+import { useEffect, useRef } from "react";
+import { isUndoKey, pauseUndo, resumeUndo, undoNow, useUndo } from "../ui/undo";
 
 const editable = (t: EventTarget | null) => {
   const el = t as HTMLElement | null;
@@ -23,9 +23,17 @@ export function UndoNote() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [note]);
+  // The clock stops while the pointer is over the note or focus is in it.
+  const over = useRef({ hover: false, focus: false });
+  const set = (k: "hover" | "focus", on: boolean) => {
+    over.current[k] = on;
+    if (over.current.hover || over.current.focus) pauseUndo(); else resumeUndo();
+  };
+  useEffect(() => { if (!note) over.current = { hover: false, focus: false }; }, [note]);
   if (!note && !error) return null;
   return (
-    <div className="undo-note" role="status">
+    <div className="undo-note" role="status" onMouseEnter={() => set("hover", true)} onMouseLeave={() => set("hover", false)}
+      onFocus={() => set("focus", true)} onBlur={() => set("focus", false)}>
       {note ? (
         <>
           <span className="undo-text">{note.text}</span>
