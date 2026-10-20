@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useImport, useJob, useSearch, useInvalidateLibrary } from "../api/queries";
 import type { SearchResult } from "@bc/core";
 import { JobProgress } from "../components/JobProgress";
@@ -18,7 +18,9 @@ export function SearchPage() {
   const [params] = useSearchParams();
   const initial = params.get("q") ?? "";
   const [q, setQ] = useState(initial);
-  useEffect(() => { if (initial) setQ(initial); }, [initial]);
+  // Each navigation to ?q= (also the same text again, after editing the field) refills it.
+  const { key: navKey } = useLocation();
+  useEffect(() => { if (initial) setQ(initial); }, [initial, navKey]);
   const dq = useDebounced(q, 350);
   const { data, isFetching, error } = useSearch(dq);
   const groups: { title: string; type: SearchResult["type"] }[] = [

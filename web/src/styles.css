@@ -467,4 +467,5 @@ details.about-wrap summary { cursor: pointer; color: var(--text-muted); margin-t
 .palette-option.active { background: var(--surface-hover); }
 .palette-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .palette-detail { color: var(--text-muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.palette-empty { padding: 14px 10px; color: var(--text-muted); }
+.palette-empty { padding: 14px 16px; color: var(--text-muted); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

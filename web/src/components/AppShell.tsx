@@ -26,7 +26,7 @@ export function AppShell() {
   useEffect(() => {
     if (!location.hash) return;
     document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: "start" });
-  }, [location.hash, location.pathname]);
+  }, [location.hash, location.pathname, location.key]); // key: the same section chosen again scrolls again
   // Full screen hides the traffic lights, so give the title band back to content.
   useEffect(() => {
     if (!isTauri) return;

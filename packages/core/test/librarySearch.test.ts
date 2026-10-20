@@ -141,7 +141,7 @@ describe("searchTracks", () => {
 });
 
 describe("listAlbumTracks (bulk actions on filtered results)", () => {
-  type Args = Parameters<typeof listAlbums> extends [unknown, ...infer R] ? R : never;
+  type Args = Parameters<typeof listAlbumTracks> extends [unknown, ...infer R] ? R : never;
   const tracksOf = async (...args: Args) => (await listAlbumTracks(db, ...args)).map((t) => t.title);
   // The albums the grid shows, expanded to their tracks in track order.
   const expanded = async (...args: Args) => {
@@ -200,5 +200,18 @@ describe("listAlbumTracks (bulk actions on filtered results)", () => {
     expect(rows.map((t) => [t.title, t.streamable])).toEqual([["Roygbiv", true], ["Aquarius", false]]);
     expect(rows[0]).toMatchObject({ album_title: "Music Has the Right to Children", artist_name: "Boards of Canada" });
     expect(rows[0]).not.toHaveProperty("stream_url");
+  });
+});
+
+describe("listAlbums limit (#72)", () => {
+  it("keeps the first albums in sort order, after the filter", async () => {
+    expect(await titles("title", "all", "", "", { limit: 2 })).toEqual((await titles("title")).slice(0, 2));
+    expect(await titles("title", "all", "hotties", "", { limit: 1 })).toEqual(["Kiss Yr Frenemies"]);
+  });
+
+  it("lists everything without a usable limit", async () => {
+    const all = await titles("title");
+    expect(all).toHaveLength(5);
+    for (const limit of [undefined, 0, -1, 2.5]) expect(await titles("title", "all", "", "", { limit })).toEqual(all);
   });
 });

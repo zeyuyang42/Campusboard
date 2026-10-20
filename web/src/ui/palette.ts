@@ -1,5 +1,6 @@
 // The command palette (#72): open state, and where focus goes back when it closes.
 import { create } from "zustand";
+import { useMenu } from "./menu";
 
 interface PaletteState {
   open: boolean;
@@ -19,6 +20,8 @@ export const usePalette = create<PaletteState>((set, get) => ({
       document.querySelector<HTMLInputElement>("[data-palette-input]")?.select();
       return;
     }
+    // One floating thing at a time: an open context menu closes (and gives its focus back) first.
+    if (useMenu.getState().open) useMenu.getState().close();
     const active = document.activeElement;
     set({ open: true, returnFocus: active instanceof HTMLElement && active !== document.body ? active : null });
   },
