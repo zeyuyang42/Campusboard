@@ -16,6 +16,7 @@ import { appConfigDir, appDataDir, join } from "@tauri-apps/api/path";
 import { storeBackgroundImage } from "./lib/files";
 import { backupLibraryDatabase, exportLibraryFile } from "./lib/libraryFile";
 import { miniBridgeInfo } from "./player/miniBridge";
+import { usePalette } from "./ui/palette";
 import { DEFAULT_THEME, MINI_EVENTS, positionToGain, toggleAction, type Track } from "@bc/core";
 import { FAN_ITEMS_ENDPOINT, fanPageUrl, parseFanItemsResponse, parseFanPage, repos, type FanItem } from "@bc/core";
 
@@ -781,6 +782,11 @@ async function miniPlayerCheck(s: Step) {
     await invoke("selftest_menu", { id: "sleep:off" }); await sleep(400);
     const sleepMenuOk = sleepSet && usePlayer.getState().sleep === null && (await win.isVisible()) === false;
     await mainWindow.show(); await sleep(300);
+    // View → Command Palette (#72): the native item opens the palette in this page.
+    s("menu command palette");
+    await invoke("selftest_menu", { id: "command-palette" }); await sleep(400);
+    const paletteMenuOk = usePalette.getState().open && !!document.querySelector("[data-palette-input]");
+    usePalette.getState().hide(); await sleep(100);
     s("close and reshow the mini window");
     // Close Window with the mini window focused hides it (and nothing else), and the bridge
     // stops sending state until the next hello.
@@ -805,13 +811,13 @@ async function miniPlayerCheck(s: Step) {
     await invoke("selftest_menu", { id: "close-window", focused: "main" }); await sleep(800);
     const mainCloseHides = (await win.isVisible()) === false;
     out.guardShows = await mainWindow.show(); await sleep(300);
-    const menuOk = forgedMenuIgnored && menuDispatched && controlActed && controlKeptHidden && sleepMenuOk;
+    const menuOk = forgedMenuIgnored && menuDispatched && controlActed && controlKeptHidden && sleepMenuOk && paletteMenuOk;
     const closeOk = liveBeforeClose && miniClosed && mainUntouched && !liveAfterClose && quietWhileHidden && mainCloseHides && liveAfterReshow && reshowTitleOk;
     Object.assign(out, {
       opened, titleOk, wasPlaying, canCheck, firstOk,
       ...(canCheck ? { paused, shownPaused, resumed, seeked } : { paused: "skipped (muted)", shownPaused: "skipped (muted)", resumed: "skipped (muted)", seeked: "skipped (muted)" }),
       rejectsBad, mainShown, commands, commandsExact, perms,
-      forgedMenuIgnored, menuDispatched, controlActed, controlKeptHidden, sleepMenuOk,
+      forgedMenuIgnored, menuDispatched, controlActed, controlKeptHidden, sleepMenuOk, paletteMenuOk,
       liveBeforeClose, miniClosed, mainUntouched, liveAfterClose, playingWhileHidden, quietWhileHidden, liveAfterReshow, reshowTitleOk, mainCloseHides,
       info: miniBridgeInfo(),
     });

@@ -4,6 +4,10 @@
 use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Manager, Runtime};
 
+/// View → Command Palette (#72). The id is the key `web/src/lib/appMenu.ts` maps to the palette.
+pub const COMMAND_PALETTE: &str = "command-palette";
+pub const COMMAND_PALETTE_ACCEL: &str = "CmdOrCtrl+K";
+
 fn item<R: Runtime>(app: &AppHandle<R>, id: &str, label: &str, accel: Option<&str>) -> tauri::Result<MenuItem<R>> {
     MenuItem::with_id(app, id, label, true, accel)
 }
@@ -74,6 +78,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             &item(app, "nav:search", "Search", Some("CmdOrCtrl+2"))?,
             &item(app, "nav:import", "Import", Some("CmdOrCtrl+3"))?,
             &item(app, "nav:playlists", "Playlists", Some("CmdOrCtrl+4"))?,
+            &sep()?,
+            &item(app, COMMAND_PALETTE, "Command Palette", Some(COMMAND_PALETTE_ACCEL))?,
             &sep()?,
             &item(app, "back", "Back", Some("CmdOrCtrl+["))?,
             &item(app, "forward", "Forward", Some("CmdOrCtrl+]"))?,
@@ -310,6 +316,16 @@ mod tests {
         assert_eq!(route("volume-up"), Route::Control);
         assert_eq!(route("sleep:30"), Route::Control);
         assert_eq!(route("sleep:off"), Route::Control);
+    }
+
+    #[test]
+    fn command_palette_raises_the_main_window_and_opens_there() {
+        // Raise: from the mini window or a hidden main window, ⌘K brings the main window
+        // forward and runs window.__bcMenu("command-palette") in it, never in the mini window.
+        assert_eq!(COMMAND_PALETTE, "command-palette");
+        assert_eq!(COMMAND_PALETTE_ACCEL, "CmdOrCtrl+K");
+        assert_eq!(route(COMMAND_PALETTE), Route::Raise);
+        assert!(!CONTROLS.contains(&COMMAND_PALETTE));
     }
 
     #[test]

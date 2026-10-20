@@ -120,12 +120,14 @@ function albumWhere(filter: AlbumFilter, q: string, tag = ""): { sql: string; pa
 /**
  * The library's albums. `q` matches album title, artist name, track titles and track
  * artists as a substring (case-insensitive for ASCII), combined with `filter` and, when
- * given, one tag.
+ * given, one tag. `limit` (a positive integer) keeps only the first albums in sort order;
+ * by default all are listed.
  */
-export async function listAlbums(db: Db, sort: AlbumSort = "added", filter: AlbumFilter = "all", q = "", tag = ""): Promise<Album[]> {
+export async function listAlbums(db: Db, sort: AlbumSort = "added", filter: AlbumFilter = "all", q = "", tag = "", opts: { limit?: number } = {}): Promise<Album[]> {
   const w = albumWhere(filter, q, tag);
-  const sql = `${ALBUM_SELECT} ${w.sql} ORDER BY ${SORTS[sort] ?? SORTS.added}`;
-  return (await db.select<AlbumRow>(sql, w.params)).map(rowToAlbum);
+  const limit = opts.limit !== undefined && Number.isInteger(opts.limit) && opts.limit > 0 ? opts.limit : null;
+  const sql = `${ALBUM_SELECT} ${w.sql} ORDER BY ${SORTS[sort] ?? SORTS.added}${limit ? " LIMIT ?" : ""}`;
+  return (await db.select<AlbumRow>(sql, limit ? [...w.params, limit] : w.params)).map(rowToAlbum);
 }
 
 /**

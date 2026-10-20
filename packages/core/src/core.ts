@@ -78,7 +78,8 @@ export function createCore(deps: CoreDeps) {
     db,
     queue,
     // library
-    albums: (sort: albums.AlbumSort = "added", filter: albums.AlbumFilter = "all", q = "", tag = "") => albums.listAlbums(db, sort, filter, q, tag),
+    /** Library albums; `opts.limit` keeps the first few (the command palette). */
+    albums: (sort: albums.AlbumSort = "added", filter: albums.AlbumFilter = "all", q = "", tag = "", opts: { limit?: number } = {}) => albums.listAlbums(db, sort, filter, q, tag, opts),
     /** All tracks of the albums `albums(sort, filter, q, tag)` lists, in that order (for bulk actions). */
     albumTracks: (sort: albums.AlbumSort = "added", filter: albums.AlbumFilter = "all", q = "", tag = "") => albums.listAlbumTracks(db, sort, filter, q, tag),
     /** The library's tags with album counts (#71), most used first. */

@@ -5,6 +5,7 @@ import { PlayerBar } from "./PlayerBar";
 import { QueueDrawer } from "./QueueDrawer";
 import { Ambient } from "./Ambient";
 import { MenuHost } from "./MenuHost";
+import { CommandPalette } from "./CommandPalette";
 import { NowPlaying } from "./NowPlaying";
 import { usePlayer } from "../player/store";
 import { useUi } from "../ui/store";
@@ -25,7 +26,7 @@ export function AppShell() {
   useEffect(() => {
     if (!location.hash) return;
     document.getElementById(location.hash.slice(1))?.scrollIntoView({ block: "start" });
-  }, [location.hash, location.pathname]);
+  }, [location.hash, location.pathname, location.key]); // key: the same section chosen again scrolls again
   // Full screen hides the traffic lights, so give the title band back to content.
   useEffect(() => {
     if (!isTauri) return;
@@ -55,6 +56,7 @@ export function AppShell() {
         {queueOpen && !nowPlayingOpen && <QueueDrawer />}
       </div>
       <MenuHost />
+      <CommandPalette />
     </>
   );
 }
