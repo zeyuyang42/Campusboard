@@ -1,6 +1,6 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCore } from "./core";
-import { repos, type Job, type PlayState } from "@bc/core";
+import { repos, type HistoryCursor, type Job, type PlayState } from "@bc/core";
 
 export const keys = {
   albums: (sort: string, filter = "all", q = "", tag = "") => ["albums", sort, filter, q, tag] as const,
@@ -24,6 +24,8 @@ export const keys = {
   libraryView: ["settings", "library_view"] as const,
   recentlyPlayed: ["history", "recent"] as const,
   playCount: ["history", "count"] as const,
+  // Under "history" (plays recorded, history cleared) and refreshed with the library (album removed).
+  historyList: ["history", "list"] as const,
   newReleases: ["releases", "list"] as const,
   newReleaseCount: ["releases", "count"] as const,
   releaseStatus: ["releases", "status"] as const,
@@ -80,6 +82,16 @@ export const useRecentlyPlayed = (limit = 12) =>
   useQuery({ queryKey: [...keys.recentlyPlayed, limit], queryFn: async () => (await core()).recentlyPlayed(limit) });
 /** How many plays the listening history holds. */
 export const usePlayCount = () => useQuery({ queryKey: keys.playCount, queryFn: async () => (await core()).playCount() });
+
+/** The History tab (#86): plays newest first, one page at a time. */
+export const HISTORY_PAGE = 50;
+export const usePlayHistory = () =>
+  useInfiniteQuery({
+    queryKey: keys.historyList,
+    queryFn: async ({ pageParam }) => (await core()).history(pageParam, HISTORY_PAGE),
+    initialPageParam: null as HistoryCursor | null,
+    getNextPageParam: (last) => last.next,
+  });
 
 /** Forget all listening history, then refresh everything that shows it. */
 export function useClearHistory() {

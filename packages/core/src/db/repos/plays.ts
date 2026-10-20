@@ -1,7 +1,8 @@
 import type { Db } from "../Db.js";
 import { now } from "../Db.js";
 import { ALBUM_SELECT, rowToAlbum, type AlbumRow } from "./albums.js";
-import type { Album } from "../../types.js";
+import { rowToTrack, type TrackRow } from "./tracks.js";
+import type { Album, HistoryCursor, HistoryPage } from "../../types.js";
 
 /**
  * Record one counted play. A single INSERT, and a no-op (null) if the track has left the
@@ -39,6 +40,36 @@ async function historyAlbums(db: Db, order: string, limit: number): Promise<Albu
     ORDER BY ${order}`;
   return (await db.select<AlbumRow>(sql, [limit])).map(rowToAlbum);
 }
+
+/**
+ * One page of listening history (#86), newest play first. Keyset paging on (played_at, id):
+ * `before` is the previous page's `next`, so plays recorded meanwhile never shift a page.
+ * plays is the outer loop (CROSS JOIN fixes the order) and walks ix_plays_played_at backwards;
+ * the index carries the rowid, so the id tie-break needs no sort. Rows whose track is gone
+ * can't appear: an album delete takes its plays with it.
+ */
+export async function listPlays(db: Db, before: HistoryCursor | null = null, limit = 50): Promise<HistoryPage> {
+  const n = Math.max(1, Math.min(500, Math.floor(limit)));
+  const rows = await db.select<TrackRow & { play_id: number; played_at: string }>(
+    historySql(!!before),
+    before ? [before.played_at, before.id, n + 1] : [n + 1],
+  );
+  const page = rows.slice(0, n);
+  const entries = page.map(({ play_id, played_at, ...r }) => ({ ...rowToTrack(r as TrackRow), play_id, played_at }));
+  const last = page[page.length - 1];
+  return { entries, next: rows.length > n && last ? { played_at: last.played_at, id: last.play_id } : null };
+}
+
+/** listPlays' statement; params are [played_at, id,] limit. Exported for the query-plan test. */
+export const historySql = (cursor: boolean) => `
+  SELECT t.*, al.title AS album_title, al.url AS album_url, al.item_type AS album_item_type,
+         al.art_id AS art_id, ar.name AS artist_name,
+         (SELECT COUNT(*) FROM plays c WHERE c.track_id = t.id) AS play_count,
+         p.id AS play_id, p.played_at AS played_at
+  FROM plays p CROSS JOIN tracks t ON t.id = p.track_id
+    JOIN albums al ON al.id = t.album_id JOIN artists ar ON ar.id = al.artist_id
+  ${cursor ? "WHERE (p.played_at, p.id) < (?, ?)" : ""}
+  ORDER BY p.played_at DESC, p.id DESC LIMIT ?`;
 
 /** How many plays are recorded. */
 export async function countPlays(db: Db): Promise<number> {

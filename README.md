@@ -60,6 +60,9 @@ Requires macOS 13.3 or later. Your library lives in
 - **Tags**: Library → Tags lists the Bandcamp tags of your albums with how
   many carry each; a tag (there, or under an album's title) opens the album
   grid narrowed to it, together with the filter field, Show and Sort.
+- **History**: Library → History lists what you played, newest first, under
+  Today, Yesterday and earlier dates. Click a row to play the track within its
+  album; right-click for the usual track menu. Radio episodes aren't recorded.
 - **Filtered library**: when the filter field, a tag or the **Show** menu narrows the
   Library, a bar above the grid plays, shuffles, queues or adds to a playlist
   every matching album in the current sort order (it asks first above 500 tracks).
