@@ -16,7 +16,30 @@ export class FakeAudio extends EventTarget {
   crossOrigin: string | null = null;
   /** What the next play() does: resolve, or reject with this error (e.g. a NotAllowedError). */
   playError: { name: string } | null = null;
-  calls = { play: 0, pause: 0, load: 0 };
+  calls = { play: 0, pause: 0, load: 0, picker: 0 };
+  /**
+   * WebKit's AirPlay API (#42): a test sets FakeAudio.airPlay before boot() for elements that
+   * have webkitShowPlaybackTargetPicker (WKWebView), as Chromium's don't.
+   */
+  static airPlay = false;
+  webkitShowPlaybackTargetPicker?: () => void;
+  webkitCurrentPlaybackTargetIsWireless?: boolean;
+  constructor() {
+    super();
+    if (FakeAudio.airPlay) {
+      this.webkitCurrentPlaybackTargetIsWireless = false;
+      this.webkitShowPlaybackTargetPicker = () => { this.calls.picker++; };
+    }
+  }
+  /** WebKit reports whether AirPlay targets are nearby. */
+  targets(available: boolean) {
+    this.dispatchEvent(Object.assign(new Event("webkitplaybacktargetavailabilitychanged"), { availability: available ? "available" : "not-available" }));
+  }
+  /** The element starts (or stops) playing on an AirPlay target. */
+  wireless(on: boolean) {
+    this.webkitCurrentPlaybackTargetIsWireless = on;
+    this.dispatchEvent(new Event("webkitcurrentplaybacktargetiswirelesschanged"));
+  }
   private _src = "";
 
   get src() { return this._src; }
