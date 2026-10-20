@@ -81,16 +81,8 @@ export async function backgroundFileUrl(name: string): Promise<string | null> {
   }
 }
 
-export async function appInfo(): Promise<{ version: string; dataDir: string | null }> {
-  if (!isTauri) return { version: "dev (browser)", dataDir: null };
+export async function appVersion(): Promise<string> {
+  if (!isTauri) return "dev (browser)";
   const { getVersion } = await import("@tauri-apps/api/app");
-  const { appDataDir } = await import("@tauri-apps/api/path");
-  return { version: await getVersion(), dataDir: await appDataDir() };
-}
-
-export async function revealDataDir(): Promise<void> {
-  if (!isTauri) return;
-  const { openPath } = await import("@tauri-apps/plugin-opener");
-  const { appDataDir } = await import("@tauri-apps/api/path");
-  await openPath(await appDataDir());
+  return getVersion();
 }
