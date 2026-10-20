@@ -45,7 +45,7 @@ pub const MAIN: Sizing = Sizing {
     snap: &[],
 };
 
-/// Where a window opens: `pos` None means centred on the screen it opens on.
+/// Where a window opens. `pos` is None only when there is no screen to centre it on.
 #[derive(Debug, PartialEq)]
 pub struct Placement {
     pub size: (f64, f64),
@@ -54,7 +54,7 @@ pub struct Placement {
 
 /// Fit a saved rect (or the default size) to the screens there are now. A saved window
 /// stays where it was if enough of it is on a screen, moved and shrunk to fit inside that
-/// screen; otherwise it opens centred. `screens[0]` is the screen a new window opens on.
+/// screen; otherwise it is centred on `screens[0]`, the screen a new window opens on.
 pub fn place(saved: Option<Rect>, screens: &[Rect], s: &Sizing) -> Placement {
     let clamp = |(w, h): (f64, f64), area: Option<&Rect>| {
         let (mut w, mut h) = (w.clamp(s.min.0, s.max.0), h.clamp(s.min.1, s.max.1));
@@ -63,6 +63,12 @@ pub fn place(saved: Option<Rect>, screens: &[Rect], s: &Sizing) -> Placement {
             h = h.min(a.h).max(s.min.1.min(a.h));
         }
         (w, h)
+    };
+    // Centred here rather than by NSWindow `center`, which runs at once while tao queues
+    // `set_size`: the window would be centred at its old size and then grow off-centre.
+    let centred = |size: (f64, f64)| Placement {
+        size,
+        pos: screens.first().map(|a| (a.x + (a.w - size.0) / 2.0, a.y + (a.h - size.1) / 2.0)),
     };
     let snapped = |(w, h): (f64, f64)| -> (f64, f64) {
         match s.snap {
@@ -90,10 +96,10 @@ pub fn place(saved: Option<Rect>, screens: &[Rect], s: &Sizing) -> Placement {
                     r.y.min(a.y + a.h - size.1).max(a.y),
                 )),
             },
-            None => Placement { size, pos: None },
+            None => centred(size),
         };
     }
-    Placement { size: clamp(s.default, screens.first()), pos: None }
+    centred(clamp(s.default, screens.first()))
 }
 
 /// A screen's usable area (without the menu bar and Dock) in points.
@@ -125,12 +131,12 @@ impl Geometry {
         Geometry { path, rects: Mutex::new(rects) }
     }
 
-    /// Note where a window is now. Ignored while it is hidden, minimized, maximized or full
-    /// screen, so those never become the size it reopens at.
+    /// Note where a window is now. Ignored while it is hidden, minimized or full screen, so
+    /// those never become the size it reopens at. A zoomed window counts: on macOS that is
+    /// just a frame (`isZoomed` is true for any window filling the screen), kept as it is.
     pub fn record<R: Runtime>(&self, w: &WebviewWindow<R>) {
         let normal = w.is_visible().unwrap_or(false)
             && !w.is_minimized().unwrap_or(true)
-            && !w.is_maximized().unwrap_or(true)
             && !w.is_fullscreen().unwrap_or(true);
         let (Ok(scale), Ok(pos), Ok(size)) = (w.scale_factor(), w.outer_position(), w.inner_size()) else { return };
         if !normal {
@@ -144,7 +150,9 @@ impl Geometry {
 
     pub fn save(&self) {
         let Some(path) = &self.path else { return };
-        let Ok(json) = serde_json::to_vec_pretty(&*self.rects.lock().unwrap()) else { return };
+        // Held through the write so two saves (mini hide, quit) can't interleave in the temp file.
+        let rects = self.rects.lock().unwrap();
+        let Ok(json) = serde_json::to_vec_pretty(&*rects) else { return };
         let tmp = path.with_extension("json.tmp");
         if std::fs::write(&tmp, json).is_ok() {
             let _ = std::fs::rename(&tmp, path);
@@ -163,19 +171,12 @@ impl Geometry {
             }
         }
         let p = place(saved, &screens, s);
-        let size = LogicalSize::new(p.size.0, p.size.1);
-        match p.pos {
-            // Move first: AppKit keeps a window no taller than the screen it is on, so sizing
-            // it while it is still on a smaller screen would cut the height.
-            Some((x, y)) => {
-                let _ = w.set_position(LogicalPosition::new(x, y));
-                let _ = w.set_size(size);
-            }
-            None => {
-                let _ = w.set_size(size);
-                let _ = w.center();
-            }
+        // Move first: AppKit keeps a window no taller than the screen it is on, so sizing it
+        // while it is still on a smaller screen would cut the height. tao queues both in order.
+        if let Some((x, y)) = p.pos {
+            let _ = w.set_position(LogicalPosition::new(x, y));
         }
+        let _ = w.set_size(LogicalSize::new(p.size.0, p.size.1));
     }
 }
 
@@ -194,7 +195,7 @@ mod tests {
 
     #[test]
     fn first_launch_uses_the_default_size_centred_and_fits_a_small_screen() {
-        assert_eq!(place(None, &[EXTERNAL, LAPTOP], &MAIN), Placement { size: (1280.0, 820.0), pos: None });
+        assert_eq!(place(None, &[EXTERNAL, LAPTOP], &MAIN), Placement { size: (1280.0, 820.0), pos: Some((2152.0, -160.5)) });
         let small = Rect { x: 0.0, y: 25.0, w: 1024.0, h: 700.0 };
         assert_eq!(place(None, &[small], &MAIN).size, (1024.0, 700.0));
     }
@@ -210,7 +211,10 @@ mod tests {
     #[test]
     fn a_window_saved_on_a_screen_that_is_gone_opens_centred_and_fits() {
         let on_ext = Rect { x: 2000.0, y: -300.0, w: 2400.0, h: 1300.0 };
-        assert_eq!(place(Some(on_ext), &[LAPTOP], &MAIN), Placement { size: (1512.0, 945.0), pos: None });
+        assert_eq!(place(Some(on_ext), &[LAPTOP], &MAIN), Placement { size: (1512.0, 945.0), pos: Some((0.0, 37.0)) });
+        // The mini player's tall layout, centred on the laptop at its final size.
+        let tall = Rect { x: 3000.0, y: 0.0, w: 300.0, h: 404.0 };
+        assert_eq!(place(Some(tall), &[LAPTOP], &MINI).pos, Some((606.0, 307.5)));
     }
 
     #[test]
@@ -230,6 +234,7 @@ mod tests {
     #[test]
     fn garbage_in_the_file_falls_back_to_the_default() {
         let bad = Rect { x: f64::NAN, y: 0.0, w: 100.0, h: 100.0 };
-        assert_eq!(place(Some(bad), &[LAPTOP], &MAIN).pos, None);
+        assert_eq!(place(Some(bad), &[LAPTOP], &MAIN), place(None, &[LAPTOP], &MAIN));
+        assert_eq!(place(None, &[], &MAIN).pos, None);
     }
 }
