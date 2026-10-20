@@ -456,6 +456,26 @@ describe("collection sync", () => {
     expect((await listAlbums(db, "title", "purchased")).map((a) => a.url)).toEqual([CUSTOM_ALBUM]);
   });
 
+  it("a sync never cancels a pending removal (#93): the album goes at finish, dismissed", async () => {
+    await setUsername(db, "examplefan");
+    const { runner, fetch } = setup();
+    await runSync(db, runner);
+    const custom = (await listAlbums(db)).find((a) => a.url === CUSTOM_ALBUM)!;
+    const { markRemoving, removingAlbumIds } = await import("../src/db/repos/albumRemoval.js");
+    expect(await markRemoving(db, custom.id)).toBe(true);
+    // A sync item for it, as a sync that was running when it was removed would have.
+    const { fetch_url } = (await db.get<{ fetch_url: string }>("SELECT fetch_url FROM fan_items WHERE bandcamp_id = 2164502333"))!;
+    const job = await jobs.createJob(db, "collection", FAN, [fetch_url]);
+    await runner.kick();
+    expect((await jobs.getJob(db, job.id))!.status).toBe("done");
+    expect(await removingAlbumIds(db)).toEqual([custom.id]);
+    // The next start finishes it, and later syncs leave it out.
+    const core = createCore({ db, fetch });
+    await core.finishAlbumRemovals([]);
+    expect(await core.album(custom.id)).toBeNull();
+    expect(await db.get("SELECT 1 AS x FROM fan_dismissed WHERE bandcamp_id = 2164502333")).not.toBeNull();
+  });
+
   it("a saved cookie shows as unchecked right away, even after a sync without one", async () => {
     await setUsername(db, "examplefan");
     await runSync(db, setup().runner);

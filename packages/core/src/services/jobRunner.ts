@@ -241,7 +241,6 @@ export class JobRunner {
           if (have !== null) {
             await jobs.setItemResult(this.db, item.id, job.id, true, have, null);
             await this.settle(item.url, have);
-            await this.keep(have);
             await this.resolveImports(have);
             this.onChange();
             continue;
@@ -254,7 +253,7 @@ export class JobRunner {
           await jobs.setItemResult(this.db, item.id, job.id, true, albumId, null);
           // An imported release is no longer new (New releases), even if it's removed again later.
           await this.settle(item.url, albumId);
-          await this.keep(albumId);
+          if (job.kind !== "collection") await this.keep(albumId);
           // Playlist entries, plays and preferences from an imported library that waited for this album.
           await this.resolveImports(albumId);
         } catch (e) {
@@ -322,9 +321,10 @@ export class JobRunner {
   }
 
   /**
-   * An album imported again while it waited for its delete (#93) stays: its removal mark goes,
-   * so the delete that the Undo note would run skips it. Only imports do this; a stream
-   * refresh (upsertTralbum too) never cancels a removal.
+   * An album the user imports again while it waits for its delete (#93) stays: its removal
+   * mark goes, so the delete the Undo note runs skips it. Only user imports (album, track,
+   * discography, library file) do this: a collection sync never cancels a removal (the delete
+   * then records the dismissal so later syncs leave it out), nor does a stream refresh.
    */
   private async keep(albumId: number): Promise<void> {
     try {

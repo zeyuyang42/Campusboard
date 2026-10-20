@@ -473,8 +473,9 @@ src-tauri/
   shows). Playlists and entries are restored from a snapshot; an album's delete
   waits for the note to go (marked in `settings.key='albums_removing'`, finished on
   window close or at the next start; a private key). A marked album counts as not in
-  the library (search, browse, discography imports), and an import job that brings
-  it in again unmarks it; a stream refresh never does. A new query listing albums or
+  the library for user imports (search, browse, discography imports; a library-file
+  import still counts it as present), and a user import that brings it in again
+  unmarks it; a collection sync or a stream refresh never does. A new query listing albums or
   their tracks must add `NOT_REMOVING` (repos/albumRemoval.ts) unless it goes
   through `albumWhere`.
   `ConfirmButton` stays for bulk and irreversible actions.
