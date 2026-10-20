@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { FakeAudio } from "./fakeAudio";
-import { boot, flush, tracks, useFakeTimers, type Harness } from "./harness";
+import { boot, flush, track, tracks, useFakeTimers, type Harness } from "./harness";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -90,22 +90,80 @@ describe("with WebKit's picker API", () => {
     expect(h.transitionInfo().phase).toBe("preloading");
   });
 
-  it("holds handovers while the picker may still be open, then lets them run again", async () => {
+  it("holds handovers after the picker call until the next track loads, past any fixed time", async () => {
     h.state().setPlayback({ gapless: true, crossfadeSec: 0 });
-    const el = await h.startPlaying(tracks(3));
+    const list = tracks(3);
+    const el = await h.startPlaying(list);
     el.emit("timeupdate", { currentTime: 70 });
     await flush();
     expect(h.transitionInfo().phase).toBe("preloading");
-    h.state().showAirPlayPicker();
+    expect(h.state().showAirPlayPicker()).toBe(true);
     expect(h.transitionInfo().phase).toBe("idle"); // the picker routes this element only
+
+    vi.advanceTimersByTime(10 * 60_000); // the picker may stay open: no event says it closed
     el.emit("timeupdate", { currentTime: 75 });
     await flush();
     expect(h.transitionInfo().phase).toBe("idle");
 
-    vi.advanceTimersByTime(h.AIRPLAY_PICKER_HOLD_MS); // dismissed without a choice
-    el.emit("timeupdate", { currentTime: 76 });
+    el.end({ currentTime: 100 }); // the next track loads into the same element, the plain way
+    await flush();
+    expect(h.active()).toBe(el);
+    expect(h.state().index).toBe(1);
+    el.emit("loadedmetadata", { duration: 100, readyState: 1 });
+    el.emit("playing", { paused: false });
+    el.emit("timeupdate", { currentTime: 75 });
+    await flush();
+    expect(h.transitionInfo().phase).toBe("preloading"); // gapless again from here
+  });
+
+  it("a route change ends the hold too", async () => {
+    h.state().setPlayback({ gapless: true, crossfadeSec: 0 });
+    const el = await h.startPlaying(tracks(3));
+    h.state().showAirPlayPicker();
+    el.wireless(true);
+    el.wireless(false); // back to the Mac
+    el.emit("timeupdate", { currentTime: 75 });
     await flush();
     expect(h.transitionInfo().phase).toBe("preloading");
+  });
+
+  it("opening the picker mid-crossfade lets the fade finish and asks for the incoming element", async () => {
+    h.state().setPlayback({ crossfadeSec: 5 });
+    const list = [track({ album_id: 1 }), track({ album_id: 2 }), track({ album_id: 3 })];
+    const el = await h.startPlaying(list);
+    el.emit("timeupdate", { currentTime: 70 });
+    await flush();
+    const sb = h.standby();
+    sb.emit("loadedmetadata", { duration: 100, readyState: 1 });
+    sb.emit("timeupdate", { currentTime: 0.3 });
+    el.emit("timeupdate", { currentTime: 95 });
+    expect(h.active()).toBe(sb);
+    expect(h.transitionInfo().phase).toBe("fading");
+
+    expect(h.state().showAirPlayPicker()).toBe(true);
+    expect(sb.calls.picker).toBe(1);
+    expect(el.calls.picker).toBe(0);
+    expect(h.transitionInfo().phase).toBe("fading"); // not cut short
+    expect(el.paused).toBe(false);
+    el.currentTime = 100;
+    vi.advanceTimersByTime(50);
+    expect(h.transitionInfo().phase).toBe("idle");
+    sb.wireless(true);
+    expect(h.state().airplayActive).toBe(true);
+  });
+
+  it("a media error on an offline copy while routed streams once and keeps the copy", async () => {
+    const t = track();
+    h.core.local.set(t.id, `asset://localhost/offline/${t.id}.mp3`);
+    const el = await h.startPlaying([t]);
+    el.wireless(true);
+    el.emit("error");
+    await flush();
+    expect(el.src).toContain(`/stream/${t.id}?force`);
+    el.emit("playing");
+    await flush();
+    expect(h.core.removeTrackDownloads).not.toHaveBeenCalled();
+    expect(h.core.local.has(t.id)).toBe(true);
   });
 });
 
@@ -130,8 +188,12 @@ describe("the AirPlay button", () => {
 
   it("appears only while targets are available, and opens the picker", async () => {
     expect(button()).toBeNull();
-    const el = await act(() => h.startPlaying(tracks(2)));
-    act(() => el.targets(true));
+    h.state().playTracks(tracks(2));
+    await act(flush);
+    act(() => h.active().targets(true));
+    expect(button()!.disabled).toBe(true); // no metadata yet: WebKit would ignore the click
+    const el = h.active();
+    act(() => { el.emit("loadedmetadata", { duration: 100, readyState: 1 }); el.emit("play"); el.emit("playing"); });
     expect(button()).not.toBeNull();
     expect(button()!.disabled).toBe(false);
     act(() => button()!.click());

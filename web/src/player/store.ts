@@ -45,7 +45,13 @@ export interface PlayerState {
   airplayAvailable: boolean;
   /** The active element plays on an AirPlay target; transitions then stay on that one element. */
   airplayActive: boolean;
-  /** Open WebKit's AirPlay picker for the active element; false if it can't (no API, nothing loaded). */
+  /** The active element has metadata: WebKit on macOS ignores the picker before that. */
+  airplayReady: boolean;
+  /**
+   * Ask WebKit to open its AirPlay picker for the active element. True means it was asked,
+   * not that a picker opened: WebKit drops the call silently without a user gesture. False
+   * when it can't be asked (no picker API, no metadata yet).
+   */
   showAirPlayPicker: () => boolean;
   /** Set the sleep timer, or turn it off ("off"), which restores the volume at once. */
   setSleep: (choice: SleepChoice) => void;
@@ -204,6 +210,7 @@ function load(track: QueueTrack, force = false) {
   loading = true;
   retriedFor = force ? track.id : null;
   if (!force || suspectCopy !== track.id) suspectCopy = null;
+  if (!force) pickerHold = false; // the next track: the plain transition the hold was for is done
   if (pendingSeek && pendingSeek.trackId !== track.id) pendingSeek = null;
   // A load the listener asked for starts counting failures afresh and wins over a pending skip.
   if (!force && !skippingError) { failStreak = 0; cancelPendingSkip(); }
@@ -216,6 +223,7 @@ function load(track: QueueTrack, force = false) {
       swapping = swappingAfter(swapping, { type: "load", paused: el.paused });
       el.src = url;
       el.load();
+      usePlayer.setState({ airplayReady: false });
       // A retry after a media error continues the same playback; anything else is a fresh one.
       if (!force || plays.trackId !== track.id) plays.start(track.id, track.duration);
       // A pause pressed while the URL was resolving wins; a play pressed then starts it here.
@@ -236,6 +244,7 @@ function load(track: QueueTrack, force = false) {
       const el = active();
       el.pause();
       if (el.hasAttribute("src")) { el.removeAttribute("src"); el.load(); }
+      usePlayer.setState({ airplayReady: false });
       // During a Bandcamp cooldown every stale track would fail the same way: stop here with
       // the "try again after" message instead of skipping through the whole queue, unless the
       // queue has downloaded tracks (#2), which need no request: then skip on towards them.
@@ -350,10 +359,13 @@ type AirPlayElement = HTMLAudioElement & { webkitShowPlaybackTargetPicker?: () =
  * to the other element would bring the music back to the Mac's speakers, so while routed
  * (or while the picker may still be open) the next track loads into the same element, the
  * plain way. The element keeps its route across sources (MediaElementSession::mediaEngineUpdated).
+ *
+ * The page hears nothing when the picker is dismissed, so the hold after asking for it lasts
+ * until the route changes (a wireless-changed event) or the next track loads, whichever is
+ * first: the transition to that track is plain, and the ones after it are gapless again.
  */
-export const AIRPLAY_PICKER_HOLD_MS = 60_000;
-let pickerAt = -Infinity;
-const singleElement = () => usePlayer.getState().airplayActive || Date.now() - pickerAt < AIRPLAY_PICKER_HOLD_MS;
+let pickerHold = false;
+const singleElement = () => usePlayer.getState().airplayActive || pickerHold;
 const PLAIN: PlaybackSettings = { gapless: false, crossfadeSec: 0 };
 /** Each element's last webkitplaybacktargetavailabilitychanged report. */
 const targetsNearby = [false, false];
@@ -362,7 +374,6 @@ function airplayChanged() {
   const patch = { airplayAvailable: targetsNearby.some(Boolean) || wireless, airplayActive: wireless };
   const s = usePlayer.getState();
   if (patch.airplayAvailable !== s.airplayAvailable || patch.airplayActive !== s.airplayActive) usePlayer.setState(patch);
-  if (wireless) pickerAt = -Infinity;
   // Routed: a preload made before would start on the other element, off AirPlay.
   if (wireless && (tx.phase === "preloading" || tx.phase === "ready" || tx.phase === "failed")) cancelTransition();
 }
@@ -557,6 +568,7 @@ function start(up: { index: number; track: QueueTrack }, fadeSec: number, kind: 
   dispatch({ type: "start", fadeStart: prev.currentTime, fadeSec });
   activeIdx = 1 - activeIdx;
   airplayChanged(); // the route belongs to an element: report the new active one's
+  usePlayer.setState({ airplayReady: next.readyState >= HTMLMediaElement.HAVE_METADATA });
   preloadUrl = null;
   swapping = false;
   retriedFor = null;
@@ -653,15 +665,17 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   sleepLeft: null,
   airplayAvailable: false,
   airplayActive: false,
+  airplayReady: false,
   showAirPlayPicker: () => {
     const el = active() as AirPlayElement;
     // macOS WebKit ignores the call before metadata (MediaElementSession::showPlaybackTargetPicker).
     if (typeof el.webkitShowPlaybackTargetPicker !== "function" || el.readyState < HTMLMediaElement.HAVE_METADATA) return false;
+    // Only asked: whether a picker opened (or which route it chose) arrives later, if at all.
     // The picker routes the element that asked for it, and only that one (WebMediaSessionManager).
     // A preload would hand the next track to the other element, so it is dropped (a fade in
     // progress finishes on its own), and none starts while the picker may still be open.
     if (tx.phase === "preloading" || tx.phase === "ready" || tx.phase === "failed") cancelTransition();
-    pickerAt = Date.now();
+    pickerHold = true;
     el.webkitShowPlaybackTargetPicker();
     return true;
   },
@@ -911,7 +925,7 @@ const onAudioEvent = (type: AudioEventType) => {
     // The stream retry plays where the local file failed: the file is the problem, so it goes.
     // Not while offline (that retry can't have streamed), and only for the same track.
     const cur = usePlayer.getState().current();
-    if (cur?.id === suspectCopy && !isLocalSrc(el.src) && Date.now() >= offlineUntil) forgetLocalCopy(cur.id);
+    if (cur?.id === suspectCopy && !isLocalSrc(el.src) && Date.now() >= offlineUntil && !usePlayer.getState().airplayActive) forgetLocalCopy(cur.id);
     suspectCopy = null;
   }
   // A pause from outside (the system) mid-crossfade stops the fading track too.
@@ -936,7 +950,7 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
     usePlayer.setState({ position: el.currentTime });
   },
   loadedmetadata: (el) => {
-    usePlayer.setState({ duration: el.duration });
+    usePlayer.setState({ duration: el.duration, airplayReady: true });
     plays.setDuration(el.duration);
     if (pendingSeek != null && pendingSeek.trackId === usePlayer.getState().current()?.id) {
       plays.seeked();
@@ -969,7 +983,9 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
     if (!cur) return;
     if (retriedFor !== cur.id) {
       // The copy is only suspect: it is forgotten once the stream retry plays (see "playing").
-      suspectCopy = cur.id > 0 && isLocalSrc(el.src) ? cur.id : null;
+      // Not while on AirPlay (#42): the failure may be the route (an asset: source sent to a
+      // speaker is untested), not the file, so the retry streams and the copy stays.
+      suspectCopy = cur.id > 0 && isLocalSrc(el.src) && !usePlayer.getState().airplayActive ? cur.id : null;
       // Most likely an expired stream URL: ask the server to re-scrape and try once more. A
       // paused player (the listener, or the system) stays paused after the retry.
       if (usePlayer.getState().status === "paused") usePlayer.setState({ wantsPlay: false });
@@ -1015,7 +1031,10 @@ audioEls.forEach((el, i) => {
     targetsNearby[i] = (e as Event & { availability?: string }).availability === "available";
     airplayChanged();
   });
-  el.addEventListener("webkitcurrentplaybacktargetiswirelesschanged", airplayChanged);
+  el.addEventListener("webkitcurrentplaybacktargetiswirelesschanged", () => {
+    pickerHold = false; // the picker chose (or dropped) a route
+    airplayChanged();
+  });
 });
 
 /** The element playing the current track (selftest, persistence; only this module changes it). */

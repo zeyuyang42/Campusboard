@@ -35,13 +35,13 @@ export function sleepMenu(radio: boolean): MenuItem[] {
 export function AirPlayButton() {
   const available = usePlayer((p) => p.airplayAvailable);
   const wireless = usePlayer((p) => p.airplayActive);
-  const hasTrack = usePlayer((p) => p.queue.length > 0);
+  const ready = usePlayer((p) => p.airplayReady && p.queue.length > 0);
   const show = usePlayer((p) => p.showAirPlayPicker);
   if (!available) return null;
   return (
     <>
-      {wireless && <span className="sleep-left">Playing on AirPlay</span>}
-      <button className={`icon-btn ${wireless ? "on" : ""}`} title="AirPlay" aria-label="AirPlay" disabled={!hasTrack} onClick={() => show()}><AirPlayIcon /></button>
+      {wireless && <span className="sleep-left airplay-note">Playing on AirPlay</span>}
+      <button className={`icon-btn ${wireless ? "on" : ""}`} title="AirPlay" aria-label="AirPlay" disabled={!ready} onClick={() => show()}><AirPlayIcon /></button>
     </>
   );
 }

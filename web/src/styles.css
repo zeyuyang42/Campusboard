@@ -354,6 +354,7 @@ details.about-wrap summary { cursor: pointer; color: var(--text-muted); margin-t
   :root { --dock-h: 64px; }
   .player { grid-template-columns: minmax(0, 1fr) auto; }
   .controls .buttons .icon-btn:not(.keep) { display: none; }
+  .airplay-note { display: none; }
   .seek { position: absolute; left: 0; right: 0; top: -1px; max-width: none; gap: 0; }
   .seek span { display: none; }
   .seek .bar { height: 3px; }

@@ -218,9 +218,15 @@ src-tauri/
   per page to the target, the one that opened the picker
   (`WebMediaSessionManager::configurePlaybackTargetClients`), and the element keeps
   the route across new sources (`MediaElementSession::mediaEngineUpdated`). So while
-  `airplayActive` (and for 60 s after the picker opens) the store skips gapless and
-  crossfade and loads the next track into the same element; the saved settings are
-  untouched. Control Center's Sound menu routes the whole app instead, with gapless
+  `airplayActive` the store skips gapless and crossfade and loads the next track
+  into the same element; the saved settings are untouched. The page hears nothing
+  when the picker is dismissed, so after a picker call the same hold lasts until a
+  wireless-changed event or the next track loads (that transition is plain). If the
+  user presses Next with the picker still open and picks after a later gapless
+  handover, the route lands on the outgoing element (rare; the next handover back
+  fixes it). While routed, a media error on an offline (`asset:`) copy streams once
+  but never marks the copy suspect: AVFoundation playing a custom-scheme source to
+  a speaker is untested, so the route, not the file, may be at fault. Control Center's Sound menu routes the whole app instead, with gapless
   intact. The selftest's `airplay` block reports whether the API exists and never
   opens the picker (2026-10-20, macOS 15.7: picker, wireless property, the
   availability event and `remote` all present on the detached elements).
