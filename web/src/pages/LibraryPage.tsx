@@ -24,7 +24,7 @@ export function LibraryPage() {
       {tab === "albums" && <Albums />}
       {tab === "artists" && <Artists />}
       {tab === "tracks" && <Tracks />}
-      {tab === "tags" && <Tags />}
+      {tab === "tags" && <LibraryTags />}
     </>
   );
 }
@@ -200,12 +200,31 @@ function Artists() {
 }
 
 /** Every tag in the library with its album count (#71); a tag opens the album grid narrowed to it. */
-function Tags() {
-  const { data, isLoading } = useTags();
+export function LibraryTags() {
+  const { view, set } = useLibraryView();
+  if (!view) return <div className="empty">Loading…</div>;
+  return <TagList key={view.filter} filter={view.filter} showAll={() => set({ filter: "all" })} />;
+}
+
+function TagList({ filter, showAll }: { filter: repos.AlbumFilter; showAll: () => void }) {
+  // Counted under the same Show choice as the album grid, so a tag's number is what it opens.
+  const { data, isLoading, error } = useTags(filter);
   const setQ = useUi((s) => s.setLibraryQuery);
   if (isLoading) return <div className="empty">Loading…</div>;
-  if (!data?.length) return <div className="empty">No tags yet. Albums bring their Bandcamp tags with them when you import them.</div>;
+  if (error) return <div className="notice error">Couldn't load your tags. {friendlyError(error)}</div>;
+  const scope = filter !== "all" && (
+    <p className="muted tag-scope">
+      Counting albums in {FILTER_NAME[filter]}. <button className="btn ghost sm" onClick={showAll}>Count all albums</button>
+    </p>
+  );
+  if (!data?.length) {
+    return filter === "all"
+      ? <div className="empty">No tags yet. Albums bring their Bandcamp tags with them when you import them.</div>
+      : <>{scope}<div className="empty">No tags in {FILTER_NAME[filter]}.</div></>;
+  }
   return (
+    <>
+    {scope}
     <ul className="tag-list">
       {data.map((t) => (
         <li key={t.tag}>
@@ -216,6 +235,7 @@ function Tags() {
         </li>
       ))}
     </ul>
+    </>
   );
 }
 

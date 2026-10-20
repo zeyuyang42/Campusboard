@@ -12,8 +12,18 @@ export interface AlbumRow extends Omit<Album, "tags" | "is_preorder" | "owned" |
   wishlisted: number;
 }
 
+/** tags_json as strings; malformed JSON or entries read as no tags (as listTags does). */
+function parseTags(json: string): string[] {
+  try {
+    const v: unknown = JSON.parse(json || "[]");
+    return Array.isArray(v) ? v.filter((t): t is string => typeof t === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export function rowToAlbum(r: AlbumRow): Album {
-  return { ...r, tags: JSON.parse(r.tags_json || "[]"), is_preorder: !!r.is_preorder, owned: !!r.owned, wishlisted: !!r.wishlisted };
+  return { ...r, tags: parseTags(r.tags_json), is_preorder: !!r.is_preorder, owned: !!r.owned, wishlisted: !!r.wishlisted };
 }
 
 const WISHLISTED = "EXISTS (SELECT 1 FROM fan_items f WHERE f.list = 'wishlist' AND f.item_type = al.item_type AND f.bandcamp_id = al.bandcamp_id)";
@@ -81,9 +91,11 @@ const MATCH = `(al.title LIKE ? ESCAPE '\\' OR ar.name LIKE ? ESCAPE '\\'
  * Albums carrying a tag (#71). Tags stay in albums.tags_json as Bandcamp sends them; json_each
  * over a few thousand short arrays costs about a millisecond, so there is no tag table to keep
  * in step. Matching folds ASCII case only ("Ambient" and "ambient" are one tag; "électronique"
- * and "electronique" are two), like the filter text.
+ * and "electronique" are two), like the filter text. Tags compare trimmed, and a malformed
+ * tags_json reads as no tags rather than failing the whole query.
  */
-const HAS_TAG = "EXISTS (SELECT 1 FROM json_each(al.tags_json) j WHERE j.type = 'text' AND j.value = ? COLLATE NOCASE)";
+const TAGS_OF_AL = "json_each(CASE WHEN json_valid(al.tags_json) THEN al.tags_json ELSE '[]' END)";
+const HAS_TAG = `EXISTS (SELECT 1 FROM ${TAGS_OF_AL} j WHERE j.type = 'text' AND trim(j.value) = ? COLLATE NOCASE)`;
 
 /** The WHERE clause (or "") and its parameters for the Show filter, the filter text and a tag. */
 function albumWhere(filter: AlbumFilter, q: string, tag = ""): { sql: string; params: unknown[] } {
@@ -142,10 +154,10 @@ export interface TagCount { tag: string; album_count: number }
 export async function listTags(db: Db, filter: AlbumFilter = "all"): Promise<TagCount[]> {
   const w = albumWhere(filter, "");
   return db.select<TagCount>(
-    `SELECT MIN(j.value) AS tag, COUNT(DISTINCT al.id) AS album_count
-     FROM albums al, json_each(al.tags_json) j
+    `SELECT MIN(trim(j.value)) AS tag, COUNT(DISTINCT al.id) AS album_count
+     FROM albums al, ${TAGS_OF_AL} j
      ${w.sql ? `${w.sql} AND` : "WHERE"} j.type = 'text' AND trim(j.value) <> ''
-     GROUP BY j.value COLLATE NOCASE
+     GROUP BY trim(j.value) COLLATE NOCASE
      ORDER BY album_count DESC, tag COLLATE NOCASE`,
     w.params,
   );

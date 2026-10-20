@@ -38,7 +38,7 @@ describe("album tags as links (#71)", () => {
     act(() => root.render(
       h(MemoryRouter, { initialEntries: ["/album/1"] },
         h(Routes, null,
-          h(Route, { path: "/album/:id", element: h(TagLinks, { tags: ["Électronique", "drum & bass"] }) }),
+          h(Route, { path: "/album/:id", element: h(TagLinks, { tags: ["Électronique", " drum & bass ", "drum & bass", "  "] }) }),
           h(Route, { path: "/library/:tab", element: h(Probe) }),
         )),
     ));

@@ -75,6 +75,34 @@ describe("listTags (#71)", () => {
     expect((await listTags(db)).find((t) => t.tag === "jazz")?.album_count).toBe(2);
   });
 
+  it("counts what the grid shows for that tag, under every Show filter", async () => {
+    for (const filter of ["all", "purchased", "wishlist", "downloaded", "rated"] as const) {
+      for (const t of await listTags(db, filter)) {
+        expect((await listAlbums(db, "added", filter, "", t.tag)).length, `${filter}/${t.tag}`).toBe(t.album_count);
+      }
+    }
+  });
+
+  it("trims tags: \" ambient \" and \"ambient\" are one tag, found either way", async () => {
+    const spaced = album(artist("E"), "Spaced", [" ambient ", "  "]);
+    const t = (await listTags(db)).find((x) => x.tag.toLowerCase() === "ambient");
+    expect(t).toEqual({ tag: "Ambient", album_count: 3 });
+    expect((await listTags(db)).some((x) => x.tag !== x.tag.trim())).toBe(false);
+    expect(await titles("title", "all", "", "ambient")).toEqual(["Calm", "Drift", "Spaced"]);
+    expect(await titles("title", "all", "", " ambient")).toEqual(["Calm", "Drift", "Spaced"]);
+    expect((await listAlbums(db, "added", "all", "", "ambient")).map((a) => a.id)).toContain(spaced);
+  });
+
+  it("reads malformed tags_json as no tags instead of failing", async () => {
+    db.raw.prepare("UPDATE albums SET tags_json = '[\"rock\"' WHERE id = ?").run(ids.bare);
+    db.raw.prepare("UPDATE albums SET tags_json = '{\"a\": 1}' WHERE id = ?").run(ids.pulse);
+    const tags = await listTags(db);
+    expect(tags.find((t) => t.tag === "rock")).toBeUndefined();
+    expect(tags.find((t) => t.tag === "Electronic")?.album_count).toBe(1);
+    expect(await titles("title", "all", "", "ambient")).toEqual(["Calm", "Drift"]);
+    expect((await listAlbums(db, "title")).find((a) => a.id === ids.bare)?.tags).toEqual([]);
+  });
+
   it("is empty for an empty library", async () => {
     db = new NodeDb();
     expect(await listTags(db)).toEqual([]);

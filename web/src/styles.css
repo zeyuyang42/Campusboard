@@ -135,6 +135,7 @@ h2 { font-family: var(--font-display); font-size: 18px; font-weight: 600; letter
 /* The Tags tab: a quiet, flowing list of names with album counts, no chips. */
 .tag-list { list-style: none; margin: 0; padding: 0; columns: 200px; column-gap: 28px; }
 .tag-list li { break-inside: avoid; }
+.tag-scope { margin: 0 0 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tag-list a { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; color: var(--text); }
 .tag-list a .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag-list a .muted { font-variant-numeric: tabular-nums; font-size: 13px; }
