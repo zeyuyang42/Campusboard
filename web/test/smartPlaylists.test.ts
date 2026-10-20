@@ -101,11 +101,16 @@ describe("the smart playlist editor (#84)", () => {
     await setValue(field("Played"), "not");
     await setValue(host.querySelector<HTMLInputElement>("input[aria-label=Days]")!, "90");
     await setValue(field("Sort"), "rating");
+    const calls = core.smartCount.mock.calls.length;
+    await act(async () => { await new Promise((r) => setTimeout(r, 300)); });
+    await flush();
+    // Debounced: one count for the whole burst of changes.
+    expect(core.smartCount.mock.calls.length).toBe(calls + 1);
     expect(status()).toBe("3 tracks match");
-    expect(core.smartCount).toHaveBeenLastCalledWith({ show: "all", minRating: 4, tag: "ambient", notPlayedWithinDays: 90, sort: "rating" });
+    expect(core.smartCount).toHaveBeenLastCalledWith({ show: "all", minRating: 4, tag: "ambient", notPlayedWithinDays: 90, sort: "rating", limit: 500 });
 
     await click(button("Create"));
-    expect(core.createSmartPlaylist).toHaveBeenCalledWith("Faves", { show: "all", minRating: 4, tag: "ambient", notPlayedWithinDays: 90, sort: "rating" });
+    expect(core.createSmartPlaylist).toHaveBeenCalledWith("Faves", { show: "all", minRating: 4, tag: "ambient", notPlayedWithinDays: 90, sort: "rating", limit: 500 });
     expect(path).toBe("/playlists/9");
   });
 

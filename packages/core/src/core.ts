@@ -152,7 +152,8 @@ export function createCore(deps: CoreDeps) {
     artistReleasesMuted: (artistId: number) => releases.isMuted(db, artistId),
     setArtistReleasesMuted: async (artistId: number, muted: boolean) => { await releases.setMuted(db, artistId, muted); deps.onReleasesChange?.(); },
     // playlists
-    playlists: () => playlists.listPlaylists(db),
+    /** `summaries`: also evaluate smart playlists' counts and covers (the Playlists page). */
+    playlists: (opts: { summaries?: boolean } = {}) => playlists.listPlaylists(db, opts),
     playlist: (id: number) => playlists.getPlaylist(db, id),
     createPlaylist: (name: string) => playlists.createPlaylist(db, name),
     /** A smart playlist (#84) from a rule (validated with SmartRuleSchema). */

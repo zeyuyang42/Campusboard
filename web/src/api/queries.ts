@@ -106,6 +106,8 @@ export const useArtists = () => useQuery({ queryKey: keys.artists, queryFn: asyn
 export const useArtist = (id: number) => useQuery({ queryKey: keys.artist(id), queryFn: async () => (await core()).artist(id), enabled: id > 0 });
 export const useTracks = (q: string) => useQuery({ queryKey: keys.tracks(q), queryFn: async () => (await core()).tracks(q) });
 export const usePlaylists = () => useQuery({ queryKey: keys.playlists, queryFn: async () => (await core()).playlists() });
+/** usePlaylists plus smart playlists' counts and covers (#84), evaluated per smart playlist: the Playlists page only. */
+export const usePlaylistSummaries = () => useQuery({ queryKey: [...keys.playlists, "summaries"], queryFn: async () => (await core()).playlists({ summaries: true }) });
 export const usePlaylist = (id: number) => useQuery({ queryKey: keys.playlist(id), queryFn: async () => (await core()).playlist(id), enabled: id > 0 });
 export const useSearch = (q: string) => useQuery({ queryKey: keys.search(q), queryFn: async () => (await core()).search(q), enabled: q.trim().length >= 2, staleTime: 60_000 });
 

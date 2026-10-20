@@ -1052,7 +1052,7 @@ export async function runSelfTest() {
       await core.addToPlaylist(pl.id, playable.slice(0, 1).map((t) => t.id));
       const got = await core.playlist(pl.id);
       const stored = await core.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM playlist_tracks WHERE playlist_id = ?", [pl.id]);
-      const listed = (await core.playlists()).find((p) => p.id === pl.id);
+      const listed = (await core.playlists({ summaries: true })).find((p) => p.id === pl.id);
       await core.setSmartRule(pl.id, { text: a.title });
       const all = await core.playlist(pl.id);
       await core.deletePlaylist(pl.id);

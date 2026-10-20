@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { usePlaylists, usePlaylistMutations } from "../api/queries";
+import { usePlaylistSummaries, usePlaylistMutations } from "../api/queries";
 import { PlaylistCover } from "../components/PlaylistCover";
 import { SmartRuleEditor } from "../components/SmartRuleEditor";
 import { useState } from "react";
@@ -7,7 +7,7 @@ import { normalizePlaylistName, PLAYLIST_NAME_MAX } from "@bc/core";
 import { friendlyError } from "../lib/errors";
 
 export function PlaylistsPage() {
-  const { data, isLoading } = usePlaylists();
+  const { data, isLoading } = usePlaylistSummaries();
   const { create, createSmart } = usePlaylistMutations();
   const nav = useNavigate();
   const [creating, setCreating] = useState<"plain" | "smart" | null>(null);

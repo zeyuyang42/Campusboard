@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeDb } from "./helpers/nodeDb.js";
@@ -16,7 +16,7 @@ import {
   evaluateSmartRule, getSmartRule, parseRuleJson, parseSmartRule, setSmartRule, summarizeSmartRule, SmartRuleError,
   SMART_DAYS_MAX, SMART_LIMIT_MAX, SMART_TEXT_MAX, type SmartRule,
 } from "../src/db/repos/smartPlaylists.js";
-import { exportLibrary, importLibrary, LibraryExportSchema, parseLibraryExport, previewLibraryImport } from "../src/services/libraryTransfer.js";
+import { exportLibrary, importLibrary, parseLibraryExport, previewLibraryImport } from "../src/services/libraryTransfer.js";
 
 let db: NodeDb;
 let nextId = 1;
@@ -135,8 +135,10 @@ describe("smart playlists in the playlist repo (#84)", () => {
   it("creates, lists, opens, edits and deletes one; its tracks are never stored", async () => {
     const p = await createSmartPlaylist(db, " Top rated ", { minRating: 4 });
     expect(p).toMatchObject({ name: "Top rated", smart: true, rule: { minRating: 4 }, track_count: 3, art_ids: [1005, 1003] });
-    const listed = (await listPlaylists(db)).find((x) => x.id === p.id)!;
-    expect(listed).toMatchObject({ smart: true, track_count: 3 });
+    const listed = (await listPlaylists(db, { summaries: true })).find((x) => x.id === p.id)!;
+    expect(listed).toMatchObject({ smart: true, track_count: 3, art_ids: [1005, 1003] });
+    // Without summaries (the sidebar, the picker) the rule isn't evaluated.
+    expect((await listPlaylists(db)).find((x) => x.id === p.id)).toMatchObject({ smart: true, track_count: undefined, art_ids: [] });
 
     const open = (await getPlaylist(db, p.id))!;
     expect(open.tracks.map((t) => t.title)).toEqual(["Haze Two", "Haze", "Tide"]);
@@ -151,6 +153,12 @@ describe("smart playlists in the playlist repo (#84)", () => {
     expect(await getSmartRule(db, p.id)).toEqual(rule({ minRating: 5 }));
     await expect(setSmartRule(db, p.id, { minRating: 9 })).rejects.toBeInstanceOf(SmartRuleError);
     expect(await setSmartRule(db, 999, { minRating: 1 })).toBe(false);
+    // An ordinary playlist never turns smart and keeps its tracks.
+    const plain = await createPlaylist(db, "Plain");
+    await addTracks(db, plain.id, [1]);
+    expect(await setSmartRule(db, plain.id, { minRating: 1 })).toBe(false);
+    expect(await getPlaylist(db, plain.id)).toMatchObject({ smart: false, track_count: 1 });
+    await deletePlaylist(db, plain.id);
 
     expect(await deletePlaylist(db, p.id)).toBe(true);
     expect(db.raw.prepare("SELECT COUNT(*) AS n FROM smart_playlists").get()).toEqual({ n: 0 });
@@ -243,6 +251,35 @@ describe("smart playlists in a library file (#84)", () => {
     expect(await getSmartRule(dst, id)).toEqual(rule({ minRating: 4, tag: "rock", sort: "rating", limit: 50 }));
   });
 
+  it("never turns an ordinary playlist smart when the source reused its id", async () => {
+    // Source: "Mix" (2 tracks) is exported and imported into a library that has the album.
+    const src = new NodeDb();
+    const a = await upsertTralbum(src, parseTralbumPage(fixture("album"), 0));
+    const mix = await createPlaylist(src, "Mix");
+    const t = await src.select<{ id: number }>("SELECT id FROM tracks WHERE album_id = ? ORDER BY track_num LIMIT 2", [a]);
+    await addTracks(src, mix.id, t.map((x) => x.id));
+    const dst = new NodeDb();
+    await upsertTralbum(dst, parseTralbumPage(fixture("album"), 0));
+    await importLibrary(dst, runner(dst), parseLibraryExport(JSON.stringify(await exportLibrary(src))).data!);
+    const mixHere = (await listPlaylists(dst)).find((p) => p.name === "Mix")!;
+    expect(mixHere.track_count).toBe(2);
+
+    // Source: "Mix" is deleted and the smart "Faves" reuses its id; export and import again.
+    await deletePlaylist(src, mix.id);
+    const faves = await createSmartPlaylist(src, "Faves", { minRating: 4 });
+    expect(faves.id).toBe(mix.id);
+    const out = await exportLibrary(src);
+    await importLibrary(dst, runner(dst), parseLibraryExport(JSON.stringify(out)).data!);
+    const after = await listPlaylists(dst);
+    expect(after.find((p) => p.id === mixHere.id)).toMatchObject({ name: "Mix", smart: false, track_count: 2 });
+    expect(after.find((p) => p.name === "Faves")).toMatchObject({ smart: true, rule: rule({ minRating: 4 }) });
+
+    // Even a file keyed the old way ("<library>:<id>") can't give "Mix" a rule.
+    const legacy = { ...out, smart_playlists: out.smart_playlists!.map((p) => ({ ...p, name: "Other", key: `${out.library_id}:${faves.id}` })) };
+    await importLibrary(dst, runner(dst), parseLibraryExport(JSON.stringify(legacy)).data!);
+    expect((await listPlaylists(dst)).find((p) => p.id === mixHere.id)).toMatchObject({ smart: false, track_count: 2 });
+  });
+
   it("files without smart playlists still import, and a bad rule is refused", async () => {
     const out = await exportLibrary(await source());
     const { smart_playlists: _s, ...older } = out;
@@ -252,20 +289,25 @@ describe("smart playlists in a library file (#84)", () => {
   });
 
   describe("an older build (v0.5.0)", () => {
-    // v0.5.0's own libraryTransfer.ts, written next to the current one so its imports resolve.
+    // v0.5.0's whole core source, extracted with git archive into a gitignored folder (outside
+    // src, excluded from tsc) so its imports resolve to v0.5.0's own modules.
     const here = path.dirname(fileURLToPath(import.meta.url));
-    const oldFile = path.resolve(here, "../src/services/libraryTransfer.v050.tmp.ts");
-    let source050: string | null = null;
+    const dir = path.join(here, ".v050");
+    let tagged = false;
     try {
-      source050 = execFileSync("git", ["show", "v0.5.0:packages/core/src/services/libraryTransfer.ts"], { cwd: here, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+      execFileSync("git", ["rev-parse", "-q", "--verify", "v0.5.0^{commit}"], { cwd: here, stdio: "ignore" });
+      tagged = true;
     } catch {
-      source050 = null; // a checkout without the tag (a shallow clone)
+      tagged = false; // a checkout without the tag (a shallow clone)
     }
-    afterAll(() => rmSync(oldFile, { force: true }));
+    afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-    it.skipIf(!source050)("parses and imports the file, ignoring smart playlists", async () => {
-      writeFileSync(oldFile, source050!);
-      const old = (await import(/* @vite-ignore */ oldFile)) as typeof import("../src/services/libraryTransfer.js");
+    it.skipIf(!tagged)("parses and imports the file, ignoring smart playlists", async () => {
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir, { recursive: true });
+      const tar = execFileSync("git", ["archive", "v0.5.0", "packages/core/src"], { cwd: path.resolve(here, "../../.."), maxBuffer: 64 * 1024 * 1024 });
+      execFileSync("tar", ["-x", "-C", dir], { input: tar });
+      const old = (await import(/* @vite-ignore */ path.join(dir, "packages/core/src/services/libraryTransfer.ts"))) as typeof import("../src/services/libraryTransfer.js");
       const out = await exportLibrary(await source());
       const parsed = old.parseLibraryExport(JSON.stringify(out));
       expect(parsed.error).toBeUndefined();
@@ -274,8 +316,9 @@ describe("smart playlists in a library file (#84)", () => {
       const r = await old.importLibrary(dst, runner(dst), parsed.data!);
       expect(r.playlistsCreated).toBe(1);
       expect((await listPlaylists(dst)).map((p) => p.name)).toEqual(["Mix"]);
-      // The current schema without the new field is what v0.5.0 had.
-      expect(LibraryExportSchema.omit({ smart_playlists: true }).safeParse(out).success).toBe(true);
+      // "Mix" waits for its album with both entries; no rule reached the library.
+      expect(dst.raw.prepare("SELECT COUNT(*) AS n FROM import_pending WHERE kind = 'playlist_track'").get()).toEqual({ n: 2 });
+      expect(dst.raw.prepare("SELECT COUNT(*) AS n FROM smart_playlists").get()).toEqual({ n: 0 });
     });
   });
 });

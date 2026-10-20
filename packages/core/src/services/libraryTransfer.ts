@@ -180,6 +180,14 @@ async function libraryId(db: Db, create: boolean): Promise<string | null> {
 
 const TRACK_REF = "al.url AS album_url, t.track_id, t.track_num, t.title";
 
+/** A smart playlist's key in a library file (#84): "<library id>:smart:<playlist id>@<created_at>". */
+const smartKey = (lib: string, id: number, createdAt: string) => `${lib}:smart:${id}@${createdAt}`;
+/** The playlist id in a key from this library: "<lib>:<id>", or a smartKey. */
+function ownPlaylistId(key: string): number {
+  const smart = /:smart:(\d+)@/.exec(key);
+  return Number(smart ? smart[1] : key.slice(key.lastIndexOf(":") + 1));
+}
+
 /** Everything worth moving to another Mac, as a plain object ready for JSON.stringify. */
 export async function exportLibrary(db: Db, opts: { history?: boolean; appVersion?: string } = {}): Promise<LibraryExport> {
   const lib = (await libraryId(db, true))!;
@@ -207,7 +215,9 @@ export async function exportLibrary(db: Db, opts: { history?: boolean; appVersio
     "SELECT p.id, p.name, p.created_at, s.rule_json FROM playlists p JOIN smart_playlists s ON s.playlist_id = p.id ORDER BY p.created_at, p.id",
   )) {
     const rule = parseRuleJson(p.rule_json);
-    if (rule) smart.push({ key: `${lib}:${p.id}`, name: p.name, created_at: p.created_at, rule });
+    // Not "<library>:<id>" like an ordinary playlist: SQLite reuses a deleted playlist's id,
+    // and an earlier import may have mapped that key to an ordinary playlist.
+    if (rule) smart.push({ key: smartKey(lib, p.id, p.created_at), name: p.name, created_at: p.created_at, rule });
   }
 
   const history = opts.history === false ? null : await db.select<NonNullable<LibraryExport["history"]>[number]>(
@@ -365,7 +375,7 @@ async function planPlaylists(db: Db, data: LibraryExport, s: LibraryState): Prom
   const plans: PlaylistPlan[] = [];
   for (const p of filePlaylists(data)) {
     const name = normalizePlaylistName(p.name) ?? "Imported playlist";
-    const ownId = data.library_id === s.libraryId ? Number(p.key.slice(p.key.lastIndexOf(":") + 1)) : NaN;
+    const ownId = data.library_id === s.libraryId ? ownPlaylistId(p.key) : NaN;
     let present = s.mapped.has(p.key) || (Number.isInteger(ownId) && s.playlistIds.get(ownId) === p.created_at);
     if (!present && p.rule) {
       // A smart playlist of the same name with the same rule.
@@ -494,9 +504,17 @@ export async function importLibrary(db: Db, runner: JobRunner, data: LibraryExpo
     if (p.rule) {
       // The rule goes in after the playlist, with INSERT OR IGNORE: a rerun after an
       // interruption gives the playlist an earlier run created (mapped) its rule, and an
-      // existing rule is never replaced.
+      // existing rule is never replaced. Only ever an empty playlist: one with tracks, stored
+      // or pending, is an ordinary playlist and stays one.
       const pid = plan.status === "new" ? await createImportedPlaylist(db, p.key, plan.createAs) : s.mapped.get(p.key);
-      if (pid !== undefined) await db.run("INSERT OR IGNORE INTO smart_playlists (playlist_id, rule_json) VALUES (?, ?)", [pid, JSON.stringify(parseSmartRule(p.rule))]);
+      if (pid !== undefined) {
+        await db.run(
+          `INSERT OR IGNORE INTO smart_playlists (playlist_id, rule_json) SELECT ?, ?
+           WHERE NOT EXISTS (SELECT 1 FROM playlist_tracks WHERE playlist_id = ?)
+             AND NOT EXISTS (SELECT 1 FROM import_pending WHERE kind = 'playlist_track' AND playlist_id = ?)`,
+          [pid, JSON.stringify(parseSmartRule(p.rule)), pid, pid],
+        );
+      }
       if (plan.status === "new") playlistsCreated++;
       continue;
     }

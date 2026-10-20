@@ -2,7 +2,7 @@ import type { Db } from "../Db.js";
 import { now } from "../Db.js";
 import type { Playlist, PlaylistWithTracks, PlaylistTrack } from "../../types.js";
 import { PLAYLIST_NAME_MAX } from "../../config.js";
-import { evaluateSmartRule, parseRuleJson, requireRule, setSmartRule, summarizeSmartRule } from "./smartPlaylists.js";
+import { evaluateSmartRule, parseRuleJson, requireRule, summarizeSmartRule } from "./smartPlaylists.js";
 
 export { PLAYLIST_NAME_MAX };
 
@@ -78,8 +78,14 @@ const PLAYLIST_SELECT = `
     (SELECT s.rule_json FROM smart_playlists s WHERE s.playlist_id = p.id) AS rule_json
   FROM playlists p`;
 
-export async function listPlaylists(db: Db): Promise<Playlist[]> {
+/**
+ * Every playlist, most recently changed first. A smart playlist's track_count and art_ids
+ * come from evaluating its rule, a query each, so only with `summaries` (the Playlists
+ * page); otherwise its track_count is undefined and art_ids empty.
+ */
+export async function listPlaylists(db: Db, opts: { summaries?: boolean } = {}): Promise<Playlist[]> {
   const list = (await db.select<PlaylistRow>(`${PLAYLIST_SELECT} ORDER BY p.updated_at DESC`)).map(rowToPlaylist);
+  if (!opts.summaries) return list.map((p) => (p.smart ? { ...p, track_count: undefined, art_ids: [] } : p));
   return Promise.all(list.map((p) => withSmartSummary(db, p)));
 }
 
@@ -96,7 +102,7 @@ export async function createSmartPlaylist(db: Db, name: string, rule: unknown): 
   const n = requireName(name);
   const r = requireRule(rule);
   const row = await db.get<{ id: number }>("INSERT INTO playlists (name) VALUES (?) RETURNING id", [n]);
-  await setSmartRule(db, row!.id, r);
+  await db.run("INSERT INTO smart_playlists (playlist_id, rule_json) VALUES (?, ?)", [row!.id, JSON.stringify(r)]);
   const p = await db.get<PlaylistRow>(`${PLAYLIST_SELECT} WHERE p.id = ?`, [row!.id]);
   return withSmartSummary(db, rowToPlaylist(p!));
 }
@@ -106,10 +112,10 @@ export async function renamePlaylist(db: Db, id: number, name: string): Promise<
 }
 
 export async function deletePlaylist(db: Db, id: number): Promise<boolean> {
-  const r = await db.run("DELETE FROM playlists WHERE id = ?", [id]);
-  // The foreign key cascades this; also right with foreign keys off.
+  // The rule first (the foreign key would cascade it; this is also right with foreign keys
+  // off): interrupted here, an ordinary empty playlist is left.
   await db.run("DELETE FROM smart_playlists WHERE playlist_id = ?", [id]);
-  return r.changes > 0;
+  return (await db.run("DELETE FROM playlists WHERE id = ?", [id])).changes > 0;
 }
 
 export async function getPlaylist(db: Db, id: number): Promise<PlaylistWithTracks | null> {

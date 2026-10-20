@@ -79,17 +79,15 @@ export function summarizeSmartRule(db: Db, rule: SmartRule): Promise<{ track_cou
   return albumTracksSummary(db, ...args(rule));
 }
 
-/** Store (or replace) a playlist's rule, which makes it smart. Its stored tracks, if any, are removed last. */
+/**
+ * Replace a smart playlist's rule. False for an ordinary playlist (or none): a rule is only
+ * ever given at creation (createSmartPlaylist), so an ordinary playlist never turns smart.
+ */
 export async function setSmartRule(db: Db, playlistId: number, rule: unknown): Promise<boolean> {
   const r = requireRule(rule);
-  const done = await db.run(
-    `INSERT INTO smart_playlists (playlist_id, rule_json) SELECT id, ? FROM playlists WHERE id = ?
-     ON CONFLICT(playlist_id) DO UPDATE SET rule_json = excluded.rule_json`,
-    [JSON.stringify(r), playlistId],
-  );
+  const done = await db.run("UPDATE smart_playlists SET rule_json = ? WHERE playlist_id = ?", [JSON.stringify(r), playlistId]);
   if (!done.changes) return false;
   await db.run("UPDATE playlists SET updated_at = ? WHERE id = ?", [now(), playlistId]);
-  await db.run("DELETE FROM playlist_tracks WHERE playlist_id = ?", [playlistId]);
   return true;
 }
 
