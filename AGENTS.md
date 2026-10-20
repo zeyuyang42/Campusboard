@@ -169,6 +169,17 @@ src-tauri/
   continues (`persist.ts` prevents the close and calls `hide()`), the Dock icon
   reopens it (`RunEvent::Reopen` in lib.rs), Cmd+Q quits. Menu accelerators use
   Cmd so they never fight text fields; plain-key shortcuts stay in `shortcuts.ts`.
+- Drag and drop (#92, checked 2026-10-20 in wry 0.57 / tauri-runtime-wry 2.12 source,
+  selftest `dropLink`): with `dragDropEnabled` on (Tauri's default) the WKWebView
+  subclass answers every NSDraggingDestination call itself and never calls super, so
+  WebKit sees no drag at all: no HTML5 `drop`, not even for in-page drags (the queue
+  reorder), and a dragged URL arrives as `tauri://drag-drop` with an empty `paths`
+  list (it only reads `NSFilenamesPboardType`). The main window sets
+  `dragDropEnabled: false`, which hands everything to WebKit: a link from Safari or
+  Chrome arrives as `text/uri-list` + `text/plain`, a Finder file as `Files`.
+  `lib/dropLink.ts` reads only the text, always cancels outside drags (so WebKit
+  never opens a dropped file or link in the webview) and never reads files. The
+  mini window keeps the native handler, which swallows drops there.
 - Appearance (#43, selftest `appearance`): `Window.setTheme` sets the NSWindow
   appearance, which is also what WKWebView's `prefers-color-scheme` reports, so a
   pinned dark/light theme pins the query too and a system theme must call
@@ -473,6 +484,8 @@ src-tauri/
    `~/Library/Application Support/com.bandcampplayer.app/library-dev.db` (debug
    builds never open `library.db`). It starts empty; `npm run dev:copy-library`
    seeds it from the real library when a test needs real data. Extend `web/src/selftest.ts` when adding features that touch Tauri plugins.
+   `VITE_SELFTEST_ONLY=window,dropLink` runs only the named blocks (the rest report
+   skipped): a window or config change can be checked without any Bandcamp requests.
    Every block runs through `block()` with its own timeout; while it runs,
    `settings.key='selftest_progress'` names the block and step. If that row stops
    moving, the run is stuck there. A timed-out block reports `{status: "timeout", step}`

@@ -282,6 +282,11 @@ async fn selftest_window(app: tauri::AppHandle, action: String, ms: Option<u64>)
     if !cfg!(debug_assertions) {
         return Err("selftest only".into());
     }
+    if action == "drag-drop" {
+        // The effective config of the main window: false hands drags to WebKit (#92).
+        let main = app.config().app.windows.iter().find(|w| w.label == "main").ok_or("no main window config")?;
+        return Ok(serde_json::json!({ "dragDropEnabled": main.drag_drop_enabled }));
+    }
     let generation = GUARD_GEN.fetch_add(1, Ordering::SeqCst) + 1;
     let win = app.get_webview_window("main").ok_or("no main window")?;
     let mut awake = serde_json::Value::Null;
@@ -541,6 +546,15 @@ mod tests {
             assert!(f.starts_with(&format!("{:04}_", i + 1)), "{f}");
         }
         assert!(ms.last().unwrap().sql.contains("smart_playlists"));
+    }
+
+    /// The native file-drop handler swallows every drag before WebKit sees it, link text
+    /// included; the main window turns it off so a dropped Bandcamp link reaches the page (#92).
+    #[test]
+    fn main_window_leaves_drops_to_the_webview() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let main = conf["app"]["windows"].as_array().unwrap().iter().find(|w| w["label"] == "main").unwrap();
+        assert_eq!(main["dragDropEnabled"], serde_json::Value::Bool(false));
     }
 
     #[test]

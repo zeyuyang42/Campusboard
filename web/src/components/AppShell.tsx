@@ -7,6 +7,7 @@ import { Ambient } from "./Ambient";
 import { MenuHost } from "./MenuHost";
 import { CommandPalette } from "./CommandPalette";
 import { NowPlaying } from "./NowPlaying";
+import { DropLink } from "./DropLink";
 import { usePlayer } from "../player/store";
 import { useUi } from "../ui/store";
 import { isTauri } from "../lib/env";
@@ -57,6 +58,7 @@ export function AppShell() {
       </div>
       <MenuHost />
       <CommandPalette />
+      <DropLink />
     </>
   );
 }

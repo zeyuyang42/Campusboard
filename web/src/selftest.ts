@@ -78,6 +78,11 @@ const CUSTOM_ALBUM = `${CUSTOM_ARTIST}/album/snowmelt-ep`;
  * http plugin, imports one purchase and deletes it again unless it was already in the library.
  */
 const SELFTEST_FAN = import.meta.env.VITE_SELFTEST_FAN as string | undefined;
+/**
+ * VITE_SELFTEST_ONLY=window,dropLink runs just the named blocks (the others report as skipped
+ * and pass), e.g. to check a window config change without the Bandcamp requests of a full run.
+ */
+const ONLY = String(import.meta.env.VITE_SELFTEST_ONLY ?? "").split(",").map((b) => b.trim()).filter(Boolean);
 
 /**
  * The Library filter's escaped LIKE and the release-date sort through the real SQL plugin,
@@ -490,6 +495,30 @@ async function windowCheck(s: Step) {
   const result = { maximized, minimized, hidden: visibleWhileHidden === false, visibleAgain, focused, errors };
   // `focused` is informational: a background terminal can keep focus from the window.
   return { ok: Object.keys(errors).length === 0 && maximized === true && minimized === true && result.hidden && visibleAgain === true, ...result };
+}
+
+/**
+ * Dropping a link on the window (#92): the running main window must have Tauri's native
+ * file-drop handler off (else WebKit never sees a drag), and the page's listener must answer
+ * a drop. The synthetic drop carries a non-Bandcamp URL, so it only shows the quiet note: no
+ * import, no network, and the page must not navigate.
+ */
+async function dropLinkCheck() {
+  const { dragDropEnabled } = await invoke<{ dragDropEnabled: boolean }>("selftest_window", { action: "drag-drop" });
+  const href = location.href;
+  let note: string | null = null;
+  let synthetic: string | boolean = "skipped (no DataTransfer constructor)";
+  if (typeof DataTransfer === "function" && typeof DragEvent === "function") {
+    const dt = new DataTransfer();
+    dt.setData("text/uri-list", "https://example.com/not-bandcamp");
+    const ev = new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt });
+    document.body.dispatchEvent(ev);
+    await sleep(300);
+    note = document.querySelector(".drop-note")?.textContent ?? null;
+    synthetic = ev.defaultPrevented && note === "Not a Bandcamp link";
+  }
+  const stayed = location.href === href;
+  return { ok: dragDropEnabled === false && synthetic !== false && stayed, dragDropEnabled, synthetic, note, stayed };
 }
 
 /**
@@ -968,6 +997,7 @@ export async function runSelfTest() {
    * as `{ ok: false, error }`.
    */
   const block = async <T>(name: string, fn: (s: Step) => Promise<T>, timeoutMs = 60_000): Promise<T | Record<string, unknown>> => {
+    if (ONLY.length && !ONLY.includes(name)) return { ok: true, status: "skipped (VITE_SELFTEST_ONLY)" };
     let step = "start";
     let abandoned = false;
     const s: Step = (label) => {
@@ -1177,6 +1207,7 @@ export async function runSelfTest() {
     // Window permissions the menu bar and close-to-hide rely on.
     out.window = await block("window", (s) => windowCheck(s), 30_000);
     out.appearance = await block("appearance", (s) => appearanceCheck(s), 15_000);
+    out.dropLink = await block("dropLink", () => dropLinkCheck(), 10_000);
     // startDragging needs a live mouse-down to do anything, but a missing
     // capability rejects the call outright; record what it says.
     out.dragPermission = await block("dragPermission", () => getCurrentWindow().startDragging().then(() => "ok", (e) => String(e)), 10_000);
@@ -1189,12 +1220,12 @@ export async function runSelfTest() {
     // Overall ok needs every block that reports its own `ok` to pass (a timed-out or thrown
     // block reports ok: false). The listed blocks must be present as objects: one caught and
     // stored as a string threw.
-    const required = ["import", "libraryFilter", "albumNotes", "resume", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "offline", "syncGuards", "newReleases", "preorder", "libraryFile", "fsScope", "window", "appearance"];
+    const required = ["import", "libraryFilter", "albumNotes", "resume", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "offline", "syncGuards", "newReleases", "preorder", "libraryFile", "fsScope", "window", "appearance", "dropLink"];
     const failed = Object.entries(out)
       .filter(([k, v]) => required.includes(k) || hasOk(v))
       .filter(([, v]) => (v as { ok?: unknown } | null)?.ok !== true)
       .map(([k]) => k);
-    if (!failed.includes("denyScope") && !(out.denyScope as { allRejected?: boolean }).allRejected) failed.push("denyScope");
+    if (!failed.includes("denyScope") && !(ONLY.length && !ONLY.includes("denyScope")) && !(out.denyScope as { allRejected?: boolean }).allRejected) failed.push("denyScope");
     out.failedBlocks = failed;
     out.ok = failed.length === 0;
   } catch (e) {

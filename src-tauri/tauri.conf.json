@@ -22,7 +22,8 @@
         "hiddenTitle": true,
         "trafficLightPosition": { "x": 16, "y": 18 },
         "center": true,
-        "backgroundColor": "#23262D"
+        "backgroundColor": "#23262D",
+        "dragDropEnabled": false
       }
     ],
     "security": {
