@@ -4,7 +4,8 @@ import { friendlyError } from "../lib/errors";
 import { CROSSFADE_MAX_SEC, PRESETS, parseThemeJson, type Theme } from "@bc/core";
 import { usePlayer } from "../player/store";
 import { useTheme } from "../theme/store";
-import { appInfo, pickBackgroundImage, pickTextFile, revealDataDir, saveTextFile } from "../lib/files";
+import { appVersion, pickBackgroundImage, pickTextFile, saveTextFile } from "../lib/files";
+import { exportLibraryFile } from "../lib/libraryFile";
 import { isTauri } from "../lib/env";
 import { AccountSettings } from "../components/AccountSettings";
 import { LibrarySettings } from "../components/LibrarySettings";
@@ -30,8 +31,8 @@ export function SettingsPage() {
   // Following the system, a preset applies its side for the current appearance: show that one.
   const swatch = (p: Theme) => (theme.mode === "system" ? (resolved.mode === "dark" ? p.paletteDark : p.paletteLight) : undefined) ?? p.palette;
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
-  const [info, setInfo] = useState<{ version: string; dataDir: string | null } | null>(null);
-  useEffect(() => { void appInfo().then(setInfo); }, []);
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => { void appVersion().then(setVersion); }, []);
   useEffect(() => { if (!notice) return; const t = setTimeout(() => setNotice(null), 4000); return () => clearTimeout(t); }, [notice]);
 
   const exportTheme = async () => {
@@ -188,10 +189,36 @@ export function SettingsPage() {
 
       <section>
         <h2>About</h2>
-        <p className="muted">Version {info?.version ?? "…"}{info?.dataDir ? <> · library stored in <code>{info.dataDir}</code></> : null}</p>
-        {isTauri && <button className="btn" onClick={() => void revealDataDir()}>Open data folder</button>}
+        <p className="muted">Version {version ?? "…"}</p>
+        <AboutExport />
       </section>
     </div>
+  );
+}
+
+/**
+ * Settings → About: save the library as a file wherever the user picks. Replaces "Open data
+ * folder", whose openPath was refused (opener:default has no allow-open-path) and which sent
+ * people into Application Support. The export carries listening history (Library has the option).
+ */
+function AboutExport() {
+  const [state, setState] = useState<{ kind: "busy" | "ok" | "error"; text?: string } | null>(null);
+  const run = async () => {
+    setState({ kind: "busy" });
+    try {
+      setState(await exportLibraryFile({ history: true }) ? { kind: "ok", text: "Library exported." } : null);
+    } catch (e) {
+      setState({ kind: "error", text: `Couldn't export the library. ${friendlyError(e, e instanceof Error && e.message ? e.message : "")}`.trim() });
+    }
+  };
+  return (
+    <>
+      <p className="muted">Your library is kept inside the app. Export it to keep a copy or to move it to another Mac; <Link to="/settings#library">Library</Link> above can import it again or back up the whole database.</p>
+      <div className="row">
+        <button className="btn" disabled={state?.kind === "busy"} onClick={() => void run()}>{state?.kind === "busy" ? "Exporting…" : "Export library…"}</button>
+      </div>
+      {state?.text && <div className={`notice ${state.kind}`}>{state.text}</div>}
+    </>
   );
 }
 
