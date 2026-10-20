@@ -175,11 +175,21 @@ src-tauri/
   WebKit sees no drag at all: no HTML5 `drop`, not even for in-page drags (the queue
   reorder), and a dragged URL arrives as `tauri://drag-drop` with an empty `paths`
   list (it only reads `NSFilenamesPboardType`). The main window sets
-  `dragDropEnabled: false`, which hands everything to WebKit: a link from Safari or
-  Chrome arrives as `text/uri-list` + `text/plain`, a Finder file as `Files`.
-  `lib/dropLink.ts` reads only the text, always cancels outside drags (so WebKit
-  never opens a dropped file or link in the webview) and never reads files. The
-  mini window keeps the native handler, which swallows drops there.
+  `dragDropEnabled: false`: wry then calls super for everything, so a link from Safari
+  or Chrome arrives as `text/uri-list` + `text/plain`, a Finder file as `Files`. One
+  wry quirk stays: `draggingUpdated` turns WebKit's "none" into Copy, so the cursor
+  shows a copy badge even where the page sets `dropEffect = "none"` (over files); the
+  drop then reaches the page, which ignores it. `lib/dropLink.ts` reads only text and
+  never files. It has no drag state: in-page drags carry `application/x-bc-internal`
+  (set in a capture `dragstart`) and are left to their targets, a drag with `Files`
+  is always cancelled, plain text over a text field is left to WebKit, and every
+  other outside drag is cancelled so WebKit never opens it in the webview. The
+  backstop is `navigation_guard` in lib.rs: the main window may only load the app's
+  own origin (`tauri://localhost`, the dev server in debug builds). External links
+  use the opener plugin, which is not a navigation. The mini window keeps the native
+  handler, which swallows drops there. A dropped custom-domain homepage is not
+  treated as a label (any site's `/` normalizes to `/music`): it needs `/music` or
+  `/releases` in the link, or a host already in the library.
 - Appearance (#43, selftest `appearance`): `Window.setTheme` sets the NSWindow
   appearance, which is also what WKWebView's `prefers-color-scheme` reports, so a
   pinned dark/light theme pins the query too and a system theme must call

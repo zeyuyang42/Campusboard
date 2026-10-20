@@ -501,7 +501,8 @@ async function windowCheck(s: Step) {
  * Dropping a link on the window (#92): the running main window must have Tauri's native
  * file-drop handler off (else WebKit never sees a drag), and the page's listener must answer
  * a drop. The synthetic drop carries a non-Bandcamp URL, so it only shows the quiet note: no
- * import, no network, and the page must not navigate.
+ * import, no network, and the page must not navigate; then a direct load of another origin
+ * must be refused.
  */
 async function dropLinkCheck() {
   const { dragDropEnabled } = await invoke<{ dragDropEnabled: boolean }>("selftest_window", { action: "drag-drop" });
@@ -518,7 +519,14 @@ async function dropLinkCheck() {
     synthetic = ev.defaultPrevented && note === "Not a Bandcamp link";
   }
   const stayed = location.href === href;
-  return { ok: dragDropEnabled === false && synthetic !== false && stayed, dragDropEnabled, synthetic, note, stayed };
+  // The navigation guard (lib.rs): a load of anything but the app's own origin is refused,
+  // the way WebKit would open a dropped link. Not a file:// URL: WebKit refuses that from an
+  // http page by itself, so it would pass without the guard. `.invalid` never resolves, so
+  // even a failing guard fetches nothing (and the page would be gone: the run times out).
+  location.assign("https://bc-selftest.invalid/");
+  await sleep(800);
+  const guarded = location.href === href;
+  return { ok: dragDropEnabled === false && synthetic !== false && stayed && guarded, dragDropEnabled, synthetic, note, stayed, guarded };
 }
 
 /**

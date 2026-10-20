@@ -413,7 +413,7 @@ details.about-wrap summary { cursor: pointer; color: var(--text-muted); margin-t
 .selection-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--dock-h) + 14px); z-index: 25; display: flex; align-items: center; gap: 8px; padding: 8px 10px 8px 14px; border-radius: 999px; background: var(--surface-raised); border: 1px solid var(--line); box-shadow: 0 12px 32px rgba(0,0,0,.35); font-weight: 500; white-space: nowrap; }
 /* Dropping a link on the window (#92): a plain outline while dragging, a quiet note if it isn't Bandcamp. */
 .drop-outline { position: fixed; inset: 4px; z-index: 50; pointer-events: none; border: 2px solid color-mix(in oklab, var(--accent) 70%, transparent); border-radius: var(--radius-lg); }
-.drop-note { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--dock-h) + 14px); z-index: 50; pointer-events: none; padding: 8px 14px; border-radius: 999px; background: var(--surface-raised); border: 1px solid var(--line); color: var(--text-muted); white-space: nowrap; }
+.drop-note { position: fixed; left: 50%; transform: translateX(-50%); top: calc(var(--titlebar) + 14px); z-index: 50; pointer-events: none; width: max-content; max-width: calc(100vw - 32px); padding: 8px 14px; border-radius: var(--radius); background: var(--surface-raised); border: 1px solid var(--line); color: var(--text-muted); text-align: center; overflow-wrap: anywhere; }
 .confirm { display: inline-flex; align-items: center; gap: 8px; }
 .title-edit { font: inherit; letter-spacing: inherit; text-align: left; border-radius: var(--radius-sm); padding: 0 4px; margin: 0 -4px; }
 .title-edit:hover { background: var(--surface-hover); }
