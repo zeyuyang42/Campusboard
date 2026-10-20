@@ -11,6 +11,7 @@ import * as jobs from "./db/repos/jobs.js";
 import * as settings from "./db/repos/settings.js";
 import * as palettes from "./db/repos/palettes.js";
 import * as plays from "./db/repos/plays.js";
+import * as stats from "./db/repos/stats.js";
 import * as albumNotes from "./db/repos/albumNotes.js";
 import * as resumePositions from "./db/repos/resumePositions.js";
 import * as albumRemoval from "./db/repos/albumRemoval.js";
@@ -36,7 +37,7 @@ import {
   backupDatabase, exportLibrary, importLibrary, parseLibraryExport, previewLibraryImport,
   type LibraryExport, type LibraryImportOptions,
 } from "./services/libraryTransfer.js";
-import type { BrowseResult, HistoryCursor, PlayState, SearchResult } from "./types.js";
+import type { BrowseResult, HistoryCursor, PlayState, SearchResult, StatsPeriod } from "./types.js";
 
 export interface CoreDeps {
   db: Db;
@@ -263,6 +264,8 @@ export function createCore(deps: CoreDeps) {
     playCount: () => plays.countPlays(db),
     /** One page of the History view (#86), newest first; pass the previous page's `next`. */
     history: (before: HistoryCursor | null = null, limit = 50) => plays.listPlays(db, before, limit),
+    /** Listening stats (#94): the top 10 artists, albums and tags and the totals for this month, this year or all time. */
+    listeningStats: (period: StatsPeriod) => stats.listeningStats(db, period),
     /** Forget all plays, and plays an imported library still has waiting (so they don't come back). */
     clearHistory: async () => { await importPending.clearPendingPlays(db); return plays.clearPlays(db); },
     savePlayState: (s: PlayState) => playState.setPlayState(db, s),

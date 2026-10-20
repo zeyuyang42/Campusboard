@@ -10,7 +10,7 @@ import { AlbumCard } from "../components/AlbumCard";
 import { BulkBar } from "../components/BulkBar";
 import { SHOW_LABELS, SORT_LABELS } from "../lib/bulkPlay";
 import { TrackList, PlayPauseAll } from "../components/TrackList";
-import { PlayHistory } from "../components/PlayHistory";
+import { HistoryTab } from "../components/ListeningStats";
 
 export function LibraryPage() {
   const { tab = "albums" } = useParams();
@@ -28,7 +28,7 @@ export function LibraryPage() {
       {tab === "artists" && <Artists />}
       {tab === "tracks" && <Tracks />}
       {tab === "tags" && <LibraryTags />}
-      {tab === "history" && <PlayHistory />}
+      {tab === "history" && <HistoryTab />}
     </>
   );
 }

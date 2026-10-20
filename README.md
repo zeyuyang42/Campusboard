@@ -66,6 +66,9 @@ Requires macOS 13.3 or later. Your library lives in
 - **History**: Library → History lists what you played, newest first, under
   Today, Yesterday and earlier dates. Click a row to play the track within its
   album; right-click for the usual track menu. Radio episodes aren't recorded.
+  **Stats** there shows your top 10 artists, albums and tags for this month,
+  this year or all time, with plays and time listened (the full length of each
+  counted track).
 - **Filtered library**: when the filter field, a tag or the **Show** menu narrows the
   Library, a bar above the grid plays, shuffles, queues or adds to a playlist
   every matching album in the current sort order (it asks first above 500 tracks).
