@@ -39,6 +39,11 @@ export function makeFakeCore() {
     setSetting: vi.fn(async (key: string, value: unknown) => { settings.set(key, value); }),
     getArtPalette: vi.fn(async () => null),
     playCount: vi.fn(async () => 0),
+    /** Resume points (#85): queue entry id -> seconds. */
+    resume: new Map<number, number>(),
+    resumePosition: vi.fn(async (id: number) => core.resume.get(id) ?? null),
+    saveResumePosition: vi.fn(async (id: number, sec: number) => { core.resume.set(id, sec); }),
+    clearResumePosition: vi.fn(async (id: number) => { core.resume.delete(id); }),
   };
   return core;
 }

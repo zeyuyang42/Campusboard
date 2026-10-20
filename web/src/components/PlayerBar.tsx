@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { formatSleepLeft, sleepChoiceOf, toggleAction, type SleepChoice } from "@bc/core";
+import { formatResumeAt, formatSleepLeft, sleepChoiceOf, toggleAction, type SleepChoice } from "@bc/core";
 import { usePlayer } from "../player/store";
 import { ArtImage } from "./ArtImage";
 import { NextIcon, PauseIcon, PlayIcon, PrevIcon, QueueIcon, RepeatIcon, RepeatOneIcon, ShuffleIcon, VolumeIcon } from "./Icons";
@@ -55,6 +55,22 @@ function SleepLeft({ radio }: { radio: boolean }) {
   return <span className="sleep-left">{text}</span>;
 }
 
+/**
+ * A long track or episode started where it was left (#85): said quietly, with a way back to
+ * the top. Gone after a few seconds or on any seek (the store clears resumedAt).
+ */
+function ResumeHint() {
+  const at = usePlayer((p) => p.resumedAt);
+  const startOver = usePlayer((p) => p.startOver);
+  if (at == null) return null;
+  return (
+    <div className="resume-hint" role="status">
+      <span>Resumed at {formatResumeAt(at)}</span>
+      <button type="button" onClick={startOver}>Start over</button>
+    </div>
+  );
+}
+
 export function PlayerBar() {
   const s = usePlayer();
   const cur = s.queue[s.index] ?? null;
@@ -107,7 +123,7 @@ export function PlayerBar() {
         <button className={`icon-btn ${s.queueOpen ? "on" : ""}`} title="Queue (Q)" onClick={() => s.setQueueOpen(!s.queueOpen)}><QueueIcon /></button>
         <button className={`icon-btn keep ${nowPlayingOpen ? "on" : ""}`} title="Now playing (N)" disabled={!cur} onClick={() => setNowPlayingOpen(!nowPlayingOpen)}><ExpandIcon /></button>
       </div>
-      {s.error && <div className="error-pill">{s.error}</div>}
+      {s.error ? <div className="error-pill">{s.error}</div> : <ResumeHint />}
     </footer>
   );
 }

@@ -68,6 +68,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0009_album_notes.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 10,
+            description: "resume points for long tracks and radio episodes",
+            sql: include_str!("../migrations/0010_resume_positions.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

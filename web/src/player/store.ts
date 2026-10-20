@@ -4,6 +4,7 @@ import {
   crossfadeGains, elementRole, fadeProgress, fadeSeconds, gaplessDelayMs, parsePlaybackSettings, preloadDue, preloadStale, routeElementEvent,
   standbyUsable, transitionAfter, isQueueRadio, transitionKind, transitionPoint, upcomingIndex,
   sleepGain, sleepScale, sleepSecondsLeft, sleepStopsAtEnd, sleepTimerFor, type SleepChoice, type SleepTimer,
+  resumeEligible, resumePoint,
   CROSSFADE_MIN_SEC, DEFAULT_PLAYBACK, GAPLESS_ARM_SEC, GAPLESS_START_LEAD_MS, PLAYBACK_SETTING_KEY, STANDBY_PRIME_MS, TRANSITION_IDLE,
   type AudioEventType, type CountedPlay, type ElementEventType, type PlaybackSettings, type QueueTrack, type RepeatMode, type Track,
   type TransitionEvent, type TransitionKind, type TransitionState,
@@ -53,6 +54,13 @@ export interface PlayerState {
    * when it can't be asked (no picker API, no metadata yet).
    */
   showAirPlayPicker: () => boolean;
+  /**
+   * A long track or Radio episode started at its saved point (#85): that point, for the
+   * player bar's quiet hint. Cleared after RESUME_HINT_MS, on any seek, or when another loads.
+   */
+  resumedAt: number | null;
+  /** Back to the top of the resumed track, and forget its saved point. */
+  startOver: () => void;
   /** Set the sleep timer, or turn it off ("off"), which restores the volume at once. */
   setSleep: (choice: SleepChoice) => void;
   current: () => QueueTrack | null;
@@ -124,7 +132,7 @@ let retriedFor: number | null = null;
  * A position to apply once the track's metadata arrives (a seek before it had a source, a
  * restore, a retry). Tied to the track it was set for: a load of another track drops it (#75).
  */
-let pendingSeek: { trackId: number; sec: number } | null = null;
+let pendingSeek: { trackId: number; sec: number; resumed?: boolean } | null = null;
 let loadSeq = 0;
 /** The slider position before the Mute button silenced it, for unmuting. */
 let beforeMute: number | null = null;
@@ -162,6 +170,41 @@ function recordPlay(p: CountedPlay) {
     // Counts on track rows, the Library's played sorts and shelf, and Settings' total.
     .then(() => invalidateQueries(["albums", "album", "tracks", "playlist", "history"]))
     .catch(() => undefined); // history is best-effort; playback never depends on it
+}
+
+// ---- resume points (#85; the rules are in core's resume.ts) ----
+/**
+ * The track whose playhead is its resume point: set once its metadata (and any pending seek)
+ * is in, for a long track or a Radio episode; cleared when another load starts. Until then
+ * the element's 0 is not where the listener is, so nothing is saved over the old point.
+ */
+let resumeArmed: number | null = null;
+/** Resume reads and writes run one after another, so a read sees the save made just before it. */
+let resumeWrites: Promise<unknown> = Promise.resolve();
+const RESUME_HINT_MS = 8000;
+let resumeHintTimer: ReturnType<typeof setTimeout> | null = null;
+
+function resumeWrite(f: (c: Awaited<ReturnType<typeof getCore>>) => Promise<unknown>): Promise<unknown> {
+  resumeWrites = resumeWrites.then(async () => f(await getCore())).catch(() => undefined);
+  return resumeWrites;
+}
+/** The saved point of a long track or episode, or null (never rejects). */
+function readResume(track: QueueTrack): Promise<number | null> {
+  if (!resumeEligible(track)) return Promise.resolve(null);
+  return resumeWrites.then(async () => (await getCore()).resumePosition(track.id)).catch(() => null);
+}
+/** Save the armed track's playhead as its point, or forget it near the start or the end. */
+function saveResume(): Promise<unknown> {
+  const id = resumeArmed;
+  if (id == null) return resumeWrites;
+  const el = active();
+  const at = resumePoint(el.currentTime, el.duration);
+  return resumeWrite((c) => (at == null ? c.clearResumePosition(id) : c.saveResumePosition(id, at)));
+}
+function setResumeHint(at: number | null) {
+  if (resumeHintTimer) { clearTimeout(resumeHintTimer); resumeHintTimer = null; }
+  if (at != null) resumeHintTimer = setTimeout(() => { resumeHintTimer = null; usePlayer.setState({ resumedAt: null }); }, RESUME_HINT_MS);
+  if (usePlayer.getState().resumedAt !== at) usePlayer.setState({ resumedAt: at });
 }
 
 /**
@@ -212,12 +255,20 @@ function load(track: QueueTrack, force = false) {
   if (!force || suspectCopy !== track.id) suspectCopy = null;
   if (!force) pickerHold = false; // the next track: the plain transition the hold was for is done
   if (pendingSeek && pendingSeek.trackId !== track.id) pendingSeek = null;
+  // Leaving a long track or episode: where it was is where it resumes (#85). A retry (force)
+  // continues the same playback from its pending seek, so it saves nothing.
+  if (!force) { void saveResume(); setResumeHint(null); }
+  resumeArmed = null;
+  // A pending seek (a seek before the source, the restore at launch, a retry) wins over the saved point.
+  const resumeLookup = force || pendingSeek ? Promise.resolve(null) : readResume(track);
   // A load the listener asked for starts counting failures afresh and wins over a pending skip.
   if (!force && !skippingError) { failStreak = 0; cancelPendingSkip(); }
   void (async () => {
     try {
-      const { url } = await streamUrlFor(track, force);
+      const [{ url }, resumeAt] = await Promise.all([streamUrlFor(track, force), resumeLookup]);
       if (seq !== loadSeq) return; // a newer load superseded this one
+      // Applied with the metadata, like any pending seek; not over a seek made meanwhile.
+      if (resumeAt != null && !pendingSeek) pendingSeek = { trackId: track.id, sec: resumeAt, resumed: true };
       loading = false;
       const el = active();
       swapping = swappingAfter(swapping, { type: "load", paused: el.paused });
@@ -461,6 +512,14 @@ function preload(track: QueueTrack) {
   const seq = ++txSeq;
   void (async () => {
     try {
+      // A track with a saved point (#85) starts there, which the standby (primed and started
+      // at 0) can't do without an audible jump: it loads the plain way at the end instead,
+      // where load() applies the point. Checked first, so no stream URL is fetched for nothing.
+      if ((await readResume(track)) != null) {
+        if (seq === txSeq) dispatch({ type: "failed" });
+        return;
+      }
+      if (seq !== txSeq || tx.phase !== "preloading") return;
       const { url, expires_at } = await streamUrlFor(track);
       if (seq !== txSeq || tx.phase !== "preloading") return;
       dispatch({ type: "resolved", expiresAt: expires_at });
@@ -573,6 +632,11 @@ function start(up: { index: number; track: QueueTrack }, fadeSec: number, kind: 
   swapping = false;
   retriedFor = null;
   pendingSeek = null;
+  // The previous track played to its end (or into its last seconds): nothing to resume. The
+  // next one starts at 0 (one with a saved point is never preloaded) and is armed already.
+  if (resumeArmed != null) { const id = resumeArmed; void resumeWrite((c) => c.clearResumePosition(id)); }
+  resumeArmed = resumeEligible(up.track, next.duration) ? up.track.id : null;
+  setResumeHint(null);
   next.volume = fadeSec > 0 ? 0 : sleepGain(s.volume, sleepFade);
   next.muted = baseMuted[audioEls.indexOf(next)]; // muted since priming; audible from here
   // From here the play counter, the queue index, the position and Now Playing follow `next`.
@@ -666,6 +730,12 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   airplayAvailable: false,
   airplayActive: false,
   airplayReady: false,
+  resumedAt: null,
+  startOver: () => {
+    const cur = get().current();
+    get().seek(0); // hides the hint
+    if (cur && resumeEligible(cur)) void resumeWrite((c) => c.clearResumePosition(cur.id));
+  },
   showAirPlayPicker: () => {
     const el = active() as AirPlayElement;
     // macOS WebKit ignores the call before metadata (MediaElementSession::showPlaybackTargetPicker).
@@ -796,6 +866,7 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     if (tx.phase === "fading") cancelTransition();
     if (armTimer) { clearTimeout(armTimer); armTimer = null; }
     plays.seeked();
+    setResumeHint(null); // any seek answers the "Resumed at" hint
     const el = active();
     if (Number.isFinite(el.duration)) el.currentTime = Math.max(0, Math.min(sec, el.duration));
     else { const cur = get().current(); pendingSeek = cur ? { trackId: cur.id, sec } : null; }
@@ -952,11 +1023,15 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
   loadedmetadata: (el) => {
     usePlayer.setState({ duration: el.duration, airplayReady: true });
     plays.setDuration(el.duration);
-    if (pendingSeek != null && pendingSeek.trackId === usePlayer.getState().current()?.id) {
+    const cur = usePlayer.getState().current();
+    if (pendingSeek != null && pendingSeek.trackId === cur?.id) {
       plays.seeked();
       el.currentTime = pendingSeek.sec;
+      if (pendingSeek.resumed) setResumeHint(pendingSeek.sec);
       pendingSeek = null;
     }
+    // From here the playhead is the listener's: a long track's is saved as its resume point.
+    resumeArmed = cur && resumeEligible(cur, el.duration) ? cur.id : null;
   },
   durationchange: (el) => {
     usePlayer.setState({ duration: el.duration });
@@ -969,11 +1044,18 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
   // state is read when the event is handled, so a stale queued event can't undo a pause.
   play: () => onAudioEvent("play"),
   playing: () => onAudioEvent("playing"),
-  pause: () => onAudioEvent("pause"),
+  pause: (el) => {
+    // Paused by the listener, the system or the sleep timer: keep the point (#85). The pause
+    // before "ended" is the end, which clears it there.
+    if (!el.ended) void saveResume();
+    onAudioEvent("pause");
+  },
   waiting: () => onAudioEvent("waiting"),
   // Gapless: the standby starts here if the early start didn't happen; otherwise the plain way.
   // The sleep timer stops here (its track's end, or any end during its fade) before anything follows.
   ended: () => {
+    // Finished: a long track or episode starts from the top next time (repeat-one replays it so).
+    if (resumeArmed != null) { const id = resumeArmed; void resumeWrite((c) => c.clearResumePosition(id)); }
     if (usePlayer.getState().sleep && (sleepFade < 1 || sleepStopsHere())) return stopForSleep(true);
     if (!stepTransition(true)) usePlayer.getState().next(true);
   },
@@ -1043,6 +1125,11 @@ export const activeAudio = () => active();
 export const elementPaused = () => active().paused;
 /** The active element's playhead, for the saved play state. */
 export const playbackPosition = () => active().currentTime;
+/**
+ * Save the current long track's or episode's resume point now (#85): persist.ts calls it with
+ * the 5 s position save and when the window closes. Resolves once it is written.
+ */
+export const saveResumePoint = () => saveResume();
 /** The transition machinery's state, for the selftest and the browser-mode measurements. */
 export const transitionInfo = () => ({
   phase: tx.phase, active: activeIdx, transitions: transitions.slice(),
