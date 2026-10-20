@@ -198,8 +198,8 @@ export function SettingsPage() {
 
 /**
  * Settings → About: save the library as a file wherever the user picks. Replaces "Open data
- * folder": macOS privacy protection can refuse opening Application Support, and the app
- * shouldn't send people into it. The export carries listening history (Library has the option).
+ * folder", whose openPath was refused (opener:default has no allow-open-path) and which sent
+ * people into Application Support. The export carries listening history (Library has the option).
  */
 function AboutExport() {
   const [state, setState] = useState<{ kind: "busy" | "ok" | "error"; text?: string } | null>(null);
