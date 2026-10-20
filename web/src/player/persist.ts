@@ -1,6 +1,6 @@
 import { loadPlayState, savePlayPosition, savePlayState } from "../api/queries";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { playbackPosition, usePlayer } from "./store";
+import { playbackPosition, saveResumePoint, usePlayer } from "./store";
 import { gainToPosition, positionToGain, type PlayState } from "@bc/core";
 
 function snapshot(): PlayState {
@@ -45,7 +45,11 @@ export async function initPersistence() {
   // MAX_QUEUE entries) every 5 s. Queue changes go through save() above.
   window.setInterval(() => {
     const s = usePlayer.getState();
-    if (s.status !== "playing" || timer !== null) return;
+    if (s.status !== "playing") return;
+    // A long track's or episode's resume point (#85) follows the same 5 s beat, so a quit
+    // (Cmd+Q, which does not wait for the page) loses at most these seconds.
+    void saveResumePoint().catch(() => undefined);
+    if (timer !== null) return;
     void savePlayPosition(s.queue[s.index]?.id ?? null, playbackPosition() || s.position || 0, s.index).catch(() => undefined);
   }, 5000);
   // Closing the window hides it and playback continues (Cmd+Q quits, as in
@@ -59,6 +63,7 @@ export async function initPersistence() {
       // position saves (which wait while a full save is pending) would stop for good.
       timer = null;
       await savePlayState(snapshot()).catch(() => undefined);
+      await saveResumePoint().catch(() => undefined);
       await win.hide().catch(() => undefined);
     });
   } catch { /* not inside Tauri */ }

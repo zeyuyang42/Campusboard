@@ -17,7 +17,7 @@ import { storeBackgroundImage } from "./lib/files";
 import { backupLibraryDatabase, exportLibraryFile } from "./lib/libraryFile";
 import { miniBridgeInfo } from "./player/miniBridge";
 import { usePalette } from "./ui/palette";
-import { DEFAULT_THEME, MINI_EVENTS, positionToGain, toggleAction, type Track } from "@bc/core";
+import { DEFAULT_THEME, MINI_EVENTS, positionToGain, RESUME_MAX_ROWS, toggleAction, type Track } from "@bc/core";
 import { FAN_ITEMS_ENDPOINT, fanPageUrl, parseFanItemsResponse, parseFanPage, repos, type FanItem } from "@bc/core";
 
 /**
@@ -143,6 +143,30 @@ async function albumNotesCheck(core: Awaited<ReturnType<typeof getCore>>, albumI
     } else {
       await core.db.run("DELETE FROM album_notes WHERE album_id = ?", [albumId]);
     }
+  }
+}
+
+/**
+ * Resume points (#85) through the real SQL plugin: migration 0010's table is there, a point
+ * is written, updated, read back and cleared. The row uses an id no track or show has and
+ * saved_at 0, so it is the oldest: the cap never removes a real row for it (with the table
+ * full, the cap removes the test row itself, which is checked instead).
+ */
+async function resumeCheck(core: Awaited<ReturnType<typeof getCore>>) {
+  const id = -2_000_000_001;
+  try {
+    const migrated = !!(await core.db.get("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'resume_positions'"));
+    const before = await core.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM resume_positions");
+    const full = (before?.n ?? 0) >= RESUME_MAX_ROWS;
+    await repos.setResumePosition(core.db, id, 100, 0);
+    await repos.setResumePosition(core.db, id, 2480.5, 0);
+    const read = await core.resumePosition(id);
+    await core.clearResumePosition(id);
+    const cleared = (await core.resumePosition(id)) === null;
+    const ok = migrated && cleared && (full ? read === null : read === 2480.5);
+    return { ok, migrated, full, read, cleared };
+  } finally {
+    await core.db.run("DELETE FROM resume_positions WHERE item_id = ?", [id]).catch(() => undefined);
   }
 }
 
@@ -990,6 +1014,7 @@ export async function runSelfTest() {
     out.libraryFilter = await block("libraryFilter", () => libraryFilterCheck(core, album));
     out.tags = await block("tags", () => tagsCheck(core, album));
     out.albumNotes = await block("albumNotes", () => albumNotesCheck(core, album?.id));
+    out.resume = await block("resume", () => resumeCheck(core));
     out.history = await block("history", () => historyCheck(core, album));
     out.audio = await block("audio", async (s) => {
       usePlayer.getState().playTracks(playable, 0);
@@ -1146,7 +1171,7 @@ export async function runSelfTest() {
     // Overall ok needs every block that reports its own `ok` to pass (a timed-out or thrown
     // block reports ok: false). The listed blocks must be present as objects: one caught and
     // stored as a string threw.
-    const required = ["import", "libraryFilter", "albumNotes", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "offline", "syncGuards", "newReleases", "preorder", "libraryFile", "fsScope", "window", "appearance"];
+    const required = ["import", "libraryFilter", "albumNotes", "resume", "history", "hiddenPlayback", "mediaSession", "miniPlayer", "transitions", "offline", "syncGuards", "newReleases", "preorder", "libraryFile", "fsScope", "window", "appearance"];
     const failed = Object.entries(out)
       .filter(([k, v]) => required.includes(k) || hasOk(v))
       .filter(([, v]) => (v as { ok?: unknown } | null)?.ok !== true)

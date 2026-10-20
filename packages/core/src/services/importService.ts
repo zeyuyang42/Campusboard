@@ -67,7 +67,7 @@ export async function upsertTralbum(db: Db, p: ParsedTralbum): Promise<number> {
 /**
  * Remove single-track pseudo-albums whose track moved into a real album, artists with nothing
  * left, plays of tracks that are gone, new-release rows of artists that are gone, import
- * bookkeeping of playlists that are gone and notes of albums that are gone (the foreign keys cascade those; this also catches
+ * bookkeeping of playlists that are gone, notes of albums that are gone and resume points of tracks that are gone (the foreign keys cascade those; this also catches
  * deletes made with foreign keys off, e.g. the sqlite3 CLI).
  */
 export async function vacuumOrphans(db: Db): Promise<void> {
@@ -81,6 +81,9 @@ export async function vacuumOrphans(db: Db): Promise<void> {
   // (rare: a single rated before its album was imported).
   await db.run("DELETE FROM album_notes WHERE album_id NOT IN (SELECT id FROM albums)");
   await db.run("DELETE FROM import_pending WHERE playlist_id IS NOT NULL AND playlist_id NOT IN (SELECT id FROM playlists)");
+  // Resume points (#85) have no foreign key (radio episodes use negative ids): a library
+  // track's goes with the track, so a reused id never resumes another track.
+  await db.run("DELETE FROM resume_positions WHERE item_id > 0 AND item_id NOT IN (SELECT id FROM tracks)");
 }
 
 async function updateStreamFields(db: Db, p: ParsedTralbum) {

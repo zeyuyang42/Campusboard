@@ -11,6 +11,7 @@ import * as settings from "./db/repos/settings.js";
 import * as palettes from "./db/repos/palettes.js";
 import * as plays from "./db/repos/plays.js";
 import * as albumNotes from "./db/repos/albumNotes.js";
+import * as resumePositions from "./db/repos/resumePositions.js";
 import { artUrl, extractPalette, type ArtPalette } from "./palette/index.js";
 import { JobRunner, type ImportRequest, type ImportSelectionRequest } from "./services/jobRunner.js";
 import { cachedFetchText } from "./services/pageCache.js";
@@ -213,6 +214,10 @@ export function createCore(deps: CoreDeps) {
     savePlayState: (s: PlayState) => playState.setPlayState(db, s),
     /** Save just the position (the queue as last saved stays). */
     savePlayPosition: (currentTrackId: number | null, positionSec: number, queueIndex: number) => playState.setPlayPosition(db, currentTrackId, positionSec, queueIndex),
+    // resume points (#85), keyed by the queue entry's id (negative for a Radio episode)
+    resumePosition: (itemId: number) => resumePositions.getResumePosition(db, itemId),
+    saveResumePosition: (itemId: number, positionSec: number) => resumePositions.setResumePosition(db, itemId, positionSec),
+    clearResumePosition: (itemId: number) => resumePositions.clearResumePosition(db, itemId),
     // Bandcamp account (the identity cookie is write-only from the UI's side)
     account: () => getAccount(db),
     setAccountUsername: (username: string) => setUsername(db, username),
