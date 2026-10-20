@@ -5,7 +5,7 @@ import { ArtImage } from "./ArtImage";
 import { NextIcon, PauseIcon, PlayIcon, PrevIcon, QueueIcon, RepeatIcon, RepeatOneIcon, ShuffleIcon, VolumeIcon } from "./Icons";
 import { SeekBar } from "./SeekBar";
 import { useUi } from "../ui/store";
-import { ClockIcon, ExpandIcon, MenuIcon, MiniPlayerIcon } from "./Icons";
+import { AirPlayIcon, ClockIcon, ExpandIcon, MenuIcon, MiniPlayerIcon } from "./Icons";
 import { openMenuFromEvent, type MenuItem } from "../ui/menu";
 import { toggleMiniPlayer } from "../player/miniBridge";
 import { useRadioNow } from "../player/radio";
@@ -26,6 +26,24 @@ export function sleepMenu(radio: boolean): MenuItem[] {
     // album" would mean the end of this track: offered only in album order.
     shuffle && chosen !== "album" ? { label: "End of album", disabled: true, hint: "not with shuffle", onSelect: () => undefined } : opt("album", "End of album"),
   ];
+}
+
+/**
+ * AirPlay (#42): shown only while WebKit reports a target nearby (or is playing on one). It
+ * opens the system picker for the element that plays the current track.
+ */
+export function AirPlayButton() {
+  const available = usePlayer((p) => p.airplayAvailable);
+  const wireless = usePlayer((p) => p.airplayActive);
+  const hasTrack = usePlayer((p) => p.queue.length > 0);
+  const show = usePlayer((p) => p.showAirPlayPicker);
+  if (!available) return null;
+  return (
+    <>
+      {wireless && <span className="sleep-left">Playing on AirPlay</span>}
+      <button className={`icon-btn ${wireless ? "on" : ""}`} title="AirPlay" aria-label="AirPlay" disabled={!hasTrack} onClick={() => show()}><AirPlayIcon /></button>
+    </>
+  );
 }
 
 /** What is left on the timer, quietly, next to its button. */
@@ -84,6 +102,7 @@ export function PlayerBar() {
         </div>
         <SleepLeft radio={!!cur?.radio} />
         <button className={`icon-btn ${s.sleep ? "on" : ""}`} title="Sleep timer" aria-label="Sleep timer" aria-haspopup="menu" onClick={(e) => openMenuFromEvent(e, { items: sleepMenu(!!cur?.radio) })}><ClockIcon /></button>
+        <AirPlayButton />
         <button className="icon-btn" title="Mini player (⌘⇧M)" onClick={() => void toggleMiniPlayer().catch(() => undefined)}><MiniPlayerIcon /></button>
         <button className={`icon-btn ${s.queueOpen ? "on" : ""}`} title="Queue (Q)" onClick={() => s.setQueueOpen(!s.queueOpen)}><QueueIcon /></button>
         <button className={`icon-btn keep ${nowPlayingOpen ? "on" : ""}`} title="Now playing (N)" disabled={!cur} onClick={() => setNowPlayingOpen(!nowPlayingOpen)}><ExpandIcon /></button>

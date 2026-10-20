@@ -590,6 +590,20 @@ async function mediaSessionCheck(s: Step) {
 }
 
 /**
+ * AirPlay (#42): whether this WKWebView exposes WebKit's picker API on the audio elements
+ * the store plays with, and what the store has heard about nearby targets. It only looks:
+ * the picker is never opened (it is a system popover, and needs a user gesture anyway).
+ */
+function airplayCheck() {
+  const el = activeAudio() as HTMLAudioElement & Record<string, unknown>;
+  const picker = typeof el.webkitShowPlaybackTargetPicker === "function";
+  const wirelessProp = "webkitCurrentPlaybackTargetIsWireless" in el;
+  const availabilityEvent = "WebKitPlaybackTargetAvailabilityEvent" in window;
+  const { airplayAvailable, airplayActive } = usePlayer.getState();
+  return { ok: picker && wirelessProp && availabilityEvent, picker, wirelessProp, availabilityEvent, remotePlayback: "remote" in el, airplayAvailable, airplayActive, inDocument: el.isConnected };
+}
+
+/**
  * Mini player (web/src/mini/): open the window, check it received and rendered the state,
  * then, with the main window hidden (what closing it does), have it press its own buttons
  * and seek, and check the store followed. The mini window also reports whether its window
@@ -984,6 +998,7 @@ export async function runSelfTest() {
       return { visibility: document.visibilityState, currentTime: activeAudio().currentTime, paused: activeAudio().paused, readyState: activeAudio().readyState, error: activeAudio().error?.code ?? null, src: activeAudio().src.slice(0, 48), storeStatus: usePlayer.getState().status, storeError: usePlayer.getState().error };
     }, 30_000);
     out.mediaSession = await block("mediaSession", (s) => mediaSessionCheck(s), 30_000);
+    out.airplay = await block("airplay", async () => airplayCheck(), 5_000);
     out.miniPlayer = await block("miniPlayer", (s) => miniPlayerCheck(s), 90_000);
     out.audioAfterNext = await block("next", async (s) => {
       usePlayer.getState().next();

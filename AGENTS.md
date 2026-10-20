@@ -202,6 +202,28 @@ src-tauri/
   crossfade tail is not counted toward listening history: the PlayCounter moves to
   the new track when the fade starts. After priming the standby stays muted until
   it takes over, so a paused standby is never Now Playing eligible.
+- AirPlay (#42, researched in WebKit source 2026-10-20, at the macOS 13.3 tag
+  `WebKit-7615.1.26.11.1` and `main`; not yet tried against a real speaker) uses
+  WebKit's own picker, no native code. `ENABLE_WIRELESS_PLAYBACK_TARGET` is on for
+  every Cocoa platform; `webkitShowPlaybackTargetPicker()`,
+  `webkitCurrentPlaybackTargetIsWireless` and the
+  `webkitplaybacktargetavailabilitychanged` event are exposed to page content
+  (unconditionally at the tag; behind `WirelessPlaybackTargetAPIEnabled`, default
+  true except visionOS, on main). `WKWebViewConfiguration.allowsAirPlayForMediaPlayback`
+  is macOS 10.11+ and defaults to YES; wry 0.57 never changes it, so nothing is set
+  from Rust. The picker needs a user gesture (the button click) and, on macOS,
+  `readyState >= HAVE_METADATA`. A detached `new Audio()` registers with the
+  document in its constructor, so it gets availability events and the picker; the
+  hidden-element check on route monitoring is iOS-only. WebKit routes one element
+  per page to the target, the one that opened the picker
+  (`WebMediaSessionManager::configurePlaybackTargetClients`), and the element keeps
+  the route across new sources (`MediaElementSession::mediaEngineUpdated`). So while
+  `airplayActive` (and for 60 s after the picker opens) the store skips gapless and
+  crossfade and loads the next track into the same element; the saved settings are
+  untouched. Control Center's Sound menu routes the whole app instead, with gapless
+  intact. The selftest's `airplay` block reports whether the API exists and never
+  opens the picker (2026-10-20, macOS 15.7: picker, wireless property, the
+  availability event and `remote` all present on the detached elements).
 - Now Playing and media keys (researched 2026-10-18) come from WebKit's Media
   Session, with no native code. `MediaSessionEnabled` defaults to true for
   WKWebView since WebKit 612 (Safari 15) and is still on; no private preference

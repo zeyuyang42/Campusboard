@@ -41,6 +41,12 @@ export interface PlayerState {
   sleep: SleepTimer | null;
   /** Whole seconds left on a minutes timer, for the player bar (null otherwise). */
   sleepLeft: number | null;
+  /** AirPlay (#42): WebKit reports a wireless target nearby (only in a WebKit with the picker API). */
+  airplayAvailable: boolean;
+  /** The active element plays on an AirPlay target; transitions then stay on that one element. */
+  airplayActive: boolean;
+  /** Open WebKit's AirPlay picker for the active element; false if it can't (no API, nothing loaded). */
+  showAirPlayPicker: () => boolean;
   /** Set the sleep timer, or turn it off ("off"), which restores the volume at once. */
   setSleep: (choice: SleepChoice) => void;
   current: () => QueueTrack | null;
@@ -335,6 +341,32 @@ const finitePositive = (x: number) => Number.isFinite(x) && x > 0;
 const dispatch = (e: TransitionEvent) => { tx = transitionAfter(tx, e); };
 const settingsOf = (s: PlayerState): PlaybackSettings => ({ gapless: s.gapless, crossfadeSec: s.crossfadeSec });
 
+// ---- AirPlay (#42) ----
+/** The WebKit-only parts of HTMLMediaElement the AirPlay button uses (not in lib.dom). */
+type AirPlayElement = HTMLAudioElement & { webkitShowPlaybackTargetPicker?: () => void; webkitCurrentPlaybackTargetIsWireless?: boolean };
+/**
+ * WebKit plays to an AirPlay target from one element only: the one that opened the picker
+ * (WebMediaSessionManager::configurePlaybackTargetClients). A gapless or crossfade handover
+ * to the other element would bring the music back to the Mac's speakers, so while routed
+ * (or while the picker may still be open) the next track loads into the same element, the
+ * plain way. The element keeps its route across sources (MediaElementSession::mediaEngineUpdated).
+ */
+export const AIRPLAY_PICKER_HOLD_MS = 60_000;
+let pickerAt = -Infinity;
+const singleElement = () => usePlayer.getState().airplayActive || Date.now() - pickerAt < AIRPLAY_PICKER_HOLD_MS;
+const PLAIN: PlaybackSettings = { gapless: false, crossfadeSec: 0 };
+/** Each element's last webkitplaybacktargetavailabilitychanged report. */
+const targetsNearby = [false, false];
+function airplayChanged() {
+  const wireless = !!(active() as AirPlayElement).webkitCurrentPlaybackTargetIsWireless;
+  const patch = { airplayAvailable: targetsNearby.some(Boolean) || wireless, airplayActive: wireless };
+  const s = usePlayer.getState();
+  if (patch.airplayAvailable !== s.airplayAvailable || patch.airplayActive !== s.airplayActive) usePlayer.setState(patch);
+  if (wireless) pickerAt = -Infinity;
+  // Routed: a preload made before would start on the other element, off AirPlay.
+  if (wireless && (tx.phase === "preloading" || tx.phase === "ready" || tx.phase === "failed")) cancelTransition();
+}
+
 function clearTimers() {
   if (armTimer) clearTimeout(armTimer);
   if (fadeTimer) clearInterval(fadeTimer);
@@ -406,7 +438,7 @@ function plan() {
   if (!cur || !up || !finitePositive(duration)) return null;
   // The sleep timer stops at this track's end, or is fading out: nothing starts after it.
   if (s.sleep && (sleepFade < 1 || sleepStopsAtEnd(s.sleep, cur, up.track, up.index <= s.index))) return null;
-  const settings = settingsOf(s);
+  const settings = singleElement() ? PLAIN : settingsOf(s);
   const kind = transitionKind(cur, up.track, settings, duration);
   const fadeSec = kind === "crossfade" ? fadeSeconds(settings, duration, up.track.duration) : 0;
   return { up, kind, fadeSec, point: transitionPoint(kind, duration, fadeSec) };
@@ -524,6 +556,7 @@ function start(up: { index: number; track: QueueTrack }, fadeSec: number, kind: 
   if (transitions.length > 10) transitions.shift();
   dispatch({ type: "start", fadeStart: prev.currentTime, fadeSec });
   activeIdx = 1 - activeIdx;
+  airplayChanged(); // the route belongs to an element: report the new active one's
   preloadUrl = null;
   swapping = false;
   retriedFor = null;
@@ -618,6 +651,20 @@ export const usePlayer = create<PlayerState>((set, get) => ({
   crossfadeSec: DEFAULT_PLAYBACK.crossfadeSec,
   sleep: null,
   sleepLeft: null,
+  airplayAvailable: false,
+  airplayActive: false,
+  showAirPlayPicker: () => {
+    const el = active() as AirPlayElement;
+    // macOS WebKit ignores the call before metadata (MediaElementSession::showPlaybackTargetPicker).
+    if (typeof el.webkitShowPlaybackTargetPicker !== "function" || el.readyState < HTMLMediaElement.HAVE_METADATA) return false;
+    // The picker routes the element that asked for it, and only that one (WebMediaSessionManager).
+    // A preload would hand the next track to the other element, so it is dropped (a fade in
+    // progress finishes on its own), and none starts while the picker may still be open.
+    if (tx.phase === "preloading" || tx.phase === "ready" || tx.phase === "failed") cancelTransition();
+    pickerAt = Date.now();
+    el.webkitShowPlaybackTargetPicker();
+    return true;
+  },
 
   setSleep: (choice) => {
     const t = sleepTimerFor(choice, Date.now());
@@ -959,6 +1006,16 @@ audioEls.forEach((el, i) => {
       }
     });
   }
+});
+
+// AirPlay availability and route (#42): only where WebKit has the picker API (not in Chromium).
+audioEls.forEach((el, i) => {
+  if (typeof (el as AirPlayElement).webkitShowPlaybackTargetPicker !== "function") return;
+  el.addEventListener("webkitplaybacktargetavailabilitychanged", (e) => {
+    targetsNearby[i] = (e as Event & { availability?: string }).availability === "available";
+    airplayChanged();
+  });
+  el.addEventListener("webkitcurrentplaybacktargetiswirelesschanged", airplayChanged);
 });
 
 /** The element playing the current track (selftest, persistence; only this module changes it). */

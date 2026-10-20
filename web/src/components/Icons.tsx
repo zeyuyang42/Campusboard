@@ -21,6 +21,8 @@ export const ExpandIcon = ({ size }: { size?: number } = {}) => <I size={size} d
 export const SavedIcon = ({ size = 13 }: Sized) => <I size={size} d="M12 2a10 10 0 100 20 10 10 0 000-20zm-1.6 14.2L6.2 12l1.4-1.4 2.8 2.8 6-6 1.4 1.4-7.4 7.4z" />;
 /** The sleep timer (#70). */
 export const ClockIcon = () => <I d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z" />;
+/** AirPlay audio: rings above a triangle (#42). */
+export const AirPlayIcon = () => <I d="M6 22h12l-6-6-6 6zM12 2C6.48 2 2 6.48 2 12c0 2.73 1.1 5.21 2.88 7.02l1.42-1.42A7.96 7.96 0 0 1 4 12c0-4.42 3.58-8 8-8s8 3.58 8 8c0 2.2-.89 4.2-2.32 5.62l1.42 1.42A9.96 9.96 0 0 0 22 12c0-5.52-4.48-10-10-10zm0 4c-3.31 0-6 2.69-6 6 0 1.66.67 3.16 1.76 4.24l1.42-1.42A3.98 3.98 0 0 1 8 12c0-2.21 1.79-4 4-4s4 1.79 4 4c0 1.1-.45 2.1-1.18 2.82l1.42 1.42A5.98 5.98 0 0 0 18 12c0-3.31-2.69-6-6-6z" />;
 export const MenuIcon = () => <I d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z" />;
 type Sized = { size?: number };
 export const MiniPlayerIcon = ({ size }: Sized) => <I size={size} d="M19 11h-8v6h8v-6zm4 8V4.98C23 3.88 22.1 3 21 3H3c-1.1 0-2 .88-2 1.98V19c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 .02H3V4.97h18v14.05z" />;

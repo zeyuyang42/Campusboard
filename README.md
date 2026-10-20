@@ -84,6 +84,11 @@ Requires macOS 13.3 or later. Your library lives in
   background and starts as the current one ends (on by default). Crossfade
   (off by default, up to 10 s) blends tracks from different albums; tracks of
   the same album always play back to back as recorded.
+- **AirPlay**: when an AirPlay speaker or Apple TV is nearby, an AirPlay
+  button appears in the player bar; pick a speaker and the bar says "Playing on
+  AirPlay". Tracks then play back to back without gapless or crossfade (WebKit
+  sends one audio element to the speaker). Control Center → Sound routes the
+  whole Mac instead and keeps gapless.
 - **Offline listening**: on an album page, **Make available offline** saves the
   album's streams (the same 128 kbps the player uses) one track at a time at
   the usual polite pace; downloaded tracks play without a connection, and
