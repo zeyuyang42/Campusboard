@@ -282,6 +282,11 @@ async fn selftest_window(app: tauri::AppHandle, action: String, ms: Option<u64>)
     if !cfg!(debug_assertions) {
         return Err("selftest only".into());
     }
+    if action == "drag-drop" {
+        // The effective config of the main window: false hands drags to WebKit (#92).
+        let main = app.config().app.windows.iter().find(|w| w.label == "main").ok_or("no main window config")?;
+        return Ok(serde_json::json!({ "dragDropEnabled": main.drag_drop_enabled }));
+    }
     let generation = GUARD_GEN.fetch_add(1, Ordering::SeqCst) + 1;
     let win = app.get_webview_window("main").ok_or("no main window")?;
     let mut awake = serde_json::Value::Null;
@@ -458,6 +463,35 @@ fn startup_failed(err: &tauri::Error) -> ! {
     std::process::exit(failure.exit_code());
 }
 
+/// Whether the main webview may load `url`: only the app's own pages (`tauri://localhost`,
+/// `http://tauri.localhost`, or the dev server in debug builds). A backstop for #92: a file or
+/// link that WebKit would otherwise open in the window can never replace the app (and drop
+/// the player state). External links go through the opener plugin, never navigation.
+fn is_app_url(url: &tauri::Url, dev_url: Option<&tauri::Url>) -> bool {
+    match url.scheme() {
+        "tauri" => url.host_str() == Some("localhost"),
+        "http" | "https" => url.host_str() == Some("tauri.localhost") || dev_url.is_some_and(|d| d.origin() == url.origin()),
+        _ => false,
+    }
+}
+
+/// Applies `is_app_url` to the main window; the mini window loads only its own page anyway.
+fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("navigation-guard")
+        .on_navigation(|webview, url| {
+            if webview.label() != "main" {
+                return true;
+            }
+            let dev = if cfg!(debug_assertions) { webview.config().build.dev_url.clone() } else { None };
+            let ok = is_app_url(url, dev.as_ref());
+            if !ok {
+                eprintln!("blocked navigation of the main window to a {} URL", url.scheme());
+            }
+            ok
+        })
+        .build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db = db_url();
@@ -481,6 +515,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(navigation_guard())
         // Remember size and position. VISIBLE is excluded on purpose: closing
         // the window hides it, and restoring "hidden" would launch an invisible app.
         .plugin(
@@ -541,6 +576,37 @@ mod tests {
             assert!(f.starts_with(&format!("{:04}_", i + 1)), "{f}");
         }
         assert!(ms.last().unwrap().sql.contains("smart_playlists"));
+    }
+
+    /// The native file-drop handler swallows every drag before WebKit sees it, link text
+    /// included; the main window turns it off so a dropped Bandcamp link reaches the page (#92).
+    #[test]
+    fn main_window_leaves_drops_to_the_webview() {
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let main = conf["app"]["windows"].as_array().unwrap().iter().find(|w| w["label"] == "main").unwrap();
+        assert_eq!(main["dragDropEnabled"], serde_json::Value::Bool(false));
+    }
+
+    #[test]
+    fn main_window_navigates_only_to_app_pages() {
+        let u = |s: &str| tauri::Url::parse(s).unwrap();
+        let dev = u("http://localhost:5173");
+        for ok in ["tauri://localhost", "tauri://localhost/library", "http://tauri.localhost/album/3"] {
+            assert!(is_app_url(&u(ok), None), "{ok}");
+        }
+        assert!(is_app_url(&u("http://localhost:5173/import?x=1"), Some(&dev)));
+        assert!(!is_app_url(&u("http://localhost:5173/"), None), "dev server only in debug builds");
+        for bad in [
+            "file:///Users/me/Desktop/song.mp3",
+            "https://artist.bandcamp.com/album/x",
+            "http://localhost:5174/",
+            "https://localhost:5173/",
+            "tauri://evil.example",
+            "about:blank",
+            "data:text/html,hi",
+        ] {
+            assert!(!is_app_url(&u(bad), Some(&dev)), "{bad}");
+        }
     }
 
     #[test]
