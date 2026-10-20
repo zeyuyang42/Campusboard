@@ -1,4 +1,5 @@
 mod backup;
+mod geometry;
 mod menu;
 mod mini;
 mod tray;
@@ -8,7 +9,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::Manager;
 
 use tauri_plugin_sql::{Migration, MigrationKind};
-use tauri_plugin_window_state::StateFlags;
 
 /// Database migrations. Each file must be safe to re-run (IF NOT EXISTS) so a
 /// library copied from the old server build can be adopted as-is.
@@ -516,13 +516,21 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(navigation_guard())
-        // Remember size and position. VISIBLE is excluded on purpose: closing
-        // the window hides it, and restoring "hidden" would launch an invisible app.
-        .plugin(
-            tauri_plugin_window_state::Builder::default()
-                .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
-                .build(),
-        )
+        // Size and position are kept by geometry.rs: noted on every move and resize, written
+        // when a window closes (hides) and at quit.
+        .on_window_event(|window, event| {
+            let (Some(w), Some(geo)) = (window.get_webview_window(window.label()), window.try_state::<geometry::Geometry>()) else {
+                return;
+            };
+            match event {
+                tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => geo.record(&w),
+                tauri::WindowEvent::CloseRequested { .. } => {
+                    geo.record(&w);
+                    geo.save();
+                }
+                _ => {}
+            }
+        })
         .menu(|handle| menu::build(handle))
         .on_menu_event(|app, event| menu::on_event(app, event.id().as_ref()))
         .setup(|app| {
@@ -532,6 +540,15 @@ pub fn run() {
             }
             let offline = setup_offline_dir(app);
             app.manage(OfflineDir(offline));
+            // The main window is created hidden (tauri.conf.json) so it is sized and placed
+            // before anyone sees it.
+            let geo = geometry::Geometry::load(app);
+            if let Some(main) = app.get_webview_window("main") {
+                geo.restore(&main, &geometry::MAIN);
+                let _ = main.show();
+                let _ = main.set_focus();
+            }
+            app.manage(geo);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![library_db_url, offline_dir, backup_library, selftest_take_backup, selftest_file, selftest_window, selftest_sleep, mini::toggle_mini_player, menu::selftest_menu, tray::set_menu_bar])
@@ -539,6 +556,14 @@ pub fn run() {
         .unwrap_or_else(|e| startup_failed(&e));
 
     app.run(|app, event| {
+        if let tauri::RunEvent::Exit = event {
+            if let Some(geo) = app.try_state::<geometry::Geometry>() {
+                for w in app.webview_windows().values() {
+                    geo.record(w);
+                }
+                geo.save();
+            }
+        }
         // Dock icon clicked while the window is hidden (closed) or minimized.
         #[cfg(target_os = "macos")]
         if let tauri::RunEvent::Reopen { .. } = event {

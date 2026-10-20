@@ -48,7 +48,8 @@ web/src/
   ui/undo.ts + components/UndoNote.tsx   the one "Removed X. Undo" note; lib/removals.ts starts removals with it
   components/, pages/      plain CSS in styles.css driven by tokens on :root
 src-tauri/
-  src/lib.rs               registers sql/http/dialog/fs/opener/notification/window-state plugins, migrations, Dock reopen
+  src/lib.rs               registers sql/http/dialog/fs/opener/notification plugins, migrations, Dock reopen
+  src/geometry.rs          window size + position in points (window-geometry.json; -dev in debug builds)
   src/backup.rs            database backup destination check + atomic copy (Rust-side save dialog)
   src/menu.rs              native menu bar; custom items run `window.__bcMenu(id)` in the main webview (web/src/lib/appMenu.ts)
   src/mini.rs              creates/toggles the `mini` window (Window > Mini Player, dock button command)

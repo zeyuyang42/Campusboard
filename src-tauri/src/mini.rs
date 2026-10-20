@@ -1,8 +1,8 @@
 //! The mini player window (label `mini`, page `mini.html`). It has no audio and no database:
 //! it talks to the main window's player over events (web/src/mini/, web/src/player/miniBridge.ts)
 //! and its capability (capabilities/mini.json) allows little more than that. Created on first
-//! use, then only hidden and shown, so the window-state plugin restores its size and position
-//! when it is created and saves them at exit.
+//! use, then only hidden and shown. geometry.rs puts it back where it was when it is created,
+//! at one of its two layouts.
 
 use tauri::window::Color;
 use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
@@ -12,6 +12,14 @@ pub const LABEL: &str = "mini";
 const SIZE: (f64, f64) = (340.0, 100.0);
 const MIN_SIZE: (f64, f64) = (260.0, 84.0);
 const MAX_SIZE: (f64, f64) = (560.0, 680.0);
+const TALL: (f64, f64) = (300.0, 404.0);
+
+const SIZING: crate::geometry::Sizing = crate::geometry::Sizing {
+    default: SIZE,
+    min: MIN_SIZE,
+    max: MAX_SIZE,
+    snap: &[SIZE, TALL],
+};
 
 #[derive(Debug, PartialEq, Eq)]
 enum Toggle {
@@ -37,6 +45,10 @@ fn toggle_action(exists: bool, visible: bool, minimized: bool, focused: bool, fo
 /// Hide the mini window and tell the main window to stop sending it state. The page's
 /// visibilitychange sends the same `bye`; this one doesn't depend on WebKit reporting it.
 pub fn hide<R: Runtime>(app: &AppHandle<R>, w: &tauri::WebviewWindow<R>) {
+    if let Some(geo) = app.try_state::<crate::geometry::Geometry>() {
+        geo.record(w);
+        geo.save();
+    }
     let _ = w.hide();
     let _ = app.emit_to("main", "mini:command", serde_json::json!({ "type": "bye" }));
 }
@@ -68,7 +80,7 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>, focus_first: bool) -> tauri::Resul
             w.set_focus()
         }
         _ => {
-            // Built hidden: the window-state plugin moves it to its saved place first.
+            // Built hidden, so it is moved to its saved place before it shows.
             let w = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("mini.html".into()))
                 .title("Mini Player")
                 .inner_size(SIZE.0, SIZE.1)
@@ -84,6 +96,9 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>, focus_first: bool) -> tauri::Resul
                 .background_color(Color(0x23, 0x26, 0x2D, 0xFF))
                 .visible(false)
                 .build()?;
+            if let Some(geo) = app.try_state::<crate::geometry::Geometry>() {
+                geo.restore(&w, &SIZING);
+            }
             w.show()?;
             w.set_focus()
         }
@@ -121,7 +136,7 @@ mod tests {
     fn sizes_are_in_bounds() {
         assert!(MIN_SIZE.0 <= SIZE.0 && SIZE.0 <= MAX_SIZE.0);
         assert!(MIN_SIZE.1 <= SIZE.1 && SIZE.1 <= MAX_SIZE.1);
-        // The square-art layout (300 x 404 in window.ts) must fit too.
-        assert!(MIN_SIZE.0 <= 300.0 && 404.0 <= MAX_SIZE.1);
+        // The square-art layout (TALL in window.ts) must fit too.
+        assert!(MIN_SIZE.0 <= TALL.0 && TALL.1 <= MAX_SIZE.1);
     }
 }
