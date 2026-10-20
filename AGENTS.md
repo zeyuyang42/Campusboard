@@ -1,6 +1,11 @@
 # Working in this repo
 
-Personal Bandcamp player, shipped as a Tauri 2 macOS app. Single user, no auth.
+Campusboard: a personal Bandcamp player, shipped as a Tauri 2 macOS app. Single user,
+no auth. It was called Bandcamp Player until 0.6.2 (renamed 2026-10-20); the bundle
+identifier `com.bandcampplayer.app`, the crate/package names and the export format id
+`bandcamp-player-library` keep the old name on purpose: changing the identifier would
+move the library, downloads, WebKit storage and notification permission to a new,
+empty app data folder, and changing the format id would break old exports.
 TypeScript for everything except the thin Rust shell. Read `README.md` for what
 it does; this file is about how to change it safely.
 

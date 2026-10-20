@@ -1,8 +1,8 @@
 [package]
 name = "bandcamp-player"
-version = "0.6.2"
-description = "Personal Bandcamp player"
-authors = ["Bandcamp Player contributors"]
+version = "0.6.3"
+description = "Campusboard, a personal Bandcamp player"
+authors = ["Campusboard contributors"]
 edition = "2021"
 
 [lib]

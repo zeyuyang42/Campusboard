@@ -14,7 +14,7 @@ fn item<R: Runtime>(app: &AppHandle<R>, id: &str, label: &str, accel: Option<&st
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let about = AboutMetadata {
-        name: Some("Bandcamp Player".into()),
+        name: Some("Campusboard".into()),
         version: Some(app.package_info().version.to_string()),
         copyright: Some("Personal use. Buy the music you keep coming back to.".into()),
         ..Default::default()
@@ -23,10 +23,10 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 
     let app_menu = Submenu::with_items(
         app,
-        "Bandcamp Player",
+        "Campusboard",
         true,
         &[
-            &PredefinedMenuItem::about(app, Some("About Bandcamp Player"), Some(about))?,
+            &PredefinedMenuItem::about(app, Some("About Campusboard"), Some(about))?,
             &sep()?,
             &item(app, "settings", "Settings…", Some("CmdOrCtrl+,"))?,
             &sep()?,

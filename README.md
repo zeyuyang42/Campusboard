@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="docs/icon.png" width="128" alt="Bandcamp Player icon">
+  <img src="docs/icon.png" width="128" alt="Campusboard icon">
 </p>
 
-<h1 align="center">Bandcamp Player</h1>
+<h1 align="center">Campusboard</h1>
 
-<p align="center">A personal Mac app for listening to Bandcamp. Paste a link, keep a library, make playlists, and play in a player that takes its colors from the album art.</p>
+<p align="center">A personal Mac app for listening to Bandcamp, named after the climbing training board. Paste a link, keep a library, make playlists, and play in a player that takes its colors from the album art.</p>
 
 <p align="center"><a href="https://github.com/zeyuyang42/bandcamp-player/releases/latest"><b>Download the latest release</b></a> (macOS, Apple Silicon)</p>
 
@@ -20,14 +20,20 @@ personal, non-commercial use. Please buy what you keep coming back to.
 
 ## Install (macOS, Apple Silicon)
 
-1. Download the `.dmg` from the [releases page](https://github.com/zeyuyang42/bandcamp-player/releases/latest), open it, and drag **Bandcamp Player** to Applications.
+1. Download the `.dmg` from the [releases page](https://github.com/zeyuyang42/bandcamp-player/releases/latest), open it, and drag **Campusboard** to Applications.
 2. The app is not signed with an Apple Developer ID, so the first time macOS
    will refuse to open it. Right-click the app, choose **Open**, and confirm.
    If that option is missing, go to System Settings → Privacy & Security and
    click **Open Anyway**. You only need to do this once.
 
 Requires macOS 13.3 or later. Your library lives in
-`~/Library/Application Support/com.bandcampplayer.app/library.db`.
+`~/Library/Application Support/com.bandcampplayer.app/library.db` (the bundle
+identifier is kept from the app's earlier name, Bandcamp Player, so an update
+keeps the same library, downloads and settings).
+
+Coming from Bandcamp Player 0.6.2 or earlier: the app is now called
+**Campusboard.app**. Quit the old app, drag the new one to Applications, then
+delete **Bandcamp Player.app**.
 
 ## Using it
 

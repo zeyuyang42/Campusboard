@@ -423,7 +423,7 @@ impl StartupFailure {
             Self::NewerLibrary => (
                 "Library opened by a newer version",
                 format!(
-                    "Your library was opened by a newer version of Bandcamp Player, so this \
+                    "Your library was opened by a newer version of Campusboard, so this \
                      version can't use it. Install the latest release:\n\n{RELEASES_URL}\n\n({detail})"
                 ),
             ),
@@ -434,7 +434,7 @@ impl StartupFailure {
                      with. Install the latest release:\n\n{RELEASES_URL}\n\n({detail})"
                 ),
             ),
-            Self::Other => ("Bandcamp Player could not start", detail.to_string()),
+            Self::Other => ("Campusboard could not start", detail.to_string()),
         }
     }
 }
