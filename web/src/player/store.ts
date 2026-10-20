@@ -1052,6 +1052,10 @@ const storeHandlers: Partial<Record<ElementEventType, (el: HTMLAudioElement) => 
   loadedmetadata: (el) => {
     usePlayer.setState({ duration: el.duration, airplayReady: true });
     plays.setDuration(el.duration);
+    // A load() still resolving the next track's URL: the element holds the previous track, whose
+    // metadata must not count for the one now current (its duration, its pending seek, arming
+    // it for resume points). That track's own metadata does all three once its source is set.
+    if (loading) return;
     const cur = usePlayer.getState().current();
     if (cur) rememberDuration(cur.id, el.duration);
     if (pendingSeek != null && pendingSeek.trackId === cur?.id) {

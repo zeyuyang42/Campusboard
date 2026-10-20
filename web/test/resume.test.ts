@@ -299,6 +299,54 @@ describe("follow-ups from review", () => {
   });
 });
 
+describe("the previous track's metadata during a load", () => {
+  /** B's stream URL takes a second, so A stays in the element meanwhile. */
+  function slowUrlFor(id: number) {
+    const fast = h.core.getFreshStreamUrl.getMockImplementation()!;
+    h.core.getFreshStreamUrl.mockImplementation((trackId: number, force = false) =>
+      trackId === id ? new Promise((r) => setTimeout(() => r(fast(trackId, force)), 1000)) : fast(trackId, force));
+  }
+
+  it("two quick Nexts with A's metadata between them: B keeps its point", async () => {
+    const [a, b, c] = [long(), long(), track()];
+    h.core.resume.set(b.id, 2480);
+    h.state().playTracks([a, b, c]);
+    await flush();
+    const el = h.active();
+    slowUrlFor(b.id);
+    h.state().next(); // to B: its URL is resolving, the element still holds A
+    el.emit("loadedmetadata", { duration: 5000, readyState: 1, currentTime: 0 });
+    el.emit("timeupdate", { currentTime: 700 });
+    el.emit("pause", { paused: true });
+    await h.saveResumePoint();
+    h.state().jumpTo(1); // B picked again in that window
+    await flush();
+    h.state().next(); // and on to C
+    vi.advanceTimersByTime(1000);
+    await flush();
+    expect(h.state().current()?.id).toBe(c.id);
+    expect(h.core.resume.get(b.id)).toBe(2480);
+    expect(h.core.saveResumePosition).not.toHaveBeenCalledWith(b.id, expect.anything());
+    expect(h.core.clearResumePosition).not.toHaveBeenCalledWith(b.id);
+  });
+
+  it("B gets no duration from A's metadata", async () => {
+    const [a, b, c] = [long(), track({ duration: 300 }), track()];
+    h.state().playTracks([a, b, c]);
+    await flush();
+    const el = h.active();
+    slowUrlFor(b.id);
+    h.state().next();
+    el.emit("loadedmetadata", { duration: 5000, readyState: 1 });
+    h.state().next();
+    vi.advanceTimersByTime(1000);
+    await flush();
+    h.core.getFreshStreamUrl.mockClear();
+    await h.startPlaying([b], 0, 300);
+    expect(h.core.resumePosition).not.toHaveBeenCalledWith(b.id); // still a short track
+  });
+});
+
 describe("with gapless and crossfade (#57)", () => {
   it("a next track with a saved point is not preloaded: it loads the plain way and starts there", async () => {
     h.state().setPlayback({ gapless: true, crossfadeSec: 0 });
