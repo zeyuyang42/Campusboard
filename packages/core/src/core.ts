@@ -5,6 +5,7 @@ import * as artists from "./db/repos/artists.js";
 import * as albums from "./db/repos/albums.js";
 import * as tracks from "./db/repos/tracks.js";
 import * as playlists from "./db/repos/playlists.js";
+import * as smart from "./db/repos/smartPlaylists.js";
 import * as playState from "./db/repos/playState.js";
 import * as jobs from "./db/repos/jobs.js";
 import * as settings from "./db/repos/settings.js";
@@ -151,9 +152,17 @@ export function createCore(deps: CoreDeps) {
     artistReleasesMuted: (artistId: number) => releases.isMuted(db, artistId),
     setArtistReleasesMuted: async (artistId: number, muted: boolean) => { await releases.setMuted(db, artistId, muted); deps.onReleasesChange?.(); },
     // playlists
-    playlists: () => playlists.listPlaylists(db),
+    /** `summaries`: also evaluate smart playlists' counts and covers (the Playlists page). */
+    playlists: (opts: { summaries?: boolean } = {}) => playlists.listPlaylists(db, opts),
     playlist: (id: number) => playlists.getPlaylist(db, id),
     createPlaylist: (name: string) => playlists.createPlaylist(db, name),
+    /** A smart playlist (#84) from a rule (validated with SmartRuleSchema). */
+    createSmartPlaylist: (name: string, rule: unknown) => playlists.createSmartPlaylist(db, name, rule),
+    setSmartRule: (id: number, rule: unknown) => smart.setSmartRule(db, id, rule),
+    /** A smart rule's tracks right now, in order (for Play/Shuffle). */
+    smartTracks: (rule: unknown) => smart.evaluateSmartRule(db, smart.requireRule(rule)),
+    /** How many tracks a rule matches right now (the editor's live count). */
+    smartCount: async (rule: unknown) => (await smart.summarizeSmartRule(db, smart.requireRule(rule))).track_count,
     renamePlaylist: (id: number, name: string) => playlists.renamePlaylist(db, id, name),
     deletePlaylist: (id: number) => playlists.deletePlaylist(db, id),
     addToPlaylist: (id: number, trackIds: number[]) => playlists.addTracks(db, id, trackIds),

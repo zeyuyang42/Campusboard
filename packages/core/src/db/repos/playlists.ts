@@ -2,6 +2,7 @@ import type { Db } from "../Db.js";
 import { now } from "../Db.js";
 import type { Playlist, PlaylistWithTracks, PlaylistTrack } from "../../types.js";
 import { PLAYLIST_NAME_MAX } from "../../config.js";
+import { evaluateSmartRule, parseRuleJson, requireRule, summarizeSmartRule } from "./smartPlaylists.js";
 
 export { PLAYLIST_NAME_MAX };
 
@@ -48,10 +49,10 @@ function requireName(name: string): string {
   return n;
 }
 
-interface PlaylistRow extends Playlist { art_ids_csv: string | null }
+interface PlaylistRow extends Omit<Playlist, "smart" | "rule"> { art_ids_csv: string | null; rule_json: string | null }
 
 function rowToPlaylist(r: PlaylistRow): Playlist {
-  const { art_ids_csv, ...rest } = r;
+  const { art_ids_csv, rule_json, ...rest } = r;
   const seen = new Set<number>();
   const art_ids: number[] = [];
   for (const s of (art_ids_csv ?? "").split(",")) {
@@ -59,7 +60,13 @@ function rowToPlaylist(r: PlaylistRow): Playlist {
     if (s && Number.isFinite(n) && !seen.has(n)) { seen.add(n); art_ids.push(n); }
     if (art_ids.length === 4) break;
   }
-  return { ...rest, art_ids };
+  return { ...rest, art_ids, smart: rule_json !== null, rule: parseRuleJson(rule_json) };
+}
+
+/** A smart playlist's count and cover come from its rule as it evaluates now (#84). */
+async function withSmartSummary(db: Db, p: Playlist): Promise<Playlist> {
+  if (!p.smart) return p;
+  return { ...p, ...(p.rule ? await summarizeSmartRule(db, p.rule) : { track_count: 0, art_ids: [] }) };
 }
 
 const PLAYLIST_SELECT = `
@@ -67,11 +74,19 @@ const PLAYLIST_SELECT = `
     (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlist_id = p.id) AS track_count,
     (SELECT GROUP_CONCAT(art_id) FROM (
        SELECT al.art_id FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id JOIN albums al ON al.id = t.album_id
-       WHERE pt.playlist_id = p.id AND al.art_id IS NOT NULL ORDER BY pt.position LIMIT 12)) AS art_ids_csv
+       WHERE pt.playlist_id = p.id AND al.art_id IS NOT NULL ORDER BY pt.position LIMIT 12)) AS art_ids_csv,
+    (SELECT s.rule_json FROM smart_playlists s WHERE s.playlist_id = p.id) AS rule_json
   FROM playlists p`;
 
-export async function listPlaylists(db: Db): Promise<Playlist[]> {
-  return (await db.select<PlaylistRow>(`${PLAYLIST_SELECT} ORDER BY p.updated_at DESC`)).map(rowToPlaylist);
+/**
+ * Every playlist, most recently changed first. A smart playlist's track_count and art_ids
+ * come from evaluating its rule, a query each, so only with `summaries` (the Playlists
+ * page); otherwise its track_count is undefined and art_ids empty.
+ */
+export async function listPlaylists(db: Db, opts: { summaries?: boolean } = {}): Promise<Playlist[]> {
+  const list = (await db.select<PlaylistRow>(`${PLAYLIST_SELECT} ORDER BY p.updated_at DESC`)).map(rowToPlaylist);
+  if (!opts.summaries) return list.map((p) => (p.smart ? { ...p, track_count: undefined, art_ids: [] } : p));
+  return Promise.all(list.map((p) => withSmartSummary(db, p)));
 }
 
 export async function createPlaylist(db: Db, name: string): Promise<Playlist> {
@@ -79,17 +94,40 @@ export async function createPlaylist(db: Db, name: string): Promise<Playlist> {
   return (await db.get<PlaylistRow>(`${PLAYLIST_SELECT} WHERE p.id = ?`, [r!.id]).then((p) => p && rowToPlaylist(p)))!;
 }
 
+/**
+ * Create a smart playlist (#84): the playlist first, its rule second. Interrupted in between,
+ * it is left as an ordinary empty playlist, which is readable and can be deleted.
+ */
+export async function createSmartPlaylist(db: Db, name: string, rule: unknown): Promise<Playlist> {
+  const n = requireName(name);
+  const r = requireRule(rule);
+  const row = await db.get<{ id: number }>("INSERT INTO playlists (name) VALUES (?) RETURNING id", [n]);
+  await db.run("INSERT INTO smart_playlists (playlist_id, rule_json) VALUES (?, ?)", [row!.id, JSON.stringify(r)]);
+  const p = await db.get<PlaylistRow>(`${PLAYLIST_SELECT} WHERE p.id = ?`, [row!.id]);
+  return withSmartSummary(db, rowToPlaylist(p!));
+}
+
 export async function renamePlaylist(db: Db, id: number, name: string): Promise<boolean> {
   return (await db.run("UPDATE playlists SET name = ?, updated_at = ? WHERE id = ?", [requireName(name), now(), id])).changes > 0;
 }
 
 export async function deletePlaylist(db: Db, id: number): Promise<boolean> {
+  // The rule first (the foreign key would cascade it; this is also right with foreign keys
+  // off): interrupted here, an ordinary empty playlist is left.
+  await db.run("DELETE FROM smart_playlists WHERE playlist_id = ?", [id]);
   return (await db.run("DELETE FROM playlists WHERE id = ?", [id])).changes > 0;
 }
 
 export async function getPlaylist(db: Db, id: number): Promise<PlaylistWithTracks | null> {
   const p = await db.get<PlaylistRow>(`${PLAYLIST_SELECT} WHERE p.id = ?`, [id]);
   if (!p) return null;
+  const pl = rowToPlaylist(p);
+  if (pl.smart) {
+    // Evaluated now, never stored; the entry ids are placeholders (nothing to reorder or remove).
+    const tracks = pl.rule ? await evaluateSmartRule(db, pl.rule) : [];
+    const art = [...new Set(tracks.flatMap((t) => (t.art_id == null ? [] : [t.art_id])))].slice(0, 4);
+    return { ...pl, art_ids: art, track_count: tracks.length, tracks: tracks.map((t, i) => ({ ...t, playlist_track_id: -(i + 1), position: i })) };
+  }
   const tracks = (
     await db.select<Omit<PlaylistTrack, "streamable" | "downloaded"> & { streamable: number; downloaded: number }>(
       `SELECT pt.id AS playlist_track_id, pt.position, t.id, t.track_id, t.album_id, t.title, t.track_num, t.duration,
@@ -102,11 +140,12 @@ export async function getPlaylist(db: Db, id: number): Promise<PlaylistWithTrack
       [id],
     )
   ).map((t) => ({ ...t, streamable: !!t.streamable, downloaded: !!t.downloaded }));
-  return { ...rowToPlaylist(p), track_count: tracks.length, tracks };
+  return { ...pl, track_count: tracks.length, tracks };
 }
 
 /**
  * Append tracks; positions are computed inside the single INSERT so no transaction is needed.
+ * A smart playlist (#84) takes no tracks: the INSERT adds nothing to one.
  * The ids travel as one JSON parameter: no bind-variable or compound-SELECT limit, whatever
  * the count (bulk actions add tens of thousands).
  */
@@ -115,8 +154,8 @@ export async function addTracks(db: Db, playlistId: number, trackIds: number[]):
   await db.run(
     `INSERT INTO playlist_tracks (playlist_id, track_id, position)
      SELECT ?, j.value, (SELECT COALESCE(MAX(position), -1) FROM playlist_tracks WHERE playlist_id = ?) + 1 + j.key
-     FROM json_each(?) AS j ORDER BY j.key`,
-    [playlistId, playlistId, JSON.stringify(trackIds)],
+     FROM json_each(?) AS j WHERE NOT EXISTS (SELECT 1 FROM smart_playlists s WHERE s.playlist_id = ?) ORDER BY j.key`,
+    [playlistId, playlistId, JSON.stringify(trackIds), playlistId],
   );
   await db.run("UPDATE playlists SET updated_at = ? WHERE id = ?", [now(), playlistId]);
 }

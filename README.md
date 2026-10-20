@@ -56,7 +56,10 @@ Requires macOS 13.3 or later. Your library lives in
   Bandcamp for each. Episodes don't count in listening history.
 - **Playlists**: right-click any track or album, or select several tracks
   (click, Shift-click, Cmd-click) and use the bar that appears. Drag rows to
-  reorder.
+  reorder. A smart playlist (Playlists → New smart playlist) is a saved rule
+  instead: Show, minimum rating, tag, filter text, played or not played in
+  the last N days, sort and an optional track limit. It is filled from the
+  library each time it opens or plays, so it stays current.
 - **Tags**: Library → Tags lists the Bandcamp tags of your albums with how
   many carry each; a tag (there, or under an album's title) opens the album
   grid narrowed to it, together with the filter field, Show and Sort.
@@ -105,8 +108,8 @@ Requires macOS 13.3 or later. Your library lives in
   density, the album-art wash and an optional background image. Export writes a
   `.theme.json` you can send to a friend; Import loads one.
 - **Moving to another Mac**: Settings → Library. Export library writes a JSON
-  file with your albums (by Bandcamp address), playlists, listening history,
-  theme and settings, never your identity cookie. Import library on the other
+  file with your albums (by Bandcamp address), playlists (smart ones as their
+  rules), listening history, theme and settings, never your identity cookie. Import library on the other
   Mac shows what's new, then fetches the missing albums from Bandcamp at the
   usual pace and fills the playlists in as they arrive. Back up library
   database saves a complete copy of the library file at any time.

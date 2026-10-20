@@ -1,4 +1,5 @@
 // Shared DTOs between server and web.
+import type { SmartRule } from "./db/repos/smartPlaylists.js";
 
 export type ItemType = "album" | "track";
 
@@ -96,6 +97,10 @@ export interface Playlist {
   track_count?: number;
   /** Up to four distinct album art ids, in playlist order, for cover mosaics. */
   art_ids: number[];
+  /** A smart playlist (#84): its tracks are `rule` evaluated now, never stored. */
+  smart: boolean;
+  /** The smart playlist's rule; null for an ordinary playlist (or a damaged rule). */
+  rule: SmartRule | null;
 }
 
 export interface PlaylistTrack extends Track {
