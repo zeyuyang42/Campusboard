@@ -202,7 +202,7 @@ describe("challenge backoff", () => {
   it("honours a persisted cooldown in a new JobRunner, as after an app restart", async () => {
     await setSetting(db, CHALLENGE_SETTING_KEY, { until: T0 + 5 * 60_000, cooldownMs: 5 * 60_000 });
     const left = await jobs.createJob(db, "album", ALBUM_A, [ALBUM_A]);
-    await jobs.setJobStatus(db, left.id, "running"); // the app quit mid-job
+    await jobs.transitionJob(db, left.id, ["queued"], "running"); // the app quit mid-job
 
     const { runner, calls } = setup(db, [fixture("album")]);
     // whenReady() also covers the first pass over the queue, which is now paused: don't wait on it.

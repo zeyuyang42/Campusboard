@@ -1,5 +1,5 @@
 import type { Db } from "../Db.js";
-import { now, valuesList } from "../Db.js";
+import { chunks, now, valuesList } from "../Db.js";
 
 /**
  * Personal notes and 0-5 star ratings per album (#73, table album_notes, migration 0009).
@@ -47,8 +47,7 @@ export async function exportAlbumNotes(db: Db): Promise<({ album_url: string } &
  * replaced only by a newer one; mergePendingNotes writes them once their albums are here.
  */
 export async function addPendingNotes(db: Db, rows: ({ album_url: string } & AlbumNote)[]): Promise<void> {
-  for (let i = 0; i < rows.length; i += 500) {
-    const chunk = rows.slice(i, i + 500);
+  for (const chunk of chunks(rows, 500)) {
     await db.run(
       `INSERT INTO album_notes_pending (album_url, rating, note, updated_at) VALUES ${valuesList(chunk.length, 4)}
        ON CONFLICT(album_url) DO UPDATE SET rating = excluded.rating, note = excluded.note, updated_at = excluded.updated_at

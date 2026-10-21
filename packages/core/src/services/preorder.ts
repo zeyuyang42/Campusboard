@@ -5,6 +5,8 @@
  * full album: the new-releases checker does it (releaseWatch.ts), one album per tick.
  */
 
+import { sqlTimeIso } from "../db/Db.js";
+
 const MONTHS = "JanFebMarAprMayJunJulAugSepOctNovDec";
 
 /**
@@ -25,7 +27,7 @@ export function releaseTime(d: string | null | undefined): number | null {
 /** The library's own timestamps (`YYYY-MM-DD HH:MM:SS`, UTC) as unix ms, or null. */
 export function dbTime(s: string | null | undefined): number | null {
   if (!s) return null;
-  const t = Date.parse(`${s.replace(" ", "T")}Z`);
+  const t = Date.parse(sqlTimeIso(s));
   return Number.isNaN(t) ? null : t;
 }
 

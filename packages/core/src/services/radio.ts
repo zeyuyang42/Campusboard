@@ -1,4 +1,5 @@
 import type { Db } from "../db/Db.js";
+import { albumIdsByUrl } from "../db/repos/albums.js";
 import type { FetchQueue } from "../scrape/http.js";
 import { cachedFetchText } from "./pageCache.js";
 import { parseRadioList, parseRadioShow, radioShowUrl, RADIO_CDN_URL, RADIO_LIST_URL, type ParsedRadioShow } from "../scrape/radio.js";
@@ -53,14 +54,13 @@ export class RadioService {
     return parseRadioList(await cachedFetchText(this.db, this.queue, RADIO_LIST_URL, RADIO_LIST_CACHE_MS));
   }
 
-  /** An episode with its tracklist, each entry marked with its library album id if imported. */
+  /**
+   * An episode with its tracklist, each entry marked with its library album id if imported
+   * (an album waiting out its Undo, #93, reads as not imported, like everywhere else).
+   */
   async show(showId: number): Promise<RadioShow> {
     const s = this.shows.get(showId) ?? await this.fetchShow(showId, PAGE_CACHE_MS);
-    const urls = [...new Set(s.tracks.map((t) => t.url).filter((u): u is string => !!u))];
-    const rows = urls.length
-      ? await this.db.select<{ id: number; url: string }>(`SELECT id, url FROM albums WHERE url IN (${urls.map(() => "?").join(", ")})`, urls)
-      : [];
-    const byUrl = new Map(rows.map((r) => [r.url, r.id]));
+    const byUrl = await albumIdsByUrl(this.db, s.tracks.map((t) => t.url).filter((u): u is string => !!u));
     return {
       id: s.id, title: s.title, program: s.program, date: s.date, description: s.description, image_id: s.image_id,
       url: s.url, duration: s.duration, tracks: s.tracks.map((t) => ({ ...t, album_id: t.url ? byUrl.get(t.url) ?? null : null })),

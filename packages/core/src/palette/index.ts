@@ -17,7 +17,7 @@ export interface BoostedPalette { swatches: BoostedSwatch[]; neutral: boolean }
 export const ART_SWATCHES_VERSION = 1;
 export const ART_SWATCHES_MAX = 6;
 export const ArtSwatchesSchema = z.object({
-  version: z.literal(1),
+  version: z.literal(ART_SWATCHES_VERSION),
   swatches: z.array(z.object({ hex: z.string().regex(/^#[0-9a-fA-F]{6}$/), weight: z.number().min(0).max(1) })).max(ART_SWATCHES_MAX),
 });
 

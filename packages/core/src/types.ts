@@ -140,6 +140,9 @@ export interface PlaylistWithTracks extends Playlist {
 export type JobKind = "album" | "track" | "discography" | "selection" | "collection" | "library" | "download";
 /** "pending": created, items not yet inserted; the runner and the job list ignore it. */
 export type JobStatus = "pending" | "queued" | "running" | "done" | "failed" | "cancelled";
+/** A job that is not over yet: being created, waiting its turn, or in progress. */
+export const ACTIVE_JOB_STATUSES = ["pending", "queued", "running"] as const satisfies readonly JobStatus[];
+export const isActiveJob = (j: { status: JobStatus }): boolean => (ACTIVE_JOB_STATUSES as readonly JobStatus[]).includes(j.status);
 
 export interface JobItem {
   id: number;
@@ -206,10 +209,6 @@ export interface SearchResult {
   img: string | null;
   location: string | null;
   in_library: boolean;
-}
-
-export interface ApiError {
-  error: { code: string; message: string };
 }
 
 /** A release listed on an artist or label page, with library status. */

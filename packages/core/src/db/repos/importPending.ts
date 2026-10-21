@@ -1,5 +1,5 @@
 import type { Db } from "../Db.js";
-import { now, valuesList } from "../Db.js";
+import { chunks, now, valuesList } from "../Db.js";
 import { mergePendingNotes } from "./albumNotes.js";
 
 /**
@@ -32,8 +32,7 @@ function dedupeKey(r: PendingRow): string {
 /** Queue rows; ones already waiting (same natural key) are left alone. */
 export async function addPending(db: Db, rows: PendingRow[]): Promise<void> {
   // 500 rows x 16 columns stays well under SQLite's 32766 bound parameters.
-  for (let i = 0; i < rows.length; i += 500) {
-    const chunk = rows.slice(i, i + 500);
+  for (const chunk of chunks(rows, 500)) {
     const params = chunk.flatMap((r) => {
       const o = r as unknown as Record<string, unknown>;
       return COLS.map((c) => (c === "dedupe_key" ? dedupeKey(r) : o[c] ?? null));

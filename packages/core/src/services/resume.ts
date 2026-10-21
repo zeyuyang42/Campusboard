@@ -2,6 +2,7 @@
 // save (pause, skip away, the 5 s position save, window close) and applies the saved point
 // through its per-track pendingSeek. The rows live in resume_positions (migration 0010).
 import { isRadioTrack } from "./radio.js";
+import { clock } from "./time.js";
 
 /** Tracks longer than this resume where they were left (DJ mixes, live sets). */
 export const RESUME_MIN_TRACK_SEC = 20 * 60;
@@ -47,9 +48,5 @@ export function resumePoint(position: number, duration: number): number | null {
 
 /** "41:20", or "1:02:05" past an hour, for the player bar's hint. */
 export function formatResumeAt(sec: number): string {
-  const s = Math.max(0, Math.floor(sec));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const ss = String(s % 60).padStart(2, "0");
-  return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+  return clock(Math.max(0, Math.floor(sec)));
 }

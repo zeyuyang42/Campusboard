@@ -1,4 +1,5 @@
 import type { Db } from "../db/Db.js";
+import { chunks, placeholders } from "../db/Db.js";
 import { getTrackRow } from "../db/repos/tracks.js";
 import { getSetting, setSetting } from "../db/repos/settings.js";
 import type { FetchQueue } from "../scrape/http.js";
@@ -207,7 +208,7 @@ export class OfflineService {
   /** Clear the rows of tracks whose file is gone (no file removed). */
   private async forget(trackIds: number[]): Promise<void> {
     if (!trackIds.length) return;
-    const marks = trackIds.map(() => "?").join(",");
+    const marks = placeholders(trackIds.length);
     await this.db.run(`UPDATE tracks SET local_path = NULL WHERE id IN (${marks})`, trackIds);
     await this.db.run(`DELETE FROM track_files WHERE track_id IN (${marks})`, trackIds);
   }
@@ -226,12 +227,11 @@ export class OfflineService {
     }
     return this.exclusive(async () => {
       const rows: { id: number; local_path: string | null }[] = [];
-      for (let i = 0; i < trackIds.length; i += 500) {
-        const chunk = trackIds.slice(i, i + 500);
+      for (const chunk of chunks(trackIds, 500)) {
         rows.push(...await this.db.select<{ id: number; local_path: string | null }>(
-          `SELECT id, local_path FROM tracks WHERE local_path IS NOT NULL AND id IN (${chunk.map(() => "?").join(",")})`, chunk));
+          `SELECT id, local_path FROM tracks WHERE local_path IS NOT NULL AND id IN (${placeholders(chunk.length)})`, chunk));
       }
-      for (let i = 0; i < rows.length; i += 500) await this.forget(rows.slice(i, i + 500).map((r) => r.id));
+      for (const chunk of chunks(rows, 500)) await this.forget(chunk.map((r) => r.id));
       if (this.files) for (const r of rows) if (isOfflineFileName(r.local_path)) await this.files.remove(r.local_path).catch(() => undefined);
       return rows.length;
     });
@@ -264,7 +264,7 @@ export class OfflineService {
       const names = new Set(await files.list());
       const rows = await this.db.select<{ id: number; local_path: string }>("SELECT id, local_path FROM tracks WHERE local_path IS NOT NULL");
       const missing = rows.filter((r) => !isOfflineFileName(r.local_path) || !names.has(r.local_path)).map((r) => r.id);
-      for (let i = 0; i < missing.length; i += 500) await this.forget(missing.slice(i, i + 500));
+      for (const chunk of chunks(missing, 500)) await this.forget(chunk);
       await this.db.run("DELETE FROM track_files WHERE track_id NOT IN (SELECT id FROM tracks WHERE local_path IS NOT NULL)");
       const kept = new Set(rows.map((r) => r.local_path));
       let removed = 0;

@@ -1,5 +1,5 @@
 import type { Db } from "../Db.js";
-import { likeContains } from "../Db.js";
+import { chunks, likeContains, placeholders, sqlTime } from "../Db.js";
 import { dismissAlbum } from "./fanItems.js";
 import { NOT_REMOVING } from "./albumRemoval.js";
 import { TRACK_SELECT, rowToTrack, type TrackRow } from "./tracks.js";
@@ -111,7 +111,7 @@ export interface AlbumConditions {
 
 const DAY_MS = 86_400_000;
 /** played_at of N days ago, in the stored format (UTC `YYYY-MM-DD HH:MM:SS`). */
-const daysAgo = (days: number) => new Date(Date.now() - days * DAY_MS).toISOString().replace("T", " ").slice(0, 19);
+const daysAgo = (days: number) => sqlTime(new Date(Date.now() - days * DAY_MS));
 const positive = (n: number | undefined): n is number => typeof n === "number" && Number.isFinite(n) && n > 0;
 
 /** The WHERE clause (or "") and its parameters for the Show filter, the filter text, a tag and any extra conditions. */
@@ -231,6 +231,25 @@ export async function listTags(db: Db, filter: AlbumFilter = "all"): Promise<Tag
 export async function getAlbum(db: Db, id: number): Promise<Album | null> {
   const r = await db.get<AlbumRow>(`${ALBUM_SELECT} WHERE al.id = ?`, [id]);
   return r ? rowToAlbum(r) : null;
+}
+
+/** Just the album's canonical URL (the key of its jobs and fan items), or null when there is no such row. */
+export async function getAlbumUrl(db: Db, id: number): Promise<string | null> {
+  return (await db.get<{ url: string }>("SELECT url FROM albums WHERE id = ?", [id]))?.url ?? null;
+}
+
+/**
+ * Library album ids by URL, for the URLs given (others are simply absent). An album waiting
+ * for its delete (#93) is left out, as in albumUrlsInLibrary: Browse, Discover, search, a
+ * Radio tracklist and playing a release without importing it all read it as not here.
+ */
+export async function albumIdsByUrl(db: Db, urls: readonly string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  for (const chunk of chunks([...new Set(urls)], 500)) {
+    const rows = await db.select<{ id: number; url: string }>(`SELECT al.id, al.url FROM albums al WHERE al.url IN (${placeholders(chunk.length)}) AND ${NOT_REMOVING}`, chunk);
+    for (const r of rows) out.set(r.url, r.id);
+  }
+  return out;
 }
 
 export async function getAlbumWithTracks(db: Db, id: number): Promise<AlbumWithTracks | null> {

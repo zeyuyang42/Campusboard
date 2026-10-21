@@ -6,6 +6,9 @@ import { evaluateSmartRule, parseRuleJson, requireRule, summarizeSmartRule } fro
 
 export { PLAYLIST_NAME_MAX };
 
+/** Bump a playlist's updated_at after a change to its entries. */
+const touch = (db: Db, playlistId: number) => db.run("UPDATE playlists SET updated_at = ? WHERE id = ?", [now(), playlistId]);
+
 /** Thrown by createPlaylist/renamePlaylist when the name is empty after normalisation. */
 export class PlaylistNameError extends Error {
   readonly code = "invalid_playlist_name";
@@ -157,7 +160,7 @@ export async function addTracks(db: Db, playlistId: number, trackIds: number[]):
      FROM json_each(?) AS j WHERE NOT EXISTS (SELECT 1 FROM smart_playlists s WHERE s.playlist_id = ?) ORDER BY j.key`,
     [playlistId, playlistId, JSON.stringify(trackIds), playlistId],
   );
-  await db.run("UPDATE playlists SET updated_at = ? WHERE id = ?", [now(), playlistId]);
+  await touch(db, playlistId);
 }
 
 /** Rewrite positions in one statement from the given order of playlist_track ids (one JSON parameter, any length). */
@@ -171,12 +174,12 @@ export async function reorder(db: Db, playlistId: number, playlistTrackIds: numb
      WHERE playlist_tracks.id = o.id AND playlist_tracks.playlist_id = ?`,
     [JSON.stringify(playlistTrackIds), playlistId],
   );
-  await db.run("UPDATE playlists SET updated_at = ? WHERE id = ?", [now(), playlistId]);
+  await touch(db, playlistId);
 }
 
 export async function removeTrack(db: Db, playlistId: number, playlistTrackId: number): Promise<boolean> {
   const r = await db.run("DELETE FROM playlist_tracks WHERE id = ? AND playlist_id = ?", [playlistTrackId, playlistId]);
-  if (r.changes > 0) await db.run("UPDATE playlists SET updated_at = ? WHERE id = ?", [now(), playlistId]);
+  if (r.changes > 0) await touch(db, playlistId);
   return r.changes > 0;
 }
 
@@ -218,7 +221,7 @@ export async function removeTracksWithUndo(db: Db, playlistId: number, playlistT
   if (!rows.length) return null;
   const r = await db.run("DELETE FROM playlist_tracks WHERE playlist_id = ? AND id IN (SELECT j.value FROM json_each(?) AS j)", [playlistId, ids]);
   if (!r.changes) return null;
-  await db.run("UPDATE playlists SET updated_at = ? WHERE id = ?", [now(), playlistId]);
+  await touch(db, playlistId);
   return { playlist_id: playlistId, rows };
 }
 
@@ -254,7 +257,7 @@ export async function restoreTracks(db: Db, snap: RemovedPlaylistTracks): Promis
   const at = placed.length ? placed : await db.select<{ id: number; k: number }>(`SELECT r.id, r.k FROM ${SNAP_ROWS} WHERE ${ALREADY_BACK}`, [json, pid]);
   if (!at.length) return 0;
   await placeAt(db, pid, at);
-  await db.run("UPDATE playlists SET updated_at = ? WHERE id = ?", [now(), pid]);
+  await touch(db, pid);
   return placed.length;
 }
 
