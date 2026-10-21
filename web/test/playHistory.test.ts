@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import type { HistoryCursor, HistoryEntry } from "@bc/core";
 import { groupByDay } from "../src/lib/history";
 import { PlayHistory } from "../src/components/PlayHistory";
+import { flushAct as flush } from "./harness";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -74,9 +75,6 @@ describe("the History tab (#86)", () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     act(() => root.render(h(QueryClientProvider, { client: qc }, h(MemoryRouter, null, h(PlayHistory)))));
   };
-  async function flush() {
-    for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
-  }
   const rows = () => host.querySelectorAll(".history li").length;
   const more = () => [...host.querySelectorAll("button")].find((b) => b.textContent === "Show more");
 

@@ -1,27 +1,14 @@
-/* Tokens are written by applyTheme() onto :root; these are the fallbacks before it runs. */
+/* The main window's own tokens; the shared ones (colours, fonts, the @property registrations)
+   are in theme/tokens.css, imported before this sheet. applyTheme() writes over all of them. */
 :root {
-  --surface: #23262D;
-  --surface-raised: #2C3038;
-  --surface-hover: #353942;
   --surface-active: #3d424c;
-  --line: rgba(255, 255, 255, 0.08);
-  --text: #F1EEE9;
-  --text-muted: #9A9AA6;
-  --accent-fallback: #5BB6D1;
-  --accent: var(--accent-fallback);
   --accent-text: #000000;
-  --ambient-1: transparent;
-  --ambient-2: transparent;
-  --ambient-strength: 0.6;
   --danger: #E06A5E;
   --radius: 10px;
-  --radius-sm: 6px;
   --radius-lg: 12px;
   --row-h: 48px;
   --card-gap: 22px;
   --pad-page: 32px;
-  --font-display: "Bricolage Grotesque Variable", ui-sans-serif, system-ui, sans-serif;
-  --font-ui: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
   --bg-image: none;
   --bg-blur: 12px;
   --bg-dim: 0.5;
@@ -29,20 +16,11 @@
   --dock-h: 80px;
   --queue-w: 340px;
   --titlebar: 0px;
-  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px; --space-7: 48px;
-  color-scheme: dark;
 }
-:root[data-theme="light"] { color-scheme: light; }
 html.is-tauri { --titlebar: 40px; }
 html.is-tauri.is-fullscreen { --titlebar: 8px; }
 
-/* Register art-driven colors so they can transition. */
-@property --accent { syntax: "<color>"; inherits: true; initial-value: #5BB6D1; }
-@property --ambient-1 { syntax: "<color>"; inherits: true; initial-value: transparent; }
-@property --ambient-2 { syntax: "<color>"; inherits: true; initial-value: transparent; }
-:root { transition: --accent 0.6s ease, --ambient-1 0.6s ease, --ambient-2 0.6s ease; }
 @media (prefers-reduced-motion: reduce) {
-  :root { transition: none; }
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
   /* Infinite alternating animations would flip every frame at 0.01ms: stop them outright. */
   .eq, .eq::before, .eq::after,
@@ -81,7 +59,7 @@ code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
 .sidebar { grid-row: 1; padding: calc(var(--titlebar) + 14px) 12px 16px; border-right: 1px solid var(--line); overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 .sidebar .brand { font-family: var(--font-display); font-weight: 650; font-size: 15px; letter-spacing: -0.01em; padding: 6px 10px 16px; display: flex; align-items: center; gap: 10px; }
 .sidebar .brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex: none; }
-.nav a, .nav button.navlike { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: var(--radius-sm); color: var(--text-muted); width: 100%; text-align: left; font-weight: 500; }
+.nav a { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: var(--radius-sm); color: var(--text-muted); width: 100%; text-align: left; font-weight: 500; }
 .nav a:hover { background: var(--surface-hover); color: var(--text); }
 .nav a.active { background: var(--surface-hover); color: var(--text); }
 .nav .section { margin: 18px 10px 6px; font-size: 12px; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center; }
@@ -267,7 +245,6 @@ details.about-wrap summary { cursor: pointer; color: var(--text-muted); margin-t
 @keyframes eq { to { transform: scaleY(.6); } }
 
 /* ---------- menus ---------- */
-.menu-wrap { position: relative; display: inline-block; }
 .menu { position: absolute; right: 0; top: 100%; z-index: 40; min-width: 210px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 6px; box-shadow: 0 12px 32px rgba(0,0,0,.35); }
 .menu.fixed { position: fixed; top: auto; right: auto; }
 .menu button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 7px 10px; border-radius: var(--radius-sm); white-space: nowrap; }

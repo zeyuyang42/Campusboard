@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { LibraryTags } from "../src/pages/LibraryPage";
+import { flushAct as flush } from "./harness";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -31,9 +32,6 @@ afterEach(() => {
 
 let qc: QueryClient;
 const render = () => { qc = new QueryClient({ defaultOptions: { queries: { retry: false } } }); act(() => root.render(h(QueryClientProvider, { client: qc }, h(MemoryRouter, null, h(LibraryTags))))); };
-async function flush() {
-  for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
-}
 const rows = () => [...host.querySelectorAll(".tag-list a")].map((a) => a.textContent);
 
 describe("the Tags tab (#71)", () => {

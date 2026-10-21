@@ -8,6 +8,7 @@ import { MiniPlayer } from "./MiniPlayer";
 import { isTauri } from "../lib/env";
 import "@fontsource-variable/bricolage-grotesque";
 import "@fontsource-variable/instrument-sans";
+import "../theme/tokens.css";
 import "./mini.css";
 
 if (isTauri) {

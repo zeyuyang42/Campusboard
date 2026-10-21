@@ -10,6 +10,7 @@ import { initPalette } from "./theme/usePalette";
 import { isTauri } from "./lib/env";
 import "@fontsource-variable/bricolage-grotesque";
 import "@fontsource-variable/instrument-sans";
+import "./theme/tokens.css";
 import "./styles.css";
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 10_000, retry: 1, refetchOnWindowFocus: false } } });

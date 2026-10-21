@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { act } from "react";
 import type { PlayState, Track } from "@bc/core";
 import type { FakeAudio } from "./fakeAudio";
 
@@ -72,6 +73,11 @@ export function useFakeTimers() {
 /** Let pending promise chains (getCore, getFreshStreamUrl, play()) settle. */
 export async function flush() {
   for (let i = 0; i < 20; i++) await Promise.resolve();
+}
+
+/** For component tests on real timers: four short waits inside act(), so queries resolve and React commits. */
+export async function flushAct() {
+  for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
 }
 
 let nextId = 1;
