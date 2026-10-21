@@ -37,7 +37,7 @@ packages/core/src/
   db/repos/                one module per table; booleans stored 0/1, converted at the repo boundary
   services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping), miniPlayer (mini window state/command protocol, throttle), transition (gapless/crossfade scheduling, fade curve, state machine), libraryTransfer (library export/import file, VACUUM INTO backup), radio (episodes, tracklists, stream URLs), discover (preview queue entries + their stream URLs), offline (offline copies: download, local URL, sweep)
   theme/                   schema (zod), presets, color math (OKLCH, contrast), apply (CSS variables)
-  palette/                 quantize + pick + extract (canvas) + fitPalette + artUrl
+  palette/                 quantize + pick + extract (canvas) + fitPalette + artUrl; boost (palette v2: raw swatches -> vivid backdrop colours)
   core.ts                  createCore({db, fetch, onJobsChange}) -> every function the UI calls
 packages/core/test/        vitest; helpers/nodeDb.ts runs src-tauri/migrations/*.sql on node:sqlite
 web/test/                  vitest + happy-dom for the player wiring; FakeAudio stands in for new Audio(), harness.ts boots a fresh store with a stub getCore()
@@ -49,6 +49,7 @@ web/src/
   player/miniBridge.ts     main-window side of the mini player: broadcasts MiniState, maps validated MiniCommands to store actions
   mini/                    the mini player window (mini.html entry): no store, no audio, no getCore; bus.ts = Tauri events or BroadcastChannel
   theme/store.ts           theme state, persisted in settings.key='theme'; usePalette.ts maps art colors to CSS vars
+  backdrop/                the album-art backdrop (#110): Backdrop.tsx (replaces Ambient), controller (pure rules), engine (loop, GL injected), gl (raw WebGL1), shaders (GLSL strings), swatches (boosted palette store)
   ui/menu.ts + components/MenuHost.tsx   the one context menu / playlist picker for the whole app
   ui/undo.ts + components/UndoNote.tsx   the one "Removed X. Undo" note; lib/removals.ts starts removals with it
   components/, pages/      plain CSS in styles.css driven by tokens on :root
@@ -458,6 +459,41 @@ src-tauri/
   `preview` field (`services/discover.ts`): never counted, never in a playlist,
   `isRadioTrack` is false for it, and a restored one resolves its URL only on Play.
   The last setup is `settings.key='discover_last'`.
+
+- Album-art backdrop (#110, 2026-10-21). Palette v2: one decode of the 350 px art yields the
+  conservative trio (`art_palettes`, five clusters, unchanged) and up to six raw k-means
+  swatches (`art_swatches`, migration 0012, JSON validated with `ArtSwatchesSchema` on read;
+  key = art_id, or -(image_id) for a Radio episode, which gets a palette this way). The
+  raw swatches are cached; `boostSwatches` (pure, `palette/boost.ts`) raises chroma, re-spreads
+  lightness by rank and turns grey art into a tinted neutral at read time, so tuning the boost
+  never invalidates the cache. `core.getArtSwatches` fills both caches from one request, as
+  does `getArtPalette`. Theme `backdrop` (schema version still 1, defaulted additively):
+  `mode` conservative / wash / morph, `style` ink / aurora / grain / lava, `intensity`,
+  `motion` drift / still; new and existing installs land on morph + ink. `applyTheme` writes
+  `data-backdrop` on `:root` (the mini window gets it with the theme). Morph is raw WebGL1
+  (one fullscreen triangle, GLSL as template strings: no three.js, no worker, no blob:, CSP
+  unchanged), rendered at half the window size (DPR ignored, max 960×540) at 30 fps (grain
+  4), with `powerPreference: "low-power"`. The rules live in `backdrop/controller.ts`:
+  anything but a playing track, a hidden document, `motion: still` or Reduce motion freezes
+  the canvas on its last frame (no frames at all, and the shader clock keeps its phase); a
+  track change cross-fades the two palettes for 2 s even while frozen; a lost context, or no
+  WebGL, shows the CSS wash instead (`data-gl="lost"`). Never call
+  `WEBGL_lose_context.loseContext()` on a canvas that may be reused: a canvas has one context
+  for life and React StrictMode remounts the effect in dev. `webglAvailable()` is reported by
+  the selftest's `window` block (`webgl`, plus `backdrop.state`/`frames`), and
+  `window.__bcBackdrop = {state, frames}` is there for Playwright. Verified 2026-10-21 in
+  headless Chromium (SwiftShader): playing → `gl-drift` at ~31 fps, pause → `gl-frozen` with
+  frames stopped, a palette change while paused → `gl-fading` for 2 s then frozen, Reduce
+  motion → frozen; heading contrast over the frosted panels stayed ≥ 7.7:1 on every preset
+  side and style.
+- Conservative CSS is byte-identical: every rule the backdrop adds to `styles.css` and
+  `mini.css` is scoped under `:root:not([data-backdrop="conservative"])`, and the conservative
+  mode renders exactly the old DOM (`.ambient > .bg + .wash`). Keep it that way: a new
+  frosted-panel, tint or motion rule goes under that scope, never on a bare selector, so
+  "Conservative" in Settings stays the look from before #110. Outside it `--ambient-1/2` come
+  from the boosted swatches, panels are `--panel-alpha` (floored at 0.68 for contrast) over a
+  blurred, lightly tinted surface, `.main` floats with a 12 px margin, headings mix at most
+  14% toward the accent, and the mini window paints `--swatch-1..4`.
 
 ## Collection sync facts (verified 2026-10-17 with curl against a public profile)
 
