@@ -1,7 +1,9 @@
 import { z } from "zod";
-import type { FetchQueue } from "./http.js";
+import { postJson, type FetchQueue } from "./http.js";
 import { ScrapeError } from "./errors.js";
-import { normalizeBandcampUrl } from "./url.js";
+import { hostOf, normalizeBandcampUrl, releaseUrlOrNull } from "./url.js";
+import { clean } from "./html.js";
+import { items, num, str } from "./schemas.js";
 import { RADIO_CDN_URL } from "./radio.js";
 import type { DiscoverItem, DiscoverLocation, DiscoverPage, DiscoverParams, DiscoverSlice, DiscoverTag } from "../types.js";
 
@@ -55,9 +57,6 @@ export const DISCOVER_MAX_TAGS = 10;
 /** Longer tags (from a link or the query) are dropped. */
 export const DISCOVER_MAX_TAG_LENGTH = 64;
 
-const str = z.unknown().transform((v) => (typeof v === "string" ? v : null));
-const num = z.unknown().transform((v) => (typeof v === "number" && Number.isFinite(v) ? v : null));
-
 const ResultSchema = z.object({
   item_id: z.number().int().positive(),
   item_type: str,
@@ -87,35 +86,8 @@ const ResponseSchema = z.object({
 const TagSchema = z.object({ norm_name: z.string().min(1), display_name: str, count: num }).passthrough();
 const LocationSchema = z.object({ id: z.union([z.string(), z.number()]), name: str, fullname: str }).passthrough();
 
-const clean = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
+const post = (queue: FetchQueue, url: string, body: unknown, what: string) => postJson((u, i) => queue.fetchText(u, i), url, body, what);
 
-function json(text: string, what: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new ScrapeError("parse_failed", `${what} response was not JSON`);
-  }
-}
-
-async function post(queue: FetchQueue, url: string, body: unknown, what: string): Promise<unknown> {
-  const text = await queue.fetchText(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(body),
-  });
-  return json(text, what);
-}
-
-/** A release URL in canonical form (`?from=discover_page` dropped), or null if it isn't one. */
-function releaseUrl(u: string | null | undefined): string | null {
-  if (!u) return null;
-  try {
-    const n = normalizeBandcampUrl(u);
-    return n.kind === "artist" ? null : n.url;
-  } catch {
-    return null;
-  }
-}
 function artistUrl(u: string | null | undefined): string | null {
   if (!u) return null;
   try {
@@ -131,7 +103,8 @@ export function parseDiscoverResult(x: unknown): DiscoverItem | null {
   const r = ResultSchema.safeParse(x);
   if (!r.success) return null;
   const d = r.data;
-  const url = releaseUrl(d.item_url);
+  // Canonical form: `?from=discover_page` dropped.
+  const url = releaseUrlOrNull(d.item_url);
   if (!url) return null;
   const f = d.featured_track;
   const stream = f?.stream_url?.trim() ?? "";
@@ -203,12 +176,7 @@ export async function tagSuggestions(queue: FetchQueue, prefix: string): Promise
   const raw = await post(queue, TAG_SEARCH_ENDPOINT, { prefix }, "Tag search");
   const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" && Array.isArray((raw as { results?: unknown }).results) ? (raw as { results: unknown[] }).results : null;
   if (!list) throw new ScrapeError("parse_failed", "Tag search response had no list");
-  const out: DiscoverTag[] = [];
-  for (const x of list) {
-    const r = TagSchema.safeParse(x);
-    if (r.success) out.push({ norm_name: r.data.norm_name, display_name: clean(r.data.display_name) || r.data.norm_name, count: r.data.count ?? 0 });
-  }
-  return out;
+  return items(list, TagSchema).map((t) => ({ norm_name: t.norm_name, display_name: clean(t.display_name) || t.norm_name, count: t.count ?? 0 }));
 }
 
 /** Bandcamp's place search (geonames ids, as the location filter takes them). */
@@ -216,12 +184,10 @@ export async function locationSuggestions(queue: FetchQueue, q: string): Promise
   const raw = await post(queue, LOCATION_SEARCH_ENDPOINT, { q, n: 5, geocoder_fallback: false }, "Location search");
   const list = raw && typeof raw === "object" && Array.isArray((raw as { results?: unknown }).results) ? (raw as { results: unknown[] }).results : [];
   const out: DiscoverLocation[] = [];
-  for (const x of list) {
-    const r = LocationSchema.safeParse(x);
-    if (!r.success) continue;
-    const id = Number(r.data.id);
+  for (const l of items(list, LocationSchema)) {
+    const id = Number(l.id);
     if (!Number.isInteger(id) || id <= 0) continue;
-    out.push({ id, label: clean(r.data.fullname) || clean(r.data.name) || String(id) });
+    out.push({ id, label: clean(l.fullname) || clean(l.name) || String(id) });
   }
   return out;
 }
@@ -289,7 +255,7 @@ export function parseDiscoverUrl(input: string): DiscoverParams | null {
   } catch {
     return null;
   }
-  const host = u.hostname.toLowerCase().replace(/\.$/, "");
+  const host = hostOf(u);
   if (host !== "bandcamp.com" && host !== "www.bandcamp.com") return null;
   if (u.protocol !== "https:" || u.port || u.username || u.password) return null;
   const parts = u.pathname.split("/").filter(Boolean);

@@ -1,8 +1,7 @@
 import { ScrapeError } from "./errors.js";
-import { readJsonAttr, pageTitle, decodeEntities, stripTags, hasBandcampMarker } from "./html.js";
-import { normalizeBandcampUrl } from "./url.js";
-import { BandSchema } from "./schemas.js";
-import { isChallengePage } from "./parseTralbum.js";
+import { readJsonAttr, pageTitle, decodeEntities, stripTags, hasBandcampMarker, assertNotChallenge } from "./html.js";
+import { normalizeBandcampUrl, releaseUrlOrNull } from "./url.js";
+import { BandSchema, items as matching } from "./schemas.js";
 import type { ItemType } from "../types.js";
 import { z } from "zod";
 
@@ -30,13 +29,7 @@ const ClientItem = z.object({ page_url: z.string(), title: z.string().optional()
  * URLs (no LAN hosts, Bandcamp-shaped paths only) before anything can fetch it.
  */
 function cleanUrl(u: string, base: string): string | null {
-  const abs = /^https?:\/\//i.test(u) ? u : `${base}${u.startsWith("/") ? "" : "/"}${u}`;
-  try {
-    const n = normalizeBandcampUrl(abs);
-    return n.kind === "artist" ? null : n.url;
-  } catch {
-    return null;
-  }
+  return releaseUrlOrNull(/^https?:\/\//i.test(u) ? u : `${base}${u.startsWith("/") ? "" : "/"}${u}`);
 }
 const typeOf = (url: string): ItemType => (/\/track\//.test(url) ? "track" : "album");
 const artIdFrom = (s: string): number | null => {
@@ -45,7 +38,7 @@ const artIdFrom = (s: string): number | null => {
 };
 
 export function parseMusicPage(html: string, origin: string): ParsedMusicPage {
-  if (isChallengePage(html)) throw new ScrapeError("client_challenge", "Bandcamp returned a bot challenge page");
+  assertNotChallenge(html);
   if (!hasBandcampMarker(html)) throw new ScrapeError("not_bandcamp", `Not a Bandcamp page (title: ${pageTitle(html) ?? "?"})`);
   const base = canonicalOrigin(html) ?? origin.replace(/\/+$/, "");
   const seen = new Map<string, MusicItem>();
@@ -79,12 +72,10 @@ export function parseMusicPage(html: string, origin: string): ParsedMusicPage {
   try {
     const extra = readJsonAttr<unknown[]>(html, "data-client-items");
     if (Array.isArray(extra)) {
-      for (const raw of extra) {
-        const p = ClientItem.safeParse(raw);
-        if (!p.success) continue;
-        const url = cleanUrl(p.data.page_url, base);
+      for (const p of matching(extra, ClientItem)) {
+        const url = cleanUrl(p.page_url, base);
         if (!url) continue;
-        push({ url, item_type: p.data.type === "track" ? "track" : typeOf(url), title: decodeEntities(p.data.title ?? ""), art_id: p.data.art_id ?? null, artist: p.data.artist ?? null });
+        push({ url, item_type: p.type === "track" ? "track" : typeOf(url), title: decodeEntities(p.title ?? ""), art_id: p.art_id ?? null, artist: p.artist ?? null });
       }
     }
   } catch { /* tolerate */ }

@@ -1,3 +1,5 @@
+import { ScrapeError } from "./errors.js";
+
 const NAMED: Record<string, string> = { amp: "&", quot: '"', lt: "<", gt: ">", apos: "'", nbsp: " " };
 
 /** Decode HTML entities found in attribute values (named, decimal and hex). */
@@ -30,6 +32,11 @@ export function isChallengePage(html: string): boolean {
   return !!t && /^\s*client challenge\s*$/i.test(t);
 }
 
+/** Refuse to parse the bot check as a page: throws `client_challenge` for one. */
+export function assertNotChallenge(html: string): void {
+  if (isChallengePage(html)) throw new ScrapeError("client_challenge", "Bandcamp returned a bot challenge page");
+}
+
 /**
  * Whether the HTML is a Bandcamp-rendered page. Every album, track and artist
  * page carries a `data-tralbum` or `data-band` JSON attribute; a custom domain
@@ -42,3 +49,6 @@ export function hasBandcampMarker(html: string): boolean {
 export function stripTags(s: string): string {
   return decodeEntities(s.replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
 }
+
+/** A text field from Bandcamp's JSON as shown: whitespace collapsed, trimmed, "" for nothing. */
+export const clean = (s: string | null | undefined): string => (s ?? "").replace(/\s+/g, " ").trim();

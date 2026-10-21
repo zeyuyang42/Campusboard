@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ScrapeError } from "./errors.js";
-import { decodeEntities, isChallengePage, pageTitle } from "./html.js";
+import { assertNotChallenge, decodeEntities, pageTitle } from "./html.js";
+import { jsonText, postJson, type TextFetcher } from "./http.js";
 import { isBandcampHost, normalizeBandcampUrl } from "./url.js";
 import type { ItemType } from "../types.js";
 
@@ -150,7 +151,7 @@ function readBlob(html: string): unknown {
 }
 
 export function parseFanPage(html: string): ParsedFanPage {
-  if (isChallengePage(html)) throw new ScrapeError("client_challenge", "Bandcamp returned a bot challenge page");
+  assertNotChallenge(html);
   const raw = readBlob(html);
   const res = FanBlobSchema.safeParse(raw);
   if (!raw || !res.success) {
@@ -178,9 +179,9 @@ export function parseFanPage(html: string): ParsedFanPage {
   };
 }
 
-export function parseFanItemsResponse(text: string): FanListPage {
-  let json: unknown;
-  try { json = JSON.parse(text); } catch { throw new ScrapeError("parse_failed", "Fan collection response was not JSON"); }
+/** A collection_items / wishlist_items answer: its text, or the JSON already parsed (fetchFanList). */
+export function parseFanItemsResponse(raw: unknown): FanListPage {
+  const json = typeof raw === "string" ? jsonText(raw, "Fan collection") : raw;
   if (json && typeof json === "object" && (json as { error?: unknown }).error) {
     throw new ScrapeError("fetch_failed", `Bandcamp refused the collection request: ${String((json as { error_message?: unknown }).error_message ?? "error")}`);
   }
@@ -211,7 +212,7 @@ export interface FanListResult {
  * Bandcamp says there is no more, a page adds nothing new, or FAN_MAX_PAGES is reached.
  */
 export async function fetchFanList(
-  fetchText: (url: string, init: RequestInit) => Promise<string>, fanId: number, list: FanList, first: FanListPage, headers: Record<string, string> = {},
+  fetchText: TextFetcher, fanId: number, list: FanList, first: FanListPage, headers: Record<string, string> = {},
 ): Promise<FanListResult> {
   const seen = new Map<string, FanItem>();
   const add = (items: FanItem[]) => {
@@ -227,12 +228,7 @@ export async function fetchFanList(
   let received = first.received;
   for (let pages = 0; more && next; pages++) {
     if (pages >= FAN_MAX_PAGES) return { items: [...seen.values()], complete: false };
-    const text = await fetchText(FAN_ITEMS_ENDPOINT[list], {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json", ...headers },
-      body: JSON.stringify({ fan_id: fanId, older_than_token: next, count: FAN_PAGE_SIZE }),
-    });
-    const page = parseFanItemsResponse(text);
+    const page = parseFanItemsResponse(await postJson(fetchText, FAN_ITEMS_ENDPOINT[list], { fan_id: fanId, older_than_token: next, count: FAN_PAGE_SIZE }, "Fan collection", headers));
     if (add(page.items) === 0 && page.items.length > 0) return { items: [...seen.values()], complete: false };
     received += page.received;
     ({ more, next } = page);

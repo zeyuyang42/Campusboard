@@ -1,5 +1,20 @@
 import { z } from "zod";
 
+// Lenient field schemas for Bandcamp's JSON blobs (radio, discover): a descriptive field
+// never rejects an item, anything that isn't the expected type reads as null.
+export const str = z.unknown().transform((v) => (typeof v === "string" ? v : null));
+export const num = z.unknown().transform((v) => (typeof v === "number" && Number.isFinite(v) ? v : null));
+
+/** The entries of `list` that match `schema`; the others are left out (never the whole list). */
+export function items<S extends z.ZodTypeAny>(list: readonly unknown[] | null | undefined, schema: S): z.output<S>[] {
+  const out: z.output<S>[] = [];
+  for (const x of list ?? []) {
+    const r = schema.safeParse(x);
+    if (r.success) out.push(r.data);
+  }
+  return out;
+}
+
 export const TrackInfoSchema = z
   .object({
     track_id: z.number(),
@@ -39,15 +54,12 @@ export const TralbumSchema = z
     trackinfo: z.array(TrackInfoSchema),
   })
   .passthrough();
-export type Tralbum = z.infer<typeof TralbumSchema>;
 
 export const LdJsonSchema = z.object({ keywords: z.array(z.string()).optional() }).passthrough();
 
 export const BandSchema = z
   .object({ id: z.number(), name: z.string(), url: z.string().optional(), subdomain: z.string().optional() })
   .passthrough();
-
-export const ClientItemSchema = z.object({ page_url: z.string() }).passthrough();
 
 export const SearchResponseSchema = z.object({
   auto: z.object({

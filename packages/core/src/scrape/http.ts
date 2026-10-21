@@ -13,6 +13,27 @@ import { isChallengePage } from "./html.js";
  * the cooldown is the caller's call (the job runner does, once).
  */
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+/** `FetchQueue.fetchText` or anything standing in for it (a job's cooldown-aware fetch). */
+export type TextFetcher = (url: string, init: RequestInit) => Promise<string>;
+
+/** The parsed JSON of an API answer; `parse_failed` when it isn't JSON (`what` names the API). */
+export function jsonText(text: string, what: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new ScrapeError("parse_failed", `${what} response was not JSON`);
+  }
+}
+
+/** POST a JSON body to one of Bandcamp's APIs and parse the JSON answer. */
+export async function postJson(fetchText: TextFetcher, url: string, body: unknown, what: string, extraHeaders: Record<string, string> = {}): Promise<unknown> {
+  const text = await fetchText(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json", ...extraHeaders },
+    body: JSON.stringify(body),
+  });
+  return jsonText(text, what);
+}
 
 export class FetchQueue {
   private chain: Promise<unknown> = Promise.resolve();
@@ -20,8 +41,14 @@ export class FetchQueue {
 
   constructor(private fetchImpl: FetchLike, private minGapMs = RATE_LIMIT_MS, readonly gate = new ChallengeGate()) {}
 
-  /** Run `fn` in turn, at most one start per minGapMs. Refuses (without waiting) during a challenge cooldown. */
-  private schedule<T>(fn: () => Promise<T>): Promise<T> {
+  /**
+   * Run `fn` in turn, at most one start per minGapMs. Refuses (without waiting, and before
+   * taking a place in the chain) during a challenge cooldown, once the gate's persisted state
+   * is loaded.
+   */
+  private async schedule<T>(fn: () => Promise<T>): Promise<T> {
+    await this.gate.ready();
+    this.gate.assertClear();
     const run = async () => {
       // A request queued behind one that got challenged fails here, before taking a rate-limit slot.
       this.gate.assertClear();
@@ -35,21 +62,28 @@ export class FetchQueue {
     return p;
   }
 
+  /**
+   * The one request shape: the caller's init plus `extra`, this signal, and plain headers
+   * (UA, Accept-Language, then the caller's), on purpose: the bot check reacts to header
+   * sets that look inconsistent.
+   */
+  private request(url: string, init: RequestInit, signal: AbortSignal, extra: RequestInit = {}): Promise<Response> {
+    return this.fetchImpl(url, {
+      ...init,
+      ...extra,
+      signal,
+      headers: { "User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9", ...(init.headers ?? {}) },
+    });
+  }
+
   async fetchText(url: string, init: RequestInit = {}, retries = 2): Promise<string> {
-    await this.gate.ready();
-    this.gate.assertClear();
     return this.schedule(async () => {
       let lastErr: unknown;
       for (let attempt = 0; attempt <= retries; attempt++) {
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
         try {
-          // Plain headers on purpose: the bot check reacts to header sets that look inconsistent.
-          const res = await this.fetchImpl(url, {
-            ...init,
-            signal: ctrl.signal,
-            headers: { "User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9", ...(init.headers ?? {}) },
-          });
+          const res = await this.request(url, init, ctrl.signal);
           if (!res.ok) {
             const body = await res.text().catch(() => "");
             if (isChallengePage(body)) throw await this.challenged(url);
@@ -97,8 +131,6 @@ export class FetchQueue {
    * Resolves to the bytes written and the Content-Length (null when the CDN sent none).
    */
   async download(url: string, sink: (body: ReadableStream<Uint8Array>) => Promise<void>, init: RequestInit = {}): Promise<{ bytes: number; expected: number | null }> {
-    await this.gate.ready();
-    this.gate.assertClear();
     const outer = init.signal;
     if (outer?.aborted) throw stopped(url);
     const ctrl = new AbortController();
@@ -115,11 +147,7 @@ export class FetchQueue {
         if (outer?.aborted) throw stopped(url);
         touch();
         try {
-          return await this.fetchImpl(url, {
-            ...init,
-            signal: ctrl.signal,
-            headers: { "User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9", ...(init.headers ?? {}) },
-          });
+          return await this.request(url, init, ctrl.signal);
         } catch (e) {
           if (outer?.aborted) throw stopped(url);
           throw new ScrapeError("fetch_failed", `Failed to fetch ${url}: ${String(e)}`, { network: true });
@@ -179,20 +207,13 @@ export class FetchQueue {
    * Same queue slot, headers and challenge handling as fetchText; no retries.
    */
   async resolveRedirect(url: string, init: RequestInit = {}): Promise<string> {
-    await this.gate.ready();
-    this.gate.assertClear();
     return this.schedule(async () => {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
       try {
         let res: Response;
         try {
-          res = await this.fetchImpl(url, {
-            ...init,
-            redirect: "manual",
-            signal: ctrl.signal,
-            headers: { "User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9", ...(init.headers ?? {}) },
-          });
+          res = await this.request(url, init, ctrl.signal, { redirect: "manual" });
         } catch (e) {
           throw new ScrapeError("fetch_failed", `Failed to fetch ${url}: ${String(e)}`);
         }
