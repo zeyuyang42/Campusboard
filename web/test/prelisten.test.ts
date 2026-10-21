@@ -29,7 +29,7 @@ function listen(el: ReturnType<Harness["active"]>, sec: number) {
 
 describe("a previewed release from Search or Browse", () => {
   it("plays from the featured track, moves on to the next preview, and is not counted", async () => {
-    const { tracks, start } = previewReleaseTracks(parsed);
+    const { tracks, start } = previewReleaseTracks(parsed, RELEASE);
     expect(start).toBe(1);
     const el = await h.startPlaying(tracks, start, 100);
     expect(h.state().queue.map((t) => t.preview?.track_id)).toEqual([11, 12, 13]);

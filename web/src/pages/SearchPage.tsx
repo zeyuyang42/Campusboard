@@ -63,7 +63,7 @@ function Result({ r }: { r: SearchResult }) {
   const img = r.type === "band" ? r.img : artUrl(r.art_id, 7) ?? r.img;
   const add = async () => { const j = await imp.mutateAsync({ url: r.url }); setJobId(j.id); };
   const label = "Add";
-  const preview = useReleasePreview(r.url, null);
+  const preview = useReleasePreview(r.url, null, r.in_library);
   return (
     <div>
       <div className="result">

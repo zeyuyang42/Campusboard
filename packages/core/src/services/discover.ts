@@ -37,7 +37,9 @@ export function previewQueueTrack(i: DiscoverItem): QueueTrack | null {
  * and the same track previewed from Search are one entry. `start` is the featured track's
  * index, or 0 when the page names none (or it has no stream).
  */
-export function previewReleaseTracks(p: ParsedTralbum): { tracks: QueueTrack[]; start: number } {
+export function previewReleaseTracks(p: ParsedTralbum, fetchedUrl: string): { tracks: QueueTrack[]; start: number } {
+  // The page's own address when it is one the app may fetch again, else the one it was read from.
+  const itemUrl = isFetchableBandcampUrl(p.url) ? p.url : fetchedUrl;
   const tracks: QueueTrack[] = [];
   for (const t of p.tracks) {
     if (!t.streamable || !t.stream_url || t.stream_quality !== "mp3-128" || !RADIO_CDN_URL.test(t.stream_url)) continue;
@@ -45,8 +47,8 @@ export function previewReleaseTracks(p: ParsedTralbum): { tracks: QueueTrack[]; 
     tracks.push({
       id, track_id: id, album_id: id, title: t.title, track_num: t.track_num, duration: t.duration,
       track_artist: t.artist && t.artist !== p.artist.name ? t.artist : null, streamable: true, lyrics: null,
-      album_title: p.title, artist_name: p.artist.name, art_id: p.art_id, album_url: p.url,
-      preview: { item_url: p.url, track_id: t.track_id, stream_url: t.stream_url },
+      album_title: p.title, artist_name: p.artist.name, art_id: p.art_id, album_url: itemUrl,
+      preview: { item_url: itemUrl, track_id: t.track_id, stream_url: t.stream_url },
     });
   }
   const f = p.featured_track_id == null ? -1 : tracks.findIndex((t) => t.preview?.track_id === p.featured_track_id);

@@ -200,7 +200,8 @@ export function createCore(deps: CoreDeps) {
       const inLibrary = async (url: string): Promise<ReleasePreview | null> => {
         const row = await db.get<{ id: number }>(`SELECT al.id FROM albums al WHERE al.url = ? AND ${albumRemoval.NOT_REMOVING}`, [url]);
         const a = row ? await albums.getAlbumWithTracks(db, row.id) : null;
-        return a ? { album_id: a.id, title: a.title, tracks: a.tracks.filter((t) => t.streamable).map((t) => ({ ...t, album_title: a.title, artist_name: a.artist_name, art_id: a.art_id })), start: 0 } : null;
+        // An imported pre-order with nothing out yet: the page may have tracks by now.
+        return a && a.tracks.some((t) => t.streamable) ? { album_id: a.id, title: a.title, tracks: a.tracks.filter((t) => t.streamable).map((t) => ({ ...t, album_title: a.title, artist_name: a.artist_name, art_id: a.art_id })), start: 0 } : null;
       };
       const hit = await inLibrary(n.url);
       if (hit) return hit;
@@ -210,7 +211,7 @@ export function createCore(deps: CoreDeps) {
         const again = await inLibrary(parsed.url);
         if (again) return again;
       }
-      const { tracks, start } = previewReleaseTracks(parsed);
+      const { tracks, start } = previewReleaseTracks(parsed, n.url);
       if (!tracks.length) throw new ScrapeError("not_streamable", `"${parsed.title}" has nothing to stream yet`);
       return { album_id: null, title: parsed.title, tracks, start };
     },

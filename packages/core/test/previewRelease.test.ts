@@ -6,6 +6,10 @@ import { parseTralbumPage } from "../src/scrape/parseTralbum.js";
 import { previewQueueId, previewReleaseTracks } from "../src/services/discover.js";
 import { upsertTralbum } from "../src/services/importService.js";
 import { RADIO_CDN_URL } from "../src/scrape/radio.js";
+import { TralbumSchema } from "../src/scrape/schemas.js";
+
+/** The album fixture with every `featured_track_id` replaced by `json` (raw JSON text). */
+const withFeatured = (json: string) => fixture("album").replace(/(&quot;featured_track_id&quot;:)\d+/g, `$1${json.replace(/"/g, "&quot;")}`);
 
 const ALBUM_URL = "https://illuminatihotties.bandcamp.com/album/let-me-do-one-more";
 
@@ -48,11 +52,11 @@ describe("core.previewRelease", () => {
 
   it("starts at 0 when the page names no featured track or it has no stream", () => {
     const parsed = parseTralbumPage(fixture("album"));
-    expect(previewReleaseTracks({ ...parsed, featured_track_id: null }).start).toBe(0);
-    expect(previewReleaseTracks({ ...parsed, featured_track_id: 1 }).start).toBe(0);
+    expect(previewReleaseTracks({ ...parsed, featured_track_id: null }, ALBUM_URL).start).toBe(0);
+    expect(previewReleaseTracks({ ...parsed, featured_track_id: 1 }, ALBUM_URL).start).toBe(0);
     // A stream outside Bandcamp's CDN is dropped.
     const bad = { ...parsed, tracks: parsed.tracks.map((t, i) => (i === 0 ? { ...t, stream_url: "https://evil.example/stream/x" } : t)) };
-    expect(previewReleaseTracks(bad).tracks).toHaveLength(parsed.tracks.length - 1);
+    expect(previewReleaseTracks(bad, ALBUM_URL).tracks).toHaveLength(parsed.tracks.length - 1);
   });
 
   it("plays the library album instead, without a request", async () => {
@@ -78,5 +82,50 @@ describe("core.previewRelease", () => {
     await expect(core.previewRelease("https://192.168.1.1/album/x")).rejects.toMatchObject({ code: "not_bandcamp" });
     expect(fetch).not.toHaveBeenCalled();
     await expect(core.previewRelease("https://example.com/album/x")).rejects.toMatchObject({ code: "not_bandcamp" });
+  });
+
+  it("never fails a page over a strange featured_track_id", () => {
+    for (const v of ['"282506895"', '""', '{}', 'true']) {
+      const html = withFeatured(v);
+      expect(html).not.toBe(fixture("album"));
+      const p = parseTralbumPage(html);
+      expect(p.featured_track_id).toBeNull();
+      expect(p.tracks.length).toBeGreaterThan(0);
+    }
+    expect(TralbumSchema.shape.featured_track_id.parse(undefined)).toBeUndefined();
+  });
+
+  it("keeps the page address only when it is fetchable, else the one it was read from", () => {
+    const parsed = parseTralbumPage(fixture("album"));
+    const { tracks } = previewReleaseTracks({ ...parsed, url: "http://192.168.1.1/album/x" }, ALBUM_URL);
+    expect(tracks.every((t) => t.preview!.item_url === ALBUM_URL && t.album_url === ALBUM_URL)).toBe(true);
+  });
+
+  it("reads the page for an album waiting for its delete", async () => {
+    const { db, core, fetch } = setup({ [ALBUM_URL]: fixture("album") });
+    const id = await upsertTralbum(db, parseTralbumPage(fixture("album")));
+    await core.removeAlbumLater(id);
+    const r = await core.previewRelease(ALBUM_URL);
+    expect(r.album_id).toBeNull();
+    expect(r.tracks[0].preview).toBeDefined();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads the page for a library pre-order with nothing out, and says so when the page has nothing either", async () => {
+    const url = "https://pisstheband.bandcamp.com/album/you-made-me-skin-on-linen";
+    const preorder = parseTralbumPage(fixture("preorder"));
+    const nothing = { ...preorder, tracks: preorder.tracks.map((t) => ({ ...t, streamable: false, stream_url: null, stream_expires_at: null })) };
+    // Out by now: the page streams three tracks.
+    const a = setup({ [url]: fixture("preorder") });
+    await upsertTralbum(a.db, nothing);
+    const r = await a.core.previewRelease(url);
+    expect(r.album_id).toBeNull();
+    expect(r.tracks).toHaveLength(3);
+    expect(a.fetch).toHaveBeenCalledTimes(1);
+    // Still nothing out: an error, never a silent no-op.
+    const html = fixture("preorder").replaceAll("&quot;mp3-128&quot;:", "&quot;x&quot;:");
+    const b = setup({ [url]: html });
+    await upsertTralbum(b.db, nothing);
+    await expect(b.core.previewRelease(url)).rejects.toMatchObject({ code: "not_streamable" });
   });
 });
