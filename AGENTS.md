@@ -485,15 +485,25 @@ src-tauri/
   headless Chromium (SwiftShader): playing → `gl-drift` at ~31 fps, pause → `gl-frozen` with
   frames stopped, a palette change while paused → `gl-fading` for 2 s then frozen, Reduce
   motion → frozen; heading contrast over the frosted panels stayed ≥ 7.7:1 on every preset
-  side and style.
+  side and style. CPU (2026-10-21, `tauri dev` debug build, muted selftest block `backdrop`,
+  WebContent process, 2 s `ps cputime` deltas): 29–30 fps measured in-page; 8–9% with
+  `backdrop-filter` on all three panels, 6–7% with no blur at all, 1% paused. That is over
+  the 3% budget (plan §7), so `.main` is tinted-translucent without blur (the sidebar and the
+  player bar keep theirs); the rest is the canvas itself, so the next lever is the frame cap
+  in `controller.ts` (`fps`), not the shaders. A release build and Activity Monitor on an
+  M-series Mac have not been read yet. The selftest's `backdrop` block (5 s with blur, 5 s
+  without, then paused) writes `selftest_progress` steps a sampler outside the app can key on.
 - Conservative CSS is byte-identical: every rule the backdrop adds to `styles.css` and
   `mini.css` is scoped under `:root:not([data-backdrop="conservative"])`, and the conservative
   mode renders exactly the old DOM (`.ambient > .bg + .wash`). Keep it that way: a new
   frosted-panel, tint or motion rule goes under that scope, never on a bare selector, so
   "Conservative" in Settings stays the look from before #110. Outside it `--ambient-1/2` come
   from the boosted swatches, panels are `--panel-alpha` (floored at 0.68 for contrast) over a
-  blurred, lightly tinted surface, `.main` floats with a 12 px margin, headings mix at most
-  14% toward the accent, and the mini window paints `--swatch-1..4`.
+  lightly tinted surface (blurred on the sidebar and player bar only, see the CPU figures
+  above), `.main` floats with a 12 px margin, headings mix at most 14% toward the accent, and
+  the mini window paints `--swatch-1..4`. Under Reduce motion the global
+  `animation-duration: 0.01ms` would make an infinite alternating animation flip every frame,
+  so the wash drift layers and the `.eq` bars are stopped with `animation: none` there.
 
 ## Collection sync facts (verified 2026-10-17 with curl against a public profile)
 

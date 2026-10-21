@@ -583,8 +583,11 @@ html.is-tauri .discover-card .art.playable { cursor: default; }
 }
 :root:not([data-backdrop="conservative"]) .sidebar,
 :root:not([data-backdrop="conservative"]) .main,
+:root:not([data-backdrop="conservative"]) .player { background: var(--panel); }
+/* The sidebar and the player bar frost the backdrop; .main is tinted-translucent without blur:
+   re-filtering the largest panel over an animating canvas cost ~2 CPU points (AGENTS.md). */
+:root:not([data-backdrop="conservative"]) .sidebar,
 :root:not([data-backdrop="conservative"]) .player {
-  background: var(--panel);
   -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(1.15);
   backdrop-filter: blur(var(--panel-blur)) saturate(1.15);
 }
