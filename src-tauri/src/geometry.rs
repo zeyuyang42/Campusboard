@@ -23,7 +23,8 @@ pub struct Rect {
 
 impl Rect {
     /// Whether this is a whole screen's frame, menu bar included: a full-screen window's
-    /// frame. A zoomed window fills only the work area, so it never matches.
+    /// frame. A zoomed window fills only the work area, so it normally never matches (it
+    /// can when the menu bar and Dock both auto-hide; that frame is then just not recorded).
     fn covers(&self, screen: &Rect) -> bool {
         (self.x - screen.x).abs() < 1.0
             && (self.y - screen.y).abs() < 1.0
@@ -155,8 +156,8 @@ impl Geometry {
     /// those never become the size it reopens at. A zoomed window counts: on macOS that is
     /// just a frame (`isZoomed` is true for any window filling the screen), kept as it is.
     /// tao stops reporting full screen as soon as `set_fullscreen(false)` is called (a close
-    /// in full screen, persist.ts), while the frame is still the screen's, so a frame that
-    /// covers its whole screen is skipped too.
+    /// in full screen, fullscreen.rs), while the frame is still the screen's, so a frame
+    /// that covers its whole screen is skipped too.
     pub fn record<R: Runtime>(&self, w: &WebviewWindow<R>) {
         let normal = w.is_visible().unwrap_or(false)
             && !w.is_minimized().unwrap_or(true)

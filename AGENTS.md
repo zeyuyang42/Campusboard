@@ -65,6 +65,7 @@ src-tauri/
   src/geometry.rs          window size + position in points (window-geometry.json; -dev in debug builds)
   src/backup.rs            database backup destination check + atomic copy (Rust-side save dialog)
   src/menu.rs              native menu bar; custom items run `window.__bcMenu(id)` in the main webview (web/src/lib/appMenu.ts)
+  src/fullscreen.rs        hide_main_window: leave native full screen, then hide on NSWindowDidExitFullScreenNotification (2 s fallback)
   src/mini.rs              creates/toggles the `mini` window (Window > Mini Player, dock button command); tell_main(app, "hello" | "bye") is the only Rust emitter of mini:command
   src/tray.rs              optional menu-bar icon (Settings, off by default); `set_menu_bar` from web/src/lib/menuBar.ts; items reuse menu.rs ids
   migrations/*.sql         schema; every statement is IF NOT EXISTS so an old library.db can be adopted
@@ -186,15 +187,19 @@ src-tauri/
 - Window behaviour follows Music.app: closing hides the window and playback
   continues (`persist.ts` prevents the close and calls `hide()`), the Dock icon
   reopens it (`RunEvent::Reopen` in lib.rs), Cmd+Q quits. Hiding a window in native
-  full screen leaves its Space behind, black and empty, so a close in full screen
-  (button or ⌘W) first calls `setFullscreen(false)` (`core:window:allow-set-fullscreen`,
-  main window) and hides once the transition is over; the window reopens windowed
-  (2026-10-21). tao 0.37 reports `isFullscreen()` false as soon as it is asked to
-  leave, so the end is taken from the resizes instead: the one AppKit sends when the
-  frame changes and the one tao sends from `windowDidExitFullScreen:`, then 250 ms of
-  quiet, capped at 1.5 s. Read from the tao source, not yet tried in a real full-screen
-  Space. `geometry.rs` skips a frame covering the whole screen, since tao no longer
-  says "full screen" while that frame is still reported. Menu accelerators use
+  full screen leaves its Space behind, black and empty (2026-10-21), so persist.ts hides
+  through the `hide_main_window` command (`src/fullscreen.rs`): a windowed main window is
+  hidden at once; a full-screen one gets a one-shot `NSWindowDidExitFullScreenNotification`
+  observer on its NSWindow (objc2 `define_class!`), then `set_fullscreen(false)`, and the
+  observer removes itself and hides on the next event-loop turn. A 2 s fallback hides
+  anyway if the notification never comes; a `reveal()` during the wait (Dock reopen)
+  cancels the late hide, and a second close during it only re-arms it. The window
+  reopens windowed. The end can't be read from tao 0.37: `set_fullscreen(None)` clears
+  its `fullscreen` state synchronously (window.rs:1261), so `isFullscreen()` is false
+  for the whole animation, and a close during the enter transition is queued by tao
+  (`target_fullscreen`) and only starts after `windowDidEnterFullScreen:`. For the same
+  reason `geometry.rs` skips a frame covering the whole screen. Written from the tao and
+  AppKit docs; not yet tried in a real full-screen Space. Menu accelerators use
   Cmd so they never fight text fields; plain-key shortcuts stay in `shortcuts.ts`.
 - Drag and drop (#92, checked 2026-10-20 in wry 0.57 / tauri-runtime-wry 2.12 source,
   selftest `dropLink`): with `dragDropEnabled` on (Tauri's default) the WKWebView

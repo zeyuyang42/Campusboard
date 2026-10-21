@@ -62,14 +62,6 @@ export function makeFakeWindow() {
     closeHandler: null as null | ((e: { preventDefault: () => void }) => Promise<void>),
     onCloseRequested: vi.fn(async (cb: (e: { preventDefault: () => void }) => Promise<void>) => { win.closeHandler = cb; return () => undefined; }),
     hide: vi.fn(async () => undefined),
-    fullscreen: false,
-    isFullscreen: vi.fn(async () => win.fullscreen),
-    // tao reports "not full screen" as soon as it is asked to leave, before the animation ends.
-    setFullscreen: vi.fn(async (on: boolean) => { win.fullscreen = on; }),
-    resizeHandlers: new Set<() => void>(),
-    onResized: vi.fn(async (cb: () => void) => { win.resizeHandlers.add(cb); return () => { win.resizeHandlers.delete(cb); }; }),
-    /** The window reports a resize, as tao does when the frame changes and at the end of a full-screen transition. */
-    resized: () => { for (const cb of [...win.resizeHandlers]) cb(); },
   };
   return win;
 }
