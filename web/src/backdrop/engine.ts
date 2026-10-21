@@ -137,6 +137,7 @@ export class BackdropEngine {
 
   /** Debug: jump the shader clock (window.__bcBackdrop.setTime), so Playwright can land on a glitch burst. */
   setTime(seconds: number) {
+    if (!Number.isFinite(seconds)) return; // NaN would poison the clock for good
     this.clock.time = Math.max(0, seconds);
     this.dirty = true;
     this.kick();

@@ -30,16 +30,22 @@ uniform float u_seed;
 uniform float u_dark;
 uniform float u_still;
 
+// hash() loses its randomness once an input passes a few thousand (fract of p * 456 runs out
+// of float bits), so nothing that grows with u_time may reach it unbounded: noise() wraps its
+// lattice at NOISE_PERIOD cells (every corner, so the wrap is seamless) and the glitch style
+// takes its frame and slot counters modulo small numbers.
+const float NOISE_PERIOD = 256.0;
 float hash(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
   p += dot(p, p + 45.32);
   return fract(p.x * p.y);
 }
+float cell(vec2 i) { return hash(mod(i, NOISE_PERIOD)); }
 float noise(vec2 p) {
   vec2 i = floor(p);
   vec2 f = fract(p);
   vec2 u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+  return mix(mix(cell(i), cell(i + vec2(1.0, 0.0)), u.x), mix(cell(i + vec2(0.0, 1.0)), cell(i + vec2(1.0, 1.0)), u.x), u.y);
 }
 float fbm(vec2 p) {
   float v = 0.0;
@@ -151,7 +157,7 @@ void main() {
  * calm most of the time, torn by bursts. Everything is a function of u_time (and u_mix): a
  * burst of about 0.5 s starts once in every 5 s slot at a hashed offset (so 2-8 s apart,
  * reproducible), and a track change (u_mix between 0 and 1) is a longer, stronger one. During a
- * burst horizontal slabs of hashed heights tear sideways, re-rolled every 1/12 s, some slabs
+ * burst horizontal slabs of hashed heights tear sideways, re-rolled 8 times a second, some slabs
  * jump to a neighbouring band's colour, the channels split, and a few rectangles of TV static
  * flash. u_still (paused, Still, Reduce motion) clamps the burst to 0, so a frozen frame is never
  * caught mid-tear. The posterize also steps the lightness, so a one-colour palette still bands.
@@ -170,14 +176,15 @@ void main() {
   float t = u_time;
   // The periodic burst: one per 5 s slot, 0.5 s long, starting 1-4 s into the slot.
   float slot = floor(t / 5.0);
-  float start = slot * 5.0 + 1.0 + 3.0 * hash(vec2(slot, u_seed));
+  float sl = mod(slot, 512.0);  // the slot as a hash input: small, so it stays random for hours
+  float start = slot * 5.0 + 1.0 + 3.0 * hash(vec2(sl, u_seed));
   float bu = t - start;
   float env = step(0.0, bu) * step(bu, 0.5) * (1.0 - bu / 0.5);
   // The track-change burst rides the cross-fade: strongest half way through it.
   float change = clamp(u_mix * (1.0 - u_mix) * 4.4, 0.0, 1.0);
   float burst = max(env, change) * (1.0 - u_still);
-  float frame = floor(t * 12.0);  // slabs and static re-roll every ~1/12 s
-  float bseed = hash(vec2(slot + 7.0, u_seed + 3.0)) + change * 0.37;
+  float frame = mod(floor(t * 8.0), 256.0);  // slabs and static re-roll 8 times a second (bounded, see hash)
+  float bseed = hash(vec2(sl + 7.0, u_seed + 3.0)) + change * 0.37;
 
   // Slabs: coarse and fine, each torn sideways by its own hashed offset when the burst is on.
   vec2 p = uv;
@@ -193,9 +200,9 @@ void main() {
     float h2 = hash(vec2(b2 * 1.7 + frame, bseed + 5.0));
     float tear2 = step(0.7, hash(vec2(b2, frame * 0.53 + bseed)));
     p.x += (h2 - 0.5) * 0.18 * burst * tear2;
-    // Some slabs jump a band up or down: a neighbouring swatch.
+    // Some slabs jump one or two bands up or down (a shift of 1.4 band widths): a neighbouring swatch.
     float h3 = hash(vec2(b1 + 13.0, frame + bseed * 2.0));
-    shift = step(0.6, h3) * (floor(hash(vec2(b1, bseed + 9.0)) * 3.0) - 1.0) * (1.4 / STEPS) * step(0.001, burst);
+    shift = step(0.6, h3) * (floor(hash(vec2(b1, bseed + 9.0)) * 3.0) - 1.0) * (1.4 / STEPS);
   }
   p.x = fract(p.x);
 
@@ -212,7 +219,9 @@ void main() {
   col *= mix(mix(0.78, 1.04, q), mix(0.72, 1.25, q), u_dark);
   col += u_dark * (q - 0.5) * 0.08;
 
-  // TV static: 2-6 rectangles, each flashing on and off every few frames.
+  // TV static: 2-6 rectangles, each flashing on and off every few frames. The speckle is the
+  // band colour pushed 35% toward black or white (a modest luminance swing, re-rolled at 8 Hz,
+  // never full black/white flicker: photosensitivity).
   if (burst > 0.0) {
     float count = 2.0 + floor(hash(vec2(bseed, 4.0)) * 5.0);
     for (int i = 0; i < 6; i++) {
@@ -223,8 +232,8 @@ void main() {
       float on = step(0.45, hash(vec2(fi + frame, bseed + 17.0))) * step(0.3, burst);
       vec2 d = abs(uv - c) - sz * 0.5;
       float inside = step(max(d.x, d.y), 0.0) * on;
-      float n = hash(gl_FragCoord.xy + frame * 13.7);
-      vec3 noiseCol = mix(vec3(0.05), vec3(0.96), step(0.5, n));
+      float n = hash(gl_FragCoord.xy + mod(frame, 64.0) * 13.7);
+      vec3 noiseCol = mix(mix(col, vec3(0.0), 0.35), mix(col, vec3(1.0), 0.35), step(0.5, n));
       col = mix(col, noiseCol, inside * 0.9);
     }
   }

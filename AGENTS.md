@@ -515,6 +515,16 @@ src-tauri/
   never mid-tear and a track change while paused only cross-fades the bands. The style value
   `grain` is accepted and read as `glitch` (`STYLE_ALIASES`, a zod preprocess, schema version
   still 1); the UI and new files only write `glitch`. Both styles run at the common 30 fps cap.
+  Shader rule: `hash()` (fract of `p * 456`) runs out of float bits once an input passes a few
+  thousand, and the drift clock is unbounded (hours of play), so nothing that grows with
+  `u_time` may reach a hash unwrapped. `noise()` wraps its lattice at 256 cells (every corner,
+  so the wrap is seamless), which covers ink's and aurora's time-shifted fbm/noise; glitch takes
+  its slot and frame counters `mod 512` / `mod 256` (and `mod 64` for the per-pixel static).
+  Plain `sin`/`cos` of a large `u_time` (lava, the glitch gradient) are fine. Checked in
+  Playwright with `__bcBackdrop.setTime(3600)` and `setTime(10800)`: the static must still
+  speckle (pixels with both a brighter and a darker neighbour), not collapse into flat slabs.
+  The static's speckle is the band colour pushed 35% toward black or white at 8 Hz, never full
+  black/white flicker (photosensitivity).
 - Conservative CSS is byte-identical: every rule the backdrop adds to `styles.css` and
   `mini.css` is scoped under `:root:not([data-backdrop="conservative"])`, and the conservative
   mode renders exactly the old DOM (`.ambient > .bg + .wash`). Keep it that way: a new
