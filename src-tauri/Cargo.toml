@@ -5,6 +5,7 @@ description = "Campusboard, a personal Bandcamp player"
 authors = ["Campusboard contributors"]
 edition = "2021"
 repository = "https://github.com/zeyuyang42/campusboard"
+license = "PolyForm-Noncommercial-1.0.0"
 
 [lib]
 name = "bandcamp_player_lib"
