@@ -16,6 +16,7 @@ import { appConfigDir, appDataDir, join } from "@tauri-apps/api/path";
 import { storeBackgroundImage } from "./lib/files";
 import { backupLibraryDatabase, exportLibraryFile } from "./lib/libraryFile";
 import { miniBridgeInfo } from "./player/miniBridge";
+import { webglAvailable } from "./backdrop/gl";
 import { usePalette } from "./ui/palette";
 import { DEFAULT_THEME, MINI_EVENTS, positionToGain, previewQueueTrack, RESUME_MAX_ROWS, toggleAction, type Track } from "@bc/core";
 import { FAN_ITEMS_ENDPOINT, fanPageUrl, parseFanItemsResponse, parseFanPage, repos, type FanItem } from "@bc/core";
@@ -492,7 +493,10 @@ async function windowCheck(s: Step) {
   await step("setFocus", () => win.setFocus()); await sleep(300);
   const visibleAgain = await step("isVisibleAgain", () => win.isVisible());
   const focused = await step("isFocused", () => win.isFocused());
-  const result = { maximized, minimized, hidden: visibleWhileHidden === false, visibleAgain, focused, errors };
+  // The vivid backdrop (#110) needs WebGL in this webview; informational, the CSS wash is the fallback.
+  const webgl = webglAvailable();
+  const backdrop = window.__bcBackdrop ? { state: window.__bcBackdrop.state, frames: window.__bcBackdrop.frames } : null;
+  const result = { maximized, minimized, hidden: visibleWhileHidden === false, visibleAgain, focused, webgl, backdrop, errors };
   // `focused` is informational: a background terminal can keep focus from the window.
   return { ok: Object.keys(errors).length === 0 && maximized === true && minimized === true && result.hidden && visibleAgain === true, ...result };
 }

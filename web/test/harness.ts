@@ -43,6 +43,7 @@ export function makeFakeCore() {
     getSetting: vi.fn(async (key: string) => settings.get(key) ?? null),
     setSetting: vi.fn(async (key: string, value: unknown) => { settings.set(key, value); }),
     getArtPalette: vi.fn(async () => null),
+    getArtSwatches: vi.fn(async () => null),
     playCount: vi.fn(async () => 0),
     /** Resume points (#85): queue entry id -> seconds. */
     resume: new Map<number, number>(),

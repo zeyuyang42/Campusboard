@@ -3,7 +3,7 @@ import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { PlayerBar } from "./PlayerBar";
 import { QueueDrawer } from "./QueueDrawer";
-import { Ambient } from "./Ambient";
+import { Backdrop } from "../backdrop/Backdrop";
 import { MenuHost } from "./MenuHost";
 import { CommandPalette } from "./CommandPalette";
 import { NowPlaying } from "./NowPlaying";
@@ -46,7 +46,7 @@ export function AppShell() {
   }, []);
   return (
     <>
-      <Ambient />
+      <Backdrop />
       {isTauri && <div className="titlebar-drag" data-tauri-drag-region />}
       {/* First in the tab order, so the Undo button is one Tab away. */}
       <UndoNote />
