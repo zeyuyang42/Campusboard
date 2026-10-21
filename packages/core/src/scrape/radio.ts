@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { ScrapeError } from "./errors.js";
-import { isChallengePage, pageTitle, readJsonAttr } from "./html.js";
-import { normalizeBandcampUrl } from "./url.js";
+import { assertNotChallenge, clean, pageTitle, readJsonAttr } from "./html.js";
+import { releaseUrlOrNull } from "./url.js";
+import { items, num, str } from "./schemas.js";
 import type { RadioEntry, RadioShow, RadioShowSummary } from "../types.js";
 
 /**
@@ -14,10 +15,8 @@ export const RADIO_LIST_URL = "https://bandcamp.com/radio";
 export const radioShowUrl = (showId: number) => `https://bandcamp.com/radio?show=${showId}`;
 
 const ORIGIN = "https://bandcamp.com";
-// Descriptive fields never reject an item: anything that isn't the expected type reads as null.
-const num = z.unknown().transform((v) => (typeof v === "number" && Number.isFinite(v) ? v : null));
-const str = z.unknown().transform((v) => (typeof v === "string" ? v : null));
 
+// Descriptive fields (`str`, `num`) never reject an item: anything that isn't the expected type reads as null.
 // Items are parsed one by one (see `items`): a malformed episode or tracklist entry is dropped,
 // never the whole list or the episode's audio.
 const ShowItemSchema = z.object({
@@ -61,16 +60,6 @@ const ShowSchema = z.object({
   }).passthrough(),
 }).passthrough();
 
-/** The entries of `list` that match `schema`; the others are left out. */
-function items<S extends z.ZodTypeAny>(list: readonly unknown[] | null | undefined, schema: S): z.output<S>[] {
-  const out: z.output<S>[] = [];
-  for (const x of list ?? []) {
-    const r = schema.safeParse(x);
-    if (r.success) out.push(r.data);
-  }
-  return out;
-}
-
 /** The only stream URL shape the player resolves: Bandcamp's signed redirect to the CDN. */
 export const RADIO_STREAM_URL = /^https:\/\/bandcamp\.com\/stream_redirect\?[^#\s]+$/;
 /** Where that redirect may lead: an mp3 on Bandcamp's stream CDN. */
@@ -83,7 +72,7 @@ export interface ParsedRadioShow extends RadioShow {
 }
 
 function blob(html: string, what: string): unknown {
-  if (isChallengePage(html)) throw new ScrapeError("client_challenge", "Bandcamp returned a bot challenge page");
+  assertNotChallenge(html);
   let raw: unknown;
   try {
     raw = readJsonAttr(html, "data-blob");
@@ -99,21 +88,9 @@ const isoDate = (s: string | null | undefined): string | null => {
   const t = Date.parse(s);
   return Number.isFinite(t) ? new Date(t).toISOString() : null;
 };
-const clean = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
 const positive = (n: number | null | undefined) => (typeof n === "number" && Number.isFinite(n) && n > 0 ? n : null);
 const showPage = (itemUrl: string | null | undefined, id: number) =>
   itemUrl && /^\/radio\//.test(itemUrl) ? `${ORIGIN}${itemUrl.replace(/\/+$/, "")}` : radioShowUrl(id);
-
-/** A Bandcamp album or track URL in canonical form, or null if it isn't one. */
-function itemUrl(u: string | null | undefined): string | null {
-  if (!u) return null;
-  try {
-    const n = normalizeBandcampUrl(u);
-    return n.kind === "artist" ? null : n.url;
-  } catch {
-    return null;
-  }
-}
 
 /** The latest episodes from bandcamp.com/radio, newest first. */
 export function parseRadioList(html: string): RadioShowSummary[] {
@@ -143,7 +120,7 @@ export function parseRadioShow(html: string): ParsedRadioShow {
       artist: clean(t.artistName),
       album_title: clean(t.album?.title) || null,
       art_id: positive(t.album?.artId) ?? positive(t.artId),
-      url: itemUrl(t.album?.url) ?? itemUrl(t.url),
+      url: releaseUrlOrNull(t.album?.url) ?? releaseUrlOrNull(t.url),
       album_id: null,
     }))
     .sort((a, b) => a.timecode - b.timecode);

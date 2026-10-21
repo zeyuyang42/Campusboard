@@ -32,3 +32,8 @@ export class ScrapeError extends Error {
     this.name = "ScrapeError";
   }
 }
+
+/** An error as job rows and logs record it: `[code] message` for a ScrapeError, else its text. */
+export function describeError(e: unknown): string {
+  return e instanceof ScrapeError ? `[${e.code}] ${e.message}` : String(e);
+}

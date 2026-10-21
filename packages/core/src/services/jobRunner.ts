@@ -1,14 +1,15 @@
 import type { Db } from "../db/Db.js";
 import { now } from "../db/Db.js";
 import * as jobs from "../db/repos/jobs.js";
-import { albumUrlsInLibrary } from "../db/repos/albums.js";
+import { albumUrlsInLibrary, getAlbumUrl } from "../db/repos/albums.js";
 import { unmarkRemoving } from "../db/repos/albumRemoval.js";
+import { byBandcampId } from "../db/repos/tracks.js";
 import type { FetchQueue } from "../scrape/http.js";
-import { normalizeBandcampUrl } from "../scrape/url.js";
+import { normalizeBandcampUrl, releaseUrlOrNull } from "../scrape/url.js";
 import { parseMusicPage } from "../scrape/parseMusic.js";
 import { parseTralbumPage } from "../scrape/parseTralbum.js";
-import { ScrapeError } from "../scrape/errors.js";
-import { upsertTralbum } from "./importService.js";
+import { ScrapeError, describeError } from "../scrape/errors.js";
+import { upsertTralbum, vacuumOrphans } from "./importService.js";
 import { cachedFetchText } from "./pageCache.js";
 import { ACCOUNT_KEY, SYNC_KEY, identityHeaders } from "./account.js";
 import { fetchFanList, normalizeFanUsername, parseFanPage, fanPageUrl, type FanList, type FanListResult } from "../scrape/fan.js";
@@ -32,15 +33,6 @@ const COOKIE_NOTES: Partial<Record<CookieStatus, string>> = {
   rejected: "Bandcamp didn't accept the identity cookie (it may have expired), so only the public collection was synced. Paste a fresh one in Settings.",
   other_account: "The identity cookie belongs to a different Bandcamp account than this username, so it wasn't used.",
 };
-
-function safeReleaseUrl(u: string): string | null {
-  try {
-    const n = normalizeBandcampUrl(u);
-    return n.kind === "artist" ? null : n.url;
-  } catch {
-    return null;
-  }
-}
 
 export interface ImportRequest {
   url: string;
@@ -134,8 +126,8 @@ export class JobRunner {
     const username = (await getSetting<{ username?: string }>(this.db, ACCOUNT_KEY))?.username;
     if (!username) throw new ScrapeError("no_account", "Add your Bandcamp username in Settings first");
     await this.afterReset();
-    const active = await this.db.get<{ id: number }>("SELECT id FROM jobs WHERE kind = 'collection' AND status IN ('pending','queued','running') ORDER BY id LIMIT 1");
-    if (active) return (await jobs.getJob(this.db, active.id))!;
+    const active = await jobs.activeJob(this.db, "collection");
+    if (active) return active;
     const job = await jobs.createJob(this.db, "collection", fanPageUrl(username), []);
     if (opts.auto) this.autoSyncs.add(job.id);
     this.onChange();
@@ -152,17 +144,17 @@ export class JobRunner {
    */
   async enqueueDownload(albumId: number, trackIds?: number[]): Promise<Job | null> {
     if (!this.offline?.available) throw new ScrapeError("offline_unavailable", "Offline copies aren't available here");
-    const album = await this.db.get<{ url: string }>("SELECT url FROM albums WHERE id = ?", [albumId]);
-    if (!album) throw new ScrapeError("not_found", `Album ${albumId} is not in the library`);
+    const albumUrl = await getAlbumUrl(this.db, albumId);
+    if (!albumUrl) throw new ScrapeError("not_found", `Album ${albumId} is not in the library`);
     await this.afterReset();
-    const active = await this.db.get<{ id: number }>("SELECT id FROM jobs WHERE kind = 'download' AND input_url = ? AND status IN ('pending','queued','running') ORDER BY id LIMIT 1", [album.url]);
-    if (active) return (await jobs.getJob(this.db, active.id))!;
+    const active = await jobs.activeJob(this.db, "download", albumUrl);
+    if (active) return active;
     const only = trackIds ? new Set(trackIds) : null;
     const rows = (await this.db.select<{ id: number; track_id: number }>(
       "SELECT id, track_id FROM tracks WHERE album_id = ? AND streamable = 1 AND local_path IS NULL ORDER BY track_num, id", [albumId]))
       .filter((r) => !only || only.has(r.id));
     if (!rows.length) return null;
-    const job = await jobs.createJob(this.db, "download", album.url, rows.map((r) => downloadItemUrl(album.url, r.track_id)));
+    const job = await jobs.createJob(this.db, "download", albumUrl, rows.map((r) => downloadItemUrl(albumUrl, r.track_id)));
     this.onChange();
     void this.kick();
     return (await jobs.getJob(this.db, job.id))!;
@@ -171,7 +163,7 @@ export class JobRunner {
   /** Cancel the queued or running download of one album (its URL), or every download. */
   async cancelDownloads(albumUrl?: string): Promise<void> {
     const changed = albumUrl
-      ? (await this.db.run("UPDATE jobs SET status = 'cancelled', updated_at = ? WHERE kind = 'download' AND input_url = ? AND status IN ('pending','queued','running')", [now(), albumUrl])).changes > 0
+      ? (await this.db.run(`UPDATE jobs SET status = 'cancelled', updated_at = ? WHERE kind = 'download' AND input_url = ? AND ${jobs.ACTIVE_SQL}`, [now(), albumUrl])).changes > 0
       : await jobs.cancelJobsOfKind(this.db, "download");
     if (changed) this.onChange();
   }
@@ -217,7 +209,7 @@ export class JobRunner {
         const have = await albumUrlsInLibrary(this.db);
         const force = this.forceFlags.get(job.id) ?? false;
         // Release links come from page markup: queue only URLs that pass the same check as pasted ones.
-        const urls = [...new Set(parsed.items.map((i) => safeReleaseUrl(i.url)).filter((u): u is string => !!u))].filter((u) => force || !have.has(u));
+        const urls = [...new Set(parsed.items.map((i) => releaseUrlOrNull(i.url)).filter((u): u is string => !!u))].filter((u) => force || !have.has(u));
         await jobs.addJobItems(this.db, job.id, urls);
         if (urls.length === 0) {
           await jobs.transitionJob(this.db, job.id, ["running"], "done", parsed.items.length ? "Everything from this artist is already in your library" : "No releases found on this page");
@@ -257,7 +249,7 @@ export class JobRunner {
           // Playlist entries, plays and preferences from an imported library that waited for this album.
           await this.resolveImports(albumId);
         } catch (e) {
-          const msg = e instanceof ScrapeError ? `[${e.code}] ${e.message}` : String(e);
+          const msg = describeError(e);
           console.error(`[job ${job.id}] ${item.url}: ${msg}`);
           await jobs.setItemResult(this.db, item.id, job.id, false, null, msg);
           if (e instanceof ScrapeError && e.code === "client_challenge") {
@@ -297,13 +289,16 @@ export class JobRunner {
       await jobs.transitionJob(this.db, job.id, ["running"], allFailed ? "failed" : "done", why);
     } catch (e) {
       if (e instanceof JobCancelled) return;
-      const msg = e instanceof ScrapeError ? `[${e.code}] ${e.message}` : String(e);
+      const msg = describeError(e);
       console.error(`[job ${job.id}] ${msg}`);
       await jobs.transitionJob(this.db, job.id, ["running", "queued"], "failed", msg);
     } finally {
       this.forceFlags.delete(job.id);
       this.autoSyncs.delete(job.id);
       this.downloadBudgets.delete(job.id);
+      // Once per job, not per item: what the imports left behind (an artist with nothing left,
+      // a single's pseudo-album) goes now; upsertTralbum itself only sweeps when it saw tracks move.
+      await vacuumOrphans(this.db).catch((e) => console.error(`[job ${job.id}] vacuum: ${String(e)}`));
       this.onChange();
     }
   }
@@ -351,16 +346,25 @@ export class JobRunner {
    * back to "queued" and its items stay queued; a challenge on this fetch waits out the
    * new cooldown and retries once. Returns null if the job was cancelled while paused.
    */
-  private async fetchForJob(jobId: number, url: string, init?: JobFetchInit): Promise<string | null> {
+  private fetchForJob(jobId: number, url: string, init?: JobFetchInit): Promise<string | null> {
+    // Plain page GETs share the page cache. Sync requests and anything sent with the
+    // identity cookie don't: those answers are per account and must be fresh.
+    return this.withCooldown(jobId, () => (init ? this.queue.fetchText(url, init) : cachedFetchText(this.db, this.queue, url)));
+  }
+
+  /**
+   * Run one queued request of a job with the cooldown rules: wait out a running cooldown
+   * first (the job shows as queued meanwhile), try again after a `challenge_cooldown` (another
+   * request tripped the gate while this one waited in the queue: not an attempt), and retry
+   * once after a challenge of its own. Null if the job was cancelled while paused.
+   */
+  private async withCooldown<T>(jobId: number, fn: () => Promise<T>): Promise<T | null> {
     for (let challenges = 0; ;) {
       if (!(await this.waitOutCooldown(jobId))) return null;
       try {
-        // Plain page GETs share the page cache. Sync requests and anything sent with the
-        // identity cookie don't: those answers are per account and must be fresh.
-        return init ? await this.queue.fetchText(url, init) : await cachedFetchText(this.db, this.queue, url);
+        return await fn();
       } catch (e) {
         if (!(e instanceof ScrapeError)) throw e;
-        // Another request tripped the gate while this one waited in the queue: not an attempt.
         if (e.code === "challenge_cooldown") continue;
         if (e.code === "client_challenge" && challenges++ === 0) continue;
         throw e;
@@ -377,24 +381,16 @@ export class JobRunner {
     const offline = this.offline;
     if (!offline?.available) throw new ScrapeError("offline_unavailable", "Offline copies aren't available here");
     const bcid = downloadItemTrack(item.url);
-    const t = bcid == null ? null : await this.db.get<{ id: number; album_id: number }>("SELECT id, album_id FROM tracks WHERE track_id = ?", [bcid]);
+    const t = bcid == null ? null : await byBandcampId(this.db, bcid);
     if (!t) throw new ScrapeError("not_found", "The track is no longer in the library");
-    for (let challenges = 0; ;) {
-      if (!(await this.waitOutCooldown(jobId))) return null;
+    return this.withCooldown(jobId, async () => {
       // Checked per track, so the limit stops a job part way (the last copy may pass it a little).
       if (await offline.capReached()) throw new ScrapeError("storage_full", "Offline copies reached the size limit in Settings");
-      try {
-        let budget = this.downloadBudgets.get(jobId);
-        if (!budget) this.downloadBudgets.set(jobId, (budget = { rescrapes: 1 }));
-        await offline.download(t.id, budget);
-        return t.album_id;
-      } catch (e) {
-        if (!(e instanceof ScrapeError)) throw e;
-        if (e.code === "challenge_cooldown") continue;
-        if (e.code === "client_challenge" && challenges++ === 0) continue;
-        throw e;
-      }
-    }
+      let budget = this.downloadBudgets.get(jobId);
+      if (!budget) this.downloadBudgets.set(jobId, (budget = { rescrapes: 1 }));
+      await offline.download(t.id, budget);
+      return t.album_id;
+    });
   }
 
   /**
@@ -474,7 +470,7 @@ export class JobRunner {
     await fan.recomputeOwned(this.db);
     await stillRunning();
     // Item URLs come from Bandcamp's JSON: queue only ones that pass the same check as pasted links.
-    const urls = [...new Set((await fan.missingFetchUrls(this.db)).map(safeReleaseUrl).filter((u): u is string => !!u))];
+    const urls = [...new Set((await fan.missingFetchUrls(this.db)).map(releaseUrlOrNull).filter((u): u is string => !!u))];
     if (urls.length) await jobs.addJobItems(this.db, job.id, urls);
     const counts = await fan.countFanItems(this.db);
     const summary: SyncSummary = {

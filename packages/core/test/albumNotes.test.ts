@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { NodeDb } from "./helpers/nodeDb.js";
-import { fixture } from "./helpers.js";
+import { fixture, waitJob } from "./helpers.js";
 import { parseTralbumPage } from "../src/scrape/parseTralbum.js";
 import { upsertTralbum, vacuumOrphans } from "../src/services/importService.js";
 import { FetchQueue } from "../src/scrape/http.js";
@@ -19,14 +19,6 @@ function runnerFor(db: NodeDb) {
   const pages: Record<string, () => string> = { [ALBUM]: () => fixture("album"), [CUSTOM_ALBUM]: () => fixture("custom-album") };
   const fetch = async (url: string) => (pages[url] ? new Response(pages[url](), { status: 200 }) : new Response("not here", { status: 404 }));
   return new JobRunner(db, new FetchQueue(fetch, 0));
-}
-async function waitJob(db: NodeDb, id: number) {
-  for (let i = 0; i < 400; i++) {
-    const j = (await jobs.getJob(db, id))!;
-    if (j.status !== "queued" && j.status !== "running") return j;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  throw new Error("job did not finish");
 }
 const setUpdated = (db: NodeDb, id: number, at: string) => db.run("UPDATE album_notes SET updated_at = ? WHERE album_id = ?", [at, id]);
 

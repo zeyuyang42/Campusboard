@@ -80,10 +80,14 @@ export function createCore(deps: CoreDeps) {
   const radio = new RadioService(db, queue);
   const previews = new PreviewService(db, queue);
   const refresher = new CollectionRefresher(db, gate, runner, { ...deps.collectionRefresh, onChange: () => deps.onJobsChange?.() });
+  /** Cancel the album's download job, if one is queued or running (jobs name the album by URL). */
+  const cancelAlbumDownloads = async (id: number) => {
+    const url = await albums.getAlbumUrl(db, id);
+    if (url) await runner.cancelDownloads(url);
+  };
   /** The full delete: queued downloads cancelled, rows (notes, plays, resume points with them), then offline files. */
   const deleteAlbumNow = async (id: number) => {
-    const a = await albums.getAlbum(db, id);
-    if (a) await runner.cancelDownloads(a.url);
+    await cancelAlbumDownloads(id);
     return albums.deleteAlbum(db, id);
   };
   // Removals with Undo (#93) run one after another; each deletes only albums still marked,
@@ -142,10 +146,11 @@ export function createCore(deps: CoreDeps) {
     /** Delete the albums removed with removeAlbumLater (all, or just `ids`). Returns how many. */
     finishAlbumRemovals: (ids?: number[]) => finishRemovals(ids),
     refreshAlbum: async (id: number) => {
-      const a = await albums.getAlbum(db, id);
-      if (a) await refreshAlbum(db, queue, id, a.url);
+      const url = await albums.getAlbumUrl(db, id);
+      if (!url) return null;
+      await refreshAlbum(db, queue, id, url);
       // A track Bandcamp dropped from the album is gone from the library, and so is its copy.
-      if (a) await sweepOffline();
+      await sweepOffline();
       return albums.getAlbumWithTracks(db, id);
     },
     artists: () => artists.listArtists(db),
@@ -161,8 +166,7 @@ export function createCore(deps: CoreDeps) {
       const url = n.kind === "artist" ? n.url : `https://${n.host}/music`;
       const parsed = parseMusicPage(await cachedFetchText(db, queue, url), `https://${n.host}`);
       // An album waiting for its delete (#93) reads as not in the library, as everywhere else.
-      const rows = await db.select<{ id: number; url: string }>(`SELECT al.id, al.url FROM albums al WHERE ${albumRemoval.NOT_REMOVING}`);
-      const byUrl = new Map(rows.map((r) => [r.url, r.id]));
+      const byUrl = await albums.albumIdsByUrl(db, parsed.items.map((i) => i.url));
       // Report the canonical address (custom domain if any), not whichever one was typed.
       return { url: `${parsed.origin}/music`, band: parsed.band, items: parsed.items.map((i) => ({ ...i, album_id: byUrl.get(i.url) ?? null })) };
     },
@@ -172,11 +176,7 @@ export function createCore(deps: CoreDeps) {
      */
     discover: async (params: DiscoverParams, cursor: string | null = null): Promise<DiscoverPage> => {
       const page = await discoverBatch(queue, params, cursor);
-      const urls = [...new Set(page.items.map((i) => i.url))];
-      const rows = urls.length
-        ? await db.select<{ id: number; url: string }>(`SELECT al.id, al.url FROM albums al WHERE al.url IN (${urls.map(() => "?").join(", ")}) AND ${albumRemoval.NOT_REMOVING}`, urls)
-        : [];
-      const byUrl = new Map(rows.map((r) => [r.url, r.id]));
+      const byUrl = await albums.albumIdsByUrl(db, page.items.map((i) => i.url));
       return { ...page, items: page.items.map((i) => ({ ...i, album_id: byUrl.get(i.url) ?? null })) };
     },
     /** Bandcamp's tag autocomplete (2+ characters). */
@@ -200,8 +200,8 @@ export function createCore(deps: CoreDeps) {
       const n = normalizeBandcampUrl(input);
       if (n.kind === "artist") throw new ScrapeError("invalid_url", "Not an album or track link");
       const inLibrary = async (url: string): Promise<ReleasePreview | null> => {
-        const row = await db.get<{ id: number }>(`SELECT al.id FROM albums al WHERE al.url = ? AND ${albumRemoval.NOT_REMOVING}`, [url]);
-        const a = row ? await albums.getAlbumWithTracks(db, row.id) : null;
+        const id = (await albums.albumIdsByUrl(db, [url])).get(url);
+        const a = id ? await albums.getAlbumWithTracks(db, id) : null;
         // An imported pre-order with nothing out yet: the page may have tracks by now.
         return a && a.tracks.some((t) => t.streamable) ? { album_id: a.id, title: a.title, tracks: a.tracks.filter((t) => t.streamable).map((t) => ({ ...t, album_title: a.title, artist_name: a.artist_name, art_id: a.art_id })), start: 0 } : null;
       };
@@ -274,8 +274,10 @@ export function createCore(deps: CoreDeps) {
     // search
     search: async (q: string): Promise<SearchResult[]> => {
       if (q.trim().length < 2) return [];
-      const [raw, albumUrls, artistUrls] = await Promise.all([searchBandcamp(queue, q), albums.albumUrlsInLibrary(db), albums.artistUrlsInLibrary(db)]);
-      return raw.map((r) => ({ ...r, in_library: r.type === "band" ? artistUrls.has(r.url) : albumUrls.has(r.url) }));
+      const [raw, artistUrls] = await Promise.all([searchBandcamp(queue, q), albums.artistUrlsInLibrary(db)]);
+      // Only the results' own URLs are looked up (an album waiting for its delete, #93, reads as absent).
+      const albumIds = await albums.albumIdsByUrl(db, raw.filter((r) => r.type !== "band").map((r) => r.url));
+      return raw.map((r) => ({ ...r, in_library: r.type === "band" ? artistUrls.has(r.url) : albumIds.has(r.url) }));
     },
     // playback
     getFreshStreamUrl: (trackId: number, force = false) => getFreshStreamUrl(db, queue, trackId, force),
@@ -285,23 +287,19 @@ export function createCore(deps: CoreDeps) {
     localTrackUrl: (trackId: number) => offline.localUrl(trackId),
     /** Queue offline copies of an album's tracks (or just `trackIds`) as a download job; null if all are saved. */
     downloadAlbum: (albumId: number, trackIds?: number[]) => runner.enqueueDownload(albumId, trackIds),
+    /** The album's download job while it is pending, queued or running (with its items), or null. */
+    downloadJobFor: async (albumId: number) => {
+      const url = await albums.getAlbumUrl(db, albumId);
+      return url ? jobs.activeJob(db, "download", url) : null;
+    },
     /** Cancel the album's download if one is queued, and remove its offline copies. */
     removeAlbumDownloads: async (albumId: number) => {
-      const a = await albums.getAlbum(db, albumId);
-      if (a) await runner.cancelDownloads(a.url);
+      await cancelAlbumDownloads(albumId);
       return offline.removeAlbum(albumId);
     },
     removeTrackDownloads: (trackIds: number[]) => offline.remove(trackIds),
-    /** Which of these tracks have an offline copy (by the rows; one query, no file checks). */
-    downloadedTrackIds: async (trackIds: number[]): Promise<number[]> => {
-      const ids = trackIds.filter((id) => id > 0).slice(0, 10_000);
-      const out: number[] = [];
-      for (let i = 0; i < ids.length; i += 500) {
-        const chunk = ids.slice(i, i + 500);
-        out.push(...(await db.select<{ id: number }>(`SELECT id FROM tracks WHERE local_path IS NOT NULL AND id IN (${chunk.map(() => "?").join(",")})`, chunk)).map((r) => r.id));
-      }
-      return out;
-    },
+    /** Which of these tracks have an offline copy (by the rows; one query per 500, no file checks). */
+    downloadedTrackIds: (trackIds: number[]): Promise<number[]> => tracks.downloadedIds(db, trackIds.filter((id) => id > 0).slice(0, 10_000)),
     /** Cancel every download and remove every offline copy. */
     removeAllDownloads: async () => { await runner.cancelDownloads(); return offline.removeAll(); },
     offlineStats: () => offline.stats(),

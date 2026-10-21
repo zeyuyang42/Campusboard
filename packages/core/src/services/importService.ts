@@ -1,5 +1,5 @@
 import type { Db } from "../db/Db.js";
-import { now, valuesList } from "../db/Db.js";
+import { chunks, now, placeholders, valuesList } from "../db/Db.js";
 import { upsertArtist } from "../db/repos/artists.js";
 import { undismiss } from "../db/repos/fanItems.js";
 import type { ParsedTralbum } from "../scrape/parseTralbum.js";
@@ -11,6 +11,10 @@ import type { ParsedTralbum } from "../scrape/parseTralbum.js";
  * There is no transaction (the SQL plugin pools connections), so the statements
  * are ordered such that an interruption at any point leaves a consistent library:
  * parents before children, deletes last, and every step safe to repeat.
+ *
+ * vacuumOrphans runs only when this write can have left orphans behind (tracks that left
+ * another album or were dropped from this one, an album that changed artist), so a stream
+ * URL refresh on the play path costs no sweep; the job runner sweeps once per job as well.
  */
 export async function upsertTralbum(db: Db, p: ParsedTralbum): Promise<number> {
   // A single-track page whose track already lives in a real album: only refresh stream info.
@@ -26,6 +30,9 @@ export async function upsertTralbum(db: Db, p: ParsedTralbum): Promise<number> {
   }
 
   const artistId = await upsertArtist(db, p.artist);
+  // A release that moved to another band page leaves its old artist, maybe with nothing else.
+  const prev = await db.get<{ artist_id: number }>("SELECT artist_id FROM albums WHERE item_type = ? AND bandcamp_id = ?", [p.item_type, p.bandcamp_id]);
+  let orphans = !!prev && prev.artist_id !== artistId;
   // `owned` follows the synced collection (fan_items), so any import of a purchased release is flagged.
   const album = await db.get<{ id: number }>(
     `INSERT INTO albums (bandcamp_id, item_type, artist_id, title, url, art_id, release_date, about, credits, tags_json, is_preorder, fetched_at, owned)
@@ -42,9 +49,16 @@ export async function upsertTralbum(db: Db, p: ParsedTralbum): Promise<number> {
   const albumId = album!.id;
   await undismiss(db, p.item_type, p.bandcamp_id, p.tracks.map((t) => t.track_id));
 
+  const ids = p.tracks.map((t) => t.track_id);
+  // A track that lives in another album so far (a single's pseudo-album, when the album comes
+  // in) moves here below and leaves that album behind.
+  for (const chunk of chunks(ids, 500)) {
+    if (orphans) break;
+    orphans = !!(await db.get(`SELECT 1 AS x FROM tracks WHERE album_id != ? AND track_id IN (${placeholders(chunk.length)}) LIMIT 1`, [albumId, ...chunk]));
+  }
+
   const COLS = 11;
-  for (let i = 0; i < p.tracks.length; i += 100) {
-    const chunk = p.tracks.slice(i, i + 100);
+  for (const chunk of chunks(p.tracks, 100)) {
     await db.run(
       `INSERT INTO tracks (track_id, album_id, title, track_num, duration, track_artist, streamable, stream_url, stream_quality, stream_expires_at, lyrics)
        VALUES ${valuesList(chunk.length, COLS)}
@@ -57,10 +71,10 @@ export async function upsertTralbum(db: Db, p: ParsedTralbum): Promise<number> {
   }
 
   if (p.item_type === "album") {
-    const ids = p.tracks.map((t) => t.track_id);
-    await db.run(`DELETE FROM tracks WHERE album_id = ? ${ids.length ? `AND track_id NOT IN (${ids.map(() => "?").join(",")})` : ""}`, [albumId, ...ids]);
+    const r = await db.run(`DELETE FROM tracks WHERE album_id = ? ${ids.length ? `AND track_id NOT IN (${placeholders(ids.length)})` : ""}`, [albumId, ...ids]);
+    orphans ||= r.changes > 0;
   }
-  await vacuumOrphans(db);
+  if (orphans) await vacuumOrphans(db);
   return albumId;
 }
 

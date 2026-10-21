@@ -1,5 +1,5 @@
 import type { Db } from "../Db.js";
-import { valuesList } from "../Db.js";
+import { chunks, placeholders, valuesList } from "../Db.js";
 import type { FanItem, FanList } from "../../scrape/fan.js";
 
 /** SQL guard: the sync job is still running (not cancelled by removing or changing the account). */
@@ -13,8 +13,7 @@ const JOB_RUNNING = "EXISTS (SELECT 1 FROM jobs WHERE id = ? AND status = 'runni
  */
 export async function upsertFanItems(db: Db, list: FanList, items: FanItem[], jobId: number): Promise<void> {
   const COLS = 8;
-  for (let i = 0; i < items.length; i += 100) {
-    const chunk = items.slice(i, i + 100);
+  for (const chunk of chunks(items, 100)) {
     await db.run(
       `INSERT INTO fan_items (list, item_type, bandcamp_id, url, fetch_url, title, artist, sync_job)
        SELECT * FROM (VALUES ${valuesList(chunk.length, COLS)}) WHERE ${JOB_RUNNING}
@@ -48,7 +47,7 @@ export async function dismissAlbum(db: Db, albumId: number): Promise<void> {
 export async function undismiss(db: Db, itemType: string, bandcampId: number, trackIds: number[]): Promise<void> {
   await db.run(
     `DELETE FROM fan_dismissed WHERE (item_type = ? AND bandcamp_id = ?)
-     ${trackIds.length ? `OR (item_type = 'track' AND bandcamp_id IN (${trackIds.map(() => "?").join(",")}))` : ""}`,
+     ${trackIds.length ? `OR (item_type = 'track' AND bandcamp_id IN (${placeholders(trackIds.length)}))` : ""}`,
     [itemType, bandcampId, ...trackIds],
   );
 }

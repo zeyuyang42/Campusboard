@@ -1,6 +1,7 @@
 // The sleep timer (#70): stop playback after a while or at a natural break. Pure rules; the
 // player store owns the timer, the audio elements and the fade. Not persisted.
 import { positionToGain } from "./volume.js";
+import { clock } from "./time.js";
 
 /** What the listener picked: minutes from now, the end of the current track, or of its album. */
 export type SleepChoice = "off" | 15 | 30 | 45 | 60 | "track" | "album";
@@ -50,8 +51,7 @@ export function sleepScale(secondsLeft: number): number {
 /** The element gain for a slider position under the fade: through the perceptual curve (#36). */
 export const sleepGain = (volume: number, scale: number) => positionToGain(volume * scale);
 
-/** The quiet countdown in the player bar: m:ss for the minutes timer. */
+/** The quiet countdown in the player bar: m:ss for the minutes timer (a full hour reads "60:00"). */
 export function formatSleepLeft(sec: number): string {
-  const s = Math.max(0, Math.ceil(sec));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  return clock(Math.max(0, Math.ceil(sec)), false);
 }

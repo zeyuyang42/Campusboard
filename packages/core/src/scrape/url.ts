@@ -19,6 +19,11 @@ export function isBandcampHost(host: string): boolean {
   return h === "bandcamp.com" || h.endsWith(".bandcamp.com");
 }
 
+/** A URL's host as the app compares it: lower case, without a trailing dot. */
+export function hostOf(u: URL): string {
+  return u.hostname.toLowerCase().replace(/\.$/, "");
+}
+
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 /** Suffixes that name machines on a local or private network, never a public artist site. */
 const PRIVATE_SUFFIXES = [".local", ".localhost", ".internal", ".lan", ".home.arpa", ".localdomain", ".intranet", ".corp"];
@@ -28,7 +33,7 @@ const PRIVATE_SUFFIXES = [".local", ".localhost", ".internal", ".lan", ".home.ar
  * name over http(s), no port, credentials, IP literal, bare hostname or private suffix.
  */
 export function isPublicCustomHost(u: URL): boolean {
-  const host = u.hostname.toLowerCase().replace(/\.$/, "");
+  const host = hostOf(u);
   if (u.protocol !== "https:" && u.protocol !== "http:") return false;
   if (u.port || u.username || u.password) return false;
   if (!host.includes(".") || IPV4.test(host) || host.startsWith("[") || host === "localhost") return false;
@@ -67,7 +72,7 @@ export function normalizeBandcampUrl(input: string): NormalizedUrl {
     throw new ScrapeError("invalid_url", `Not a valid URL: ${input}`);
   }
   if (u.protocol !== "https:" && u.protocol !== "http:") throw new ScrapeError("invalid_url", `Not a web URL: ${input}`);
-  const host = u.hostname.toLowerCase().replace(/\.$/, "");
+  const host = hostOf(u);
   const custom = !isBandcampHost(host);
   if (host === "www.bandcamp.com" || host === "bandcamp.com") {
     throw new ScrapeError("not_bandcamp", `Expected an artist page like name.bandcamp.com, got ${host}`);
@@ -87,4 +92,20 @@ export function normalizeBandcampUrl(input: string): NormalizedUrl {
   }
   if (custom) throw new ScrapeError("not_bandcamp", `${host}${pathname} doesn't look like a Bandcamp album, track or artist page`);
   throw new ScrapeError("invalid_url", `Unsupported Bandcamp path: ${pathname}`);
+}
+
+/**
+ * An album or track URL in canonical form, or null: for an artist page, anything
+ * normalizeBandcampUrl refuses, or no URL at all. For links that come from page markup or
+ * Bandcamp's JSON, so every one passes the same check as a pasted URL (no LAN hosts,
+ * Bandcamp-shaped paths only) before it is queued, stored or shown.
+ */
+export function releaseUrlOrNull(u: string | null | undefined): string | null {
+  if (!u) return null;
+  try {
+    const n = normalizeBandcampUrl(u);
+    return n.kind === "artist" ? null : n.url;
+  } catch {
+    return null;
+  }
 }
