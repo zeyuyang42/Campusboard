@@ -132,6 +132,17 @@ export class BackdropEngine {
     this.kick();
   }
 
+  /** The shader clock in seconds (window.__bcBackdrop.time). */
+  get time(): number { return this.clock.time; }
+
+  /** Debug: jump the shader clock (window.__bcBackdrop.setTime), so Playwright can land on a glitch burst. */
+  setTime(seconds: number) {
+    if (!Number.isFinite(seconds)) return; // NaN would poison the clock for good
+    this.clock.time = Math.max(0, seconds);
+    this.dirty = true;
+    this.kick();
+  }
+
   dispose() {
     if (this.pending !== null) { this.deps.cancel(this.pending); this.pending = null; }
     this.attach(null);
@@ -190,6 +201,8 @@ export class BackdropEngine {
       colA: a.col, wA: a.w, colB: b.col, wB: b.w,
       seed: fading && this.fadeStart !== null ? this.seedA + (this.seedB - this.seedA) * fadeMix(this.fadeStart, now) : this.seedA,
       dark: i.dark,
+      // A frozen frame must not be caught mid-burst (glitch), so the shader learns it is one.
+      still: !drifting,
     };
     // Only a frame that reached the canvas counts (a lost context or a failed program draws nothing).
     if (this.gl.render(u)) this.frames++;

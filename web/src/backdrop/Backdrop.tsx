@@ -22,10 +22,18 @@ export const engine = new BackdropEngine({
 });
 
 declare global {
-  interface Window { __bcBackdrop?: { readonly state: BackdropState; readonly frames: number } }
+  interface Window {
+    /** For Playwright and the selftest: the engine's state, frame count and shader clock; setTime jumps the clock (debug only). */
+    __bcBackdrop?: { readonly state: BackdropState; readonly frames: number; readonly time: number; setTime(seconds: number): void };
+  }
 }
 if (typeof window !== "undefined") {
-  window.__bcBackdrop = { get state() { return engine.state; }, get frames() { return engine.frames; } };
+  window.__bcBackdrop = {
+    get state() { return engine.state; },
+    get frames() { return engine.frames; },
+    get time() { return engine.time; },
+    setTime: (seconds: number) => engine.setTime(seconds),
+  };
 }
 
 export function Backdrop() {

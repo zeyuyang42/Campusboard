@@ -16,6 +16,8 @@ export interface GlUniforms {
   wB: Float32Array;
   seed: number;
   dark: boolean;
+  /** True when the picture is frozen (paused, still, Reduce motion): the glitch style draws no burst then. */
+  still: boolean;
 }
 
 /** What the engine drives; tests stub it, the app gets createGl's. */
@@ -32,7 +34,7 @@ export interface GlHooks { onLost(): void; onRestored(): void; onFailed(): void 
 export type GlFactory = (canvas: HTMLCanvasElement, hooks: GlHooks) => GlLike | null;
 
 interface Program { program: WebGLProgram; loc: Record<string, WebGLUniformLocation | null> }
-const UNIFORMS = ["u_time", "u_res", "u_intensity", "u_mix", "u_surface", "u_colA", "u_wA", "u_colB", "u_wB", "u_seed", "u_dark"];
+const UNIFORMS = ["u_time", "u_res", "u_intensity", "u_mix", "u_surface", "u_colA", "u_wA", "u_colB", "u_wB", "u_seed", "u_dark", "u_still"];
 
 function compile(gl: WebGLRenderingContext, type: number, src: string): WebGLShader | null {
   const sh = gl.createShader(type);
@@ -168,6 +170,7 @@ export const createGl: GlFactory = (canvas, hooks) => {
       ctx.uniform1fv(p.loc.u_wB, u.wB.subarray(0, SWATCH_SLOTS));
       ctx.uniform1f(p.loc.u_seed, u.seed);
       ctx.uniform1f(p.loc.u_dark, u.dark ? 1 : 0);
+      ctx.uniform1f(p.loc.u_still, u.still ? 1 : 0);
       ctx.drawArrays(ctx.TRIANGLES, 0, 3);
       return true;
     },

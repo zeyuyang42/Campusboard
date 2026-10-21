@@ -62,8 +62,8 @@ describe("backdropState (pure)", () => {
     expect(backdropState({ ...base, status: "loading" })).toBe("gl-frozen");
   });
   it("fps, fade curve, frame gate, drift clock and buffer size", () => {
-    expect(fps("grain")).toBe(4);
-    for (const s of ["ink", "aurora", "lava"] as const) expect(fps(s)).toBe(30);
+    // Every style is capped at 30 since #113 (the glitch style replaced the 4 fps grain gradient).
+    for (const s of ["ink", "aurora", "glitch", "lava"] as const) expect(fps(s)).toBe(30);
     expect(fadeMix(0, 0)).toBe(0);
     expect(fadeMix(0, FADE_MS / 2)).toBeCloseTo(0.5);
     expect(fadeMix(0, FADE_MS * 2)).toBe(1);
@@ -178,18 +178,51 @@ describe("BackdropEngine", () => {
     expect(h.states).toContain("gl-fading");
   });
 
-  it("the grain style draws at 4 fps", () => {
+  it("the glitch style draws at 30 fps like the others, and a style switch asks GL for the new program", () => {
     const h = makeEngine();
-    h.engine.setInput({ ...morph, style: "grain", status: "playing" });
+    h.engine.setInput({ ...morph, style: "glitch", status: "playing" });
     h.engine.attach(h.canvas);
     h.engine.setSwatches(pal("#ff0000"), 1);
-    h.run(2000);
-    expect(h.frames()).toBeGreaterThanOrEqual(8);
-    expect(h.frames()).toBeLessThanOrEqual(10);
-    h.engine.setInput({ style: "ink" });
+    h.run(1000);
+    expect(h.frames()).toBeGreaterThanOrEqual(29);
+    expect(h.frames()).toBeLessThanOrEqual(32);
+    expect(h.gl.setStyle).toHaveBeenLastCalledWith("glitch");
+    h.engine.setInput({ style: "aurora" });
+    expect(h.gl.setStyle).toHaveBeenLastCalledWith("aurora");
     const n = h.frames();
     h.run(1000);
     expect(h.frames() - n).toBeGreaterThanOrEqual(29);
+  });
+
+  it("u_still: a drifting frame is not still, a frozen one (paused, Still, Reduce motion) is, even mid-fade", () => {
+    const h = makeEngine();
+    h.engine.setInput({ ...morph, status: "playing" });
+    h.engine.attach(h.canvas);
+    h.engine.setSwatches(pal("#ff0000"), 1);
+    h.run(200);
+    expect(h.renders.at(-1)!.still).toBe(false);
+    // A track change while playing: the fade runs with the drift, so the glitch burst may show.
+    h.engine.setSwatches(pal("#00ff00"), 2);
+    h.run(500);
+    expect(h.engine.state).toBe("gl-fading");
+    expect(h.renders.at(-1)!.still).toBe(false);
+    h.engine.setInput({ status: "paused" });
+    h.run(100);
+    expect(h.renders.at(-1)!.still).toBe(true);
+    for (const patch of [{ status: "playing", motion: "still" as const }, { motion: "drift" as const, reducedMotion: true }]) {
+      h.engine.setInput(patch);
+      h.run(100);
+      expect(h.renders.at(-1)!.still).toBe(true);
+    }
+    // The debug clock hook (window.__bcBackdrop.setTime) jumps the shader clock and redraws once while frozen.
+    h.run(2500); // the fade ends, the picture is frozen
+    expect(h.engine.state).toBe("gl-frozen");
+    const n = h.frames();
+    h.engine.setTime(42);
+    h.run(100);
+    expect(h.engine.time).toBe(42);
+    expect(h.renders.at(-1)!.time).toBe(42);
+    expect(h.frames()).toBe(n + 1);
   });
 
   it("a lost context falls back to CSS (no frames) and a restored one draws again", () => {

@@ -128,7 +128,7 @@ delete **Bandcamp Player.app** (and re-pin Campusboard in the Dock if you kept t
   `.theme.json` you can send to a friend; Import loads one.
 - **Backdrop**: the playing album's colours fill the window behind frosted
   panels. Settings → Backdrop picks the mode: Generative (a slow, animated
-  picture in one of four styles: fluid ink, aurora bands, grain gradient, lava
+  picture in one of four styles: fluid ink, aurora curtains, glitch, lava
   blobs), Ambient wash (two drifting colour washes), or Conservative (the
   earlier look: a faint wash and solid panels). Intensity sets how much colour
   shows; Motion → Still keeps the picture fixed. The picture pauses with the
@@ -178,9 +178,9 @@ theme can't break the app. Example:
 `accent` is only used when nothing is playing; while a track plays, the accent
 and the backdrop come from its artwork, clamped so text stays readable.
 `backdrop.mode` is `"conservative"`, `"wash"` or `"morph"`; `style` (for morph)
-is `"ink"`, `"aurora"`, `"grain"` or `"lava"`; `intensity` is 0 to 1 and
-`motion` is `"drift"` or `"still"`. A theme file without `backdrop` loads with
-the default (morph, ink).
+is `"ink"`, `"aurora"`, `"glitch"` or `"lava"` (`"grain"`, the 0.9.0 name of
+glitch, still loads); `intensity` is 0 to 1 and `motion` is `"drift"` or
+`"still"`. A theme file without `backdrop` loads with the default (morph, ink).
 
 `mode` is `"dark"`, `"light"` or `"system"`. A system theme follows the Mac's
 appearance as it changes and needs both sides as `paletteDark` and

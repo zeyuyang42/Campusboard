@@ -13,11 +13,13 @@ export const PaletteSchema = z.object({
 });
 
 export const BACKDROP_MODES = ["conservative", "wash", "morph"] as const;
-export const BACKDROP_STYLES = ["ink", "aurora", "grain", "lava"] as const;
+export const BACKDROP_STYLES = ["ink", "aurora", "glitch", "lava"] as const;
+/** "grain" was the 0.9.0 name of the style that became "glitch" (#113); saved themes and theme files still say it. */
+const STYLE_ALIASES: Record<string, (typeof BACKDROP_STYLES)[number]> = { grain: "glitch" };
 export const BackdropSchema = z.object({
   mode: z.enum(BACKDROP_MODES),
   /** The generative style, used by "morph" only (kept across mode switches). */
-  style: z.enum(BACKDROP_STYLES),
+  style: z.preprocess((v) => (typeof v === "string" && Object.prototype.hasOwnProperty.call(STYLE_ALIASES, v) ? STYLE_ALIASES[v] : v), z.enum(BACKDROP_STYLES)),
   /** How much of the surface the art colours take: 0 is the bare surface, 1 is full colour. */
   intensity: z.number().min(0).max(1),
   /** "still": no drift at all, only the cross-fade on a track change. */
@@ -60,7 +62,7 @@ export const ThemeSchema = z.object({
    * The album-art backdrop (#110). "conservative" is the look before it: the two corner washes
    * at `ambient` strength and opaque panels. "wash" drifts those washes in CSS; "morph" paints
    * a generative canvas in one of four styles. Additive with a default, so older saved themes
-   * and theme files still parse (version stays 1).
+   * and theme files still parse (version stays 1); so does the renamed style (STYLE_ALIASES).
    */
   backdrop: BackdropSchema.default(DEFAULT_BACKDROP),
 }).refine((t) => t.mode !== "system" || (t.paletteDark && t.paletteLight), {

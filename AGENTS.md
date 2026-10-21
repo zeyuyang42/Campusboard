@@ -468,12 +468,14 @@ src-tauri/
   lightness by rank and turns grey art into a tinted neutral at read time, so tuning the boost
   never invalidates the cache. `core.getArtSwatches` fills both caches from one request, as
   does `getArtPalette`. Theme `backdrop` (schema version still 1, defaulted additively):
-  `mode` conservative / wash / morph, `style` ink / aurora / grain / lava, `intensity`,
-  `motion` drift / still; new and existing installs land on morph + ink. `applyTheme` writes
+  `mode` conservative / wash / morph, `style` ink / aurora / glitch / lava (`grain` in a saved
+  theme or theme file is the 0.9.0 name of glitch, mapped by `STYLE_ALIASES` in schema.ts; see
+  the #113 fact below), `intensity`, `motion` drift / still; new and existing installs land on
+  morph + ink. `applyTheme` writes
   `data-backdrop` on `:root` (the mini window gets it with the theme). Morph is raw WebGL1
   (one fullscreen triangle, GLSL as template strings: no three.js, no worker, no blob:, CSP
-  unchanged), rendered at half the window size (DPR ignored, max 960×540) at 30 fps (grain
-  4), with `powerPreference: "low-power"`. The rules live in `backdrop/controller.ts`:
+  unchanged), rendered at half the window size (DPR ignored, max 960×540) at 30 fps for every
+  style (`controller.ts` `fps`), with `powerPreference: "low-power"`. The rules live in `backdrop/controller.ts`:
   anything but a playing track, a hidden document, `motion: still` or Reduce motion freezes
   the canvas on its last frame (no frames at all, and the shader clock keeps its phase); a
   track change cross-fades the two palettes for 2 s even while frozen; a lost context, or no
@@ -481,7 +483,8 @@ src-tauri/
   `WEBGL_lose_context.loseContext()` on a canvas that may be reused: a canvas has one context
   for life and React StrictMode remounts the effect in dev. `webglAvailable()` is reported by
   the selftest's `window` block (`webgl`, plus `backdrop.state`/`frames`), and
-  `window.__bcBackdrop = {state, frames}` is there for Playwright. Verified 2026-10-21 in
+  `window.__bcBackdrop = {state, frames, time, setTime}` is there for Playwright (`setTime`
+  jumps the shader clock, debug only: it lands a screenshot on a glitch burst). Verified 2026-10-21 in
   headless Chromium (SwiftShader): playing → `gl-drift` at ~31 fps, pause → `gl-frozen` with
   frames stopped, a palette change while paused → `gl-fading` for 2 s then frozen, Reduce
   motion → frozen; heading contrast over the frosted panels stayed ≥ 7.7:1 on every preset
@@ -493,6 +496,35 @@ src-tauri/
   in `controller.ts` (`fps`), not the shaders. A release build and Activity Monitor on an
   M-series Mac have not been read yet. The selftest's `backdrop` block (5 s with blur, 5 s
   without, then paused) writes `selftest_progress` steps a sampler outside the app can key on.
+- Backdrop styles (#113, 2026-10-21). The first aurora (thin horizontal ribbons) and grain
+  gradient (blurred blobs plus 3% grain at 4 fps) were "not obvious" in use; fluid ink and lava
+  blobs stayed. Aurora is now five tall curtains, one swatch each, spread across the width:
+  each sheet swings in x along its height (period 17 s, `s = u_time * 0.37`, plus a noise
+  wander), has a brighter core, is streaked by fine vertical rays (value noise stretched along
+  y, sampled in the sheet's own frame so the streaks bend with it) and fades toward the top
+  from a wavy hem. Overlaps average the colours and build coverage (`1 - exp(-wsum * 1.8)`),
+  brighter on dark and deeper on light, so nothing blows out on a light surface. The grain
+  gradient became "glitch": the palette as 7 posterized bands with a 4×4 Bayer dither and a
+  stepped lightness (so a one-colour palette still bands), calm until a burst. Bursts are pure
+  functions of `u_time` and `u_mix`, no CPU state: one 0.5 s burst per 5 s slot at a hashed
+  offset (2–8 s apart, the same for the same seed), and the track-change cross-fade
+  (`u_mix * (1 - u_mix) * 4.4`) is a stronger ~1.4 s one. A burst tears coarse and fine
+  horizontal slabs sideways (re-rolled every 1/12 s), jumps some slabs to a neighbouring band,
+  splits the channels and flashes 2–6 rectangles of static. `u_still` (the engine passes
+  `!drifting`: paused, Still, Reduce motion, hidden) clamps the burst to 0, so a frozen frame is
+  never mid-tear and a track change while paused only cross-fades the bands. The style value
+  `grain` is accepted and read as `glitch` (`STYLE_ALIASES`, a zod preprocess, schema version
+  still 1); the UI and new files only write `glitch`. Both styles run at the common 30 fps cap.
+  Shader rule: `hash()` (fract of `p * 456`) runs out of float bits once an input passes a few
+  thousand, and the drift clock is unbounded (hours of play), so nothing that grows with
+  `u_time` may reach a hash unwrapped. `noise()` wraps its lattice at 256 cells (every corner,
+  so the wrap is seamless), which covers ink's and aurora's time-shifted fbm/noise; glitch takes
+  its slot and frame counters `mod 512` / `mod 256` (and `mod 64` for the per-pixel static).
+  Plain `sin`/`cos` of a large `u_time` (lava, the glitch gradient) are fine. Checked in
+  Playwright with `__bcBackdrop.setTime(3600)` and `setTime(10800)`: the static must still
+  speckle (pixels with both a brighter and a darker neighbour), not collapse into flat slabs.
+  The static's speckle is the band colour pushed 35% toward black or white at 8 Hz, never full
+  black/white flicker (photosensitivity).
 - Conservative CSS is byte-identical: every rule the backdrop adds to `styles.css` and
   `mini.css` is scoped under `:root:not([data-backdrop="conservative"])`, and the conservative
   mode renders exactly the old DOM (`.ambient > .bg + .wash`). Keep it that way: a new
