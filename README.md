@@ -10,7 +10,9 @@
 
 ![Library](docs/library.png)
 
-![Now playing](docs/now-playing.png)
+![Discover](docs/discover.png)
+
+<p align="center"><a href="docs/screenshots.md">More screenshots</a>: Search, Radio and Now playing</p>
 
 Bandcamp has no public API, so the app reads the JSON that Bandcamp embeds in
 its own album pages (the same data the official player uses) and streams audio
