@@ -6,6 +6,7 @@ import { libraryTagPath } from "../lib/navigation";
 import { useUi } from "../ui/store";
 import { friendlyError } from "../lib/errors";
 import { formatPlays } from "../lib/format";
+import { useDebounced } from "../lib/useDebounced";
 import { AlbumCard } from "../components/AlbumCard";
 import { BulkBar } from "../components/BulkBar";
 import { SHOW_LABELS, SORT_LABELS } from "../lib/bulkPlay";
@@ -44,16 +45,6 @@ const FILTER_NAME: Record<string, string> = { purchased: "your purchases", wishl
 
 /** A rating as quiet text under a card, e.g. "★★★★"; nothing when unrated. */
 const starsText = (r = 0) => (r > 0 ? "★".repeat(r) : "");
-
-/** `value`, but only after it has stopped changing for `ms`. */
-function useDebounced<T>(value: T, ms: number): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(id);
-  }, [value, ms]);
-  return v;
-}
 
 /** The filter field: `/` focuses it on the Library page, Esc clears it (or leaves it when empty). */
 function FilterInput({ value, onChange, placeholder }: { value: string; onChange: (q: string) => void; placeholder: string }) {

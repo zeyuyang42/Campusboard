@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { normalizePlaylistName, PLAYLIST_NAME_MAX, repos } from "@bc/core";
 import { useSmartCount, useTags } from "../api/queries";
 import { plural, SHOW_LABELS, SORT_LABELS } from "../lib/bulkPlay";
 import { friendlyError } from "../lib/errors";
+import { useDebounced } from "../lib/useDebounced";
 
 type Played = "any" | "within" | "not";
 
@@ -10,18 +11,6 @@ type Played = "any" | "within" | "not";
 export const SMART_DEFAULT_LIMIT = 500;
 /** The live count waits this long after the last change. */
 export const SMART_COUNT_DEBOUNCE_MS = 250;
-
-/** `value`, but only after it has stopped changing for `ms` (compared as JSON). */
-function useDebounced<T>(value: T, ms: number): T {
-  const [v, setV] = useState(value);
-  const key = JSON.stringify(value);
-  useEffect(() => {
-    const id = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, ms]);
-  return v;
-}
 
 interface Draft {
   name: string;
@@ -83,7 +72,7 @@ export function SmartRuleEditor({ rule, name, saveLabel, onSave, onCancel }: {
   const { data: tags } = useTags("all");
   const r = ruleOf(d);
   const cleanName = name === null ? null : normalizePlaylistName(d.name);
-  const count = useSmartCount(useDebounced(r, SMART_COUNT_DEBOUNCE_MS));
+  const count = useSmartCount(useDebounced(r, SMART_COUNT_DEBOUNCE_MS, JSON.stringify(r)));
   const set = (p: Partial<Draft>) => { setD((x) => ({ ...x, ...p })); setError(null); };
   const ok = !!r && (name === null || !!cleanName);
 

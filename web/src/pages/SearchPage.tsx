@@ -1,18 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useImport, useJob, useSearch, useInvalidateLibrary } from "../api/queries";
-import type { SearchResult } from "@bc/core";
+import { artUrl, type SearchResult } from "@bc/core";
 import { JobProgress } from "../components/JobProgress";
-import { artUrl } from "../lib/art";
 import { friendlyError } from "../lib/errors";
+import { useDebounced } from "../lib/useDebounced";
 import { ExternalLink } from "../components/ExternalLink";
 import { ReleasePlayButton, useReleasePreview } from "../components/ReleasePlayButton";
-
-function useDebounced<T>(v: T, ms: number): T {
-  const [d, setD] = useState(v);
-  useEffect(() => { const t = setTimeout(() => setD(v), ms); return () => clearTimeout(t); }, [v, ms]);
-  return d;
-}
 
 export function SearchPage() {
   // ?q= (Search Bandcamp… in the command palette) starts the search with that text.

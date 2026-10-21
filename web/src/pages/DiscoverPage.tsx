@@ -15,15 +15,10 @@ import { CloseIcon, ExternalIcon, PauseIcon, PlayIcon } from "../components/Icon
 import { JobProgress } from "../components/JobProgress";
 import { ChallengeNotice } from "../components/ChallengeNotice";
 import { friendlyError } from "../lib/errors";
+import { useDebounced } from "../lib/useDebounced";
 
 /** The last setup, restored when /discover opens without a query (#104). */
 export const DISCOVER_SETTING_KEY = "discover_last";
-
-function useDebounced<T>(v: T, ms: number): T {
-  const [d, setD] = useState(v);
-  useEffect(() => { const t = setTimeout(() => setD(v), ms); return () => clearTimeout(t); }, [v, ms]);
-  return d;
-}
 
 /** A saved setup as a query string, validated the same way as a link's. */
 export function setupQuery(s: unknown): string | null {

@@ -12,7 +12,7 @@
 // scope, as the save dialog would.
 import { getCore } from "../api/core";
 import { isTauri } from "./env";
-import { saveTextFile } from "./files";
+import { appVersion, saveTextFile } from "./files";
 
 const DEV = import.meta.env.DEV;
 
@@ -31,8 +31,8 @@ function debugOnly(name: string | undefined, ext: "json" | "db"): string | undef
 export async function exportLibraryFile(opts: { history: boolean }, debugTempName?: string): Promise<boolean> {
   const debug = debugOnly(debugTempName, "json");
   const core = await getCore();
-  const appVersion = isTauri ? await import("@tauri-apps/api/app").then((m) => m.getVersion()).catch(() => undefined) : undefined;
-  const text = JSON.stringify(await core.exportLibrary({ history: opts.history, appVersion }), null, 1);
+  const version = isTauri ? await appVersion().catch(() => undefined) : undefined;
+  const text = JSON.stringify(await core.exportLibrary({ history: opts.history, appVersion: version }), null, 1);
   if (debug) {
     const fs = await import("@tauri-apps/plugin-fs");
     const { invoke } = await import("@tauri-apps/api/core");
