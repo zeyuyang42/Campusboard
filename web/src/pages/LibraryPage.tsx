@@ -5,7 +5,7 @@ import { useAlbums, useArtists, useLibraryView, useRecentlyPlayed, useTags, useT
 import { libraryTagPath } from "../lib/navigation";
 import { useUi } from "../ui/store";
 import { friendlyError } from "../lib/errors";
-import { formatPlays } from "../lib/format";
+import { formatPlays, plural } from "../lib/format";
 import { useDebounced } from "../lib/useDebounced";
 import { AlbumCard } from "../components/AlbumCard";
 import { BulkBar } from "../components/BulkBar";
@@ -99,7 +99,7 @@ function AlbumGrid({ sort: savedSort, filter, set }: LibraryView & { set: (p: Pa
             <button className="icon-btn sm" onClick={clearTag} aria-label={`Clear tag ${tag}`} title="Clear tag">×</button>
           </span>
         )}
-        {!bulk && <span className="muted">{n} album{n === 1 ? "" : "s"}</span>}
+        {!bulk && <span className="muted">{plural(n, "album")}</span>}
         <span className="spacer" />
         <label className="muted" htmlFor="album-filter">Show</label>
         <select id="album-filter" value={filter} onChange={(e) => set({ filter: e.target.value as repos.AlbumFilter })}>
@@ -219,7 +219,7 @@ function TagList({ filter, showAll }: { filter: repos.AlbumFilter; showAll: () =
         <li key={t.tag}>
           <Link to={libraryTagPath(t.tag)} onClick={() => setQ("")}>
             <span className="name">{t.tag}</span>
-            <span className="muted" aria-label={`${t.album_count} album${t.album_count === 1 ? "" : "s"}`}>{t.album_count}</span>
+            <span className="muted" aria-label={plural(t.album_count, "album")}>{t.album_count}</span>
           </Link>
         </li>
       ))}
@@ -237,7 +237,7 @@ function Tracks() {
         <FilterInput value={q} onChange={setQ} placeholder="Filter tracks, albums, artists" />
         {data && data.length > 0 && <PlayPauseAll tracks={data} />}
         <span className="spacer" />
-        <span className="muted">{data?.length ?? 0} track{data?.length === 1 ? "" : "s"}{!q && data?.length === 500 ? " (showing latest 500)" : ""}</span>
+        <span className="muted">{plural(data?.length ?? 0, "track")}{!q && data?.length === 500 ? " (showing latest 500)" : ""}</span>
       </div>
       {isLoading ? <div className="empty">Loading…</div> : data?.length ? <TrackList tracks={data} showAlbum /> : <div className="empty">No tracks.</div>}
     </>

@@ -11,7 +11,7 @@ import { AccountSettings } from "../components/AccountSettings";
 import { LibrarySettings } from "../components/LibrarySettings";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { useClearHistory, useOfflineMutations, useOfflineStats, usePlayCount, useReleaseCheckStatus, useReleaseMutations } from "../api/queries";
-import { formatBytes, formatPlays } from "../lib/format";
+import { formatBytes, formatDateTime, formatPlays, plural } from "../lib/format";
 import { useMenuBar } from "../lib/menuBar";
 import { useTrackNotifications } from "../lib/notifications";
 
@@ -280,7 +280,7 @@ function NewReleaseSettings() {
       onSettled: () => { inFlight.current = false; },
     });
   };
-  const last = status?.last_check_at ? new Date(status.last_check_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : null;
+  const last = status?.last_check_at ? formatDateTime(status.last_check_at) : null;
   return (
     <section id="releases">
       <h2>New releases</h2>
@@ -296,13 +296,13 @@ function NewReleaseSettings() {
         <button className="btn" disabled={!status?.enabled || running || !status.artists} onClick={runCheck}>{running ? "Checking…" : "Check now"}</button>
         <span className="muted">
           {last ? `Last checked ${last}.` : "Not checked yet."}
-          {status && status.muted > 0 ? ` ${status.muted} artist${status.muted === 1 ? "" : "s"} muted.` : ""}
+          {status && status.muted > 0 ? ` ${plural(status.muted, "artist")} muted.` : ""}
         </span>
       </div>
       {result && !running && (
         <p className="muted">
           {result.stopped && STOPPED[result.stopped] ? `${STOPPED[result.stopped]} ` : ""}
-          Checked {result.checked} artist{result.checked === 1 ? "" : "s"}{result.found ? `, found ${result.found} new` : ", nothing new"}.
+          Checked {plural(result.checked, "artist")}{result.found ? `, found ${result.found} new` : ", nothing new"}.
         </p>
       )}
       {checkNow.error && <div className="notice error">Couldn't check. {friendlyError(checkNow.error)}</div>}
@@ -352,7 +352,7 @@ function StorageSettings() {
         buy on Bandcamp to own a release. Downloads stay on this Mac and are left out of library exports.
       </p>
       <div className="row">
-        <span>{stats.tracks ? `${formatBytes(stats.bytes)} in ${stats.tracks} track${stats.tracks === 1 ? "" : "s"} from ${stats.albums} album${stats.albums === 1 ? "" : "s"}` : "Nothing downloaded yet."}</span>
+        <span>{stats.tracks ? `${formatBytes(stats.bytes)} in ${plural(stats.tracks, "track")} from ${plural(stats.albums, "album")}` : "Nothing downloaded yet."}</span>
         {stats.tracks > 0 && (
           <ConfirmButton label="Remove all downloads" confirmLabel="Remove all" question={`Remove ${formatBytes(stats.bytes)} of downloads?`} onConfirm={() => removeAll.mutateAsync().then(() => undefined)} />
         )}

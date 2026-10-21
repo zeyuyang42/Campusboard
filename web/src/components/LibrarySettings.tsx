@@ -9,9 +9,8 @@ import { pickTextFile } from "../lib/files";
 import { backupLibraryDatabase, exportLibraryFile } from "../lib/libraryFile";
 import { friendlyError } from "../lib/errors";
 import { loadSavedTheme } from "../theme/store";
+import { plural } from "../lib/format";
 import { ConfirmButton } from "./ConfirmButton";
-
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 type Status = { kind: "ok" | "error"; text: string; importing?: boolean } | null;
 interface Pending { name: string; data: LibraryExport; preview: LibraryImportPreview; history: boolean; settings: boolean }

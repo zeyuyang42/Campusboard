@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import type { StatsCounts, StatsPeriod } from "@bc/core";
 import { useListeningStats } from "../api/queries";
 import { friendlyError } from "../lib/errors";
-import { formatPlays, formatTotal } from "../lib/format";
+import { formatPlays, formatTotal, plural } from "../lib/format";
 import { libraryTagPath } from "../lib/navigation";
 import { ArtImage } from "./ArtImage";
 import { PlayHistory } from "./PlayHistory";
@@ -66,7 +66,7 @@ export function ListeningStats({ period }: { period: StatsPeriod }) {
   return (
     <div className="stats">
       <p className="stats-total">
-        {formatPlays(totals.plays)} across {totals.albums} album{totals.albums === 1 ? "" : "s"}, {formatTotal(totals.seconds)} listened.
+        {formatPlays(totals.plays)} across {plural(totals.albums, "album")}, {formatTotal(totals.seconds)} listened.
       </p>
       <div className="stats-lists">
         <Ranked title="Top artists">

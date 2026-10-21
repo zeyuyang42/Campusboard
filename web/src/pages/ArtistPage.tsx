@@ -3,6 +3,7 @@ import { useArtist, useArtistReleasesMuted, useReleaseMutations } from "../api/q
 import { AlbumCard } from "../components/AlbumCard";
 import { ExternalIcon } from "../components/Icons";
 import { friendlyError } from "../lib/errors";
+import { plural } from "../lib/format";
 import { ExternalLink } from "../components/ExternalLink";
 
 export function ArtistPage() {
@@ -17,7 +18,7 @@ export function ArtistPage() {
     <>
       <h1 className="page-title">
         {artist.name}
-        <span className="count meta"><span>{artist.albums.length} release{artist.albums.length === 1 ? "" : "s"}</span>{artist.location && <span>{artist.location}</span>}</span>
+        <span className="count meta"><span>{plural(artist.albums.length, "release")}</span>{artist.location && <span>{artist.location}</span>}</span>
         <span className="spacer" />
         <Link className="btn sm" to={`/browse?url=${encodeURIComponent(artist.url)}`}>More releases</Link>
         <ExternalLink className="btn sm" href={artist.url}>Bandcamp <ExternalIcon /></ExternalLink>

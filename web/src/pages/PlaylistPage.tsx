@@ -7,7 +7,7 @@ import { TrackList, PlayPauseAll } from "../components/TrackList";
 import { deletePlaylistWithUndo, removePlaylistTrackWithUndo } from "../lib/removals";
 import { PlaylistCover } from "../components/PlaylistCover";
 import { SmartRuleEditor } from "../components/SmartRuleEditor";
-import { formatTotal } from "../lib/format";
+import { formatTotal, plural } from "../lib/format";
 import { friendlyError } from "../lib/errors";
 import { playAllTracks, shuffleAllTracks } from "../lib/bulkPlay";
 import { usePlayer } from "../player/store";
@@ -52,7 +52,7 @@ export function PlaylistPage() {
         )}
         {pl.smart && <span className="smart-mark" title="Fills itself from a rule each time it opens or plays">Smart</span>}
         {rename.isError && editing === null && <span className="error" role="alert">{friendlyError(rename.error, "Couldn't rename the playlist.")}</span>}
-        <span className="count meta"><span>{pl.tracks.length} track{pl.tracks.length === 1 ? "" : "s"}</span><span>{formatTotal(total)}</span></span>
+        <span className="count meta"><span>{plural(pl.tracks.length, "track")}</span><span>{formatTotal(total)}</span></span>
         {!pl.smart && (
           <span className="actions">
             <PlayPauseAll tracks={pl.tracks} />

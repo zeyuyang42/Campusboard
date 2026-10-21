@@ -10,6 +10,7 @@ import { ExternalIcon } from "../components/Icons";
 import { JobProgress } from "../components/JobProgress";
 import { ReleasePlayButton, useReleasePreview } from "../components/ReleasePlayButton";
 import { friendlyError } from "../lib/errors";
+import { plural } from "../lib/format";
 
 /** An artist's or label's releases on Bandcamp, with checkboxes to import just the ones you want. */
 export function BrowsePage() {
@@ -55,7 +56,7 @@ export function BrowsePage() {
       <div className="page-title">
         <span>{data.band?.name ?? new URL(data.url).hostname.split(".")[0]}</span>
         <span className="count meta">
-          <span>{data.items.length} release{data.items.length === 1 ? "" : "s"} on Bandcamp</span>
+          <span>{plural(data.items.length, "release")} on Bandcamp</span>
           {inLibrary > 0 && <span>{inLibrary} in your library</span>}
         </span>
         <span className="actions">
