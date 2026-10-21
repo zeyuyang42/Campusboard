@@ -695,5 +695,5 @@ src-tauri/
 ## Backlog
 
 Planned features are GitHub issues labelled `feature`
-(https://github.com/zeyuyang42/campusboard/issues). Check there before
+(https://github.com/zeyuyang42/Campusboard/issues). Check there before
 proposing new scope.

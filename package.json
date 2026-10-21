@@ -3,7 +3,7 @@
   "private": true,
   "license": "PolyForm-Noncommercial-1.0.0",
   "description": "Campusboard, a personal Bandcamp player for macOS",
-  "repository": "github:zeyuyang42/campusboard",
+  "repository": "github:zeyuyang42/Campusboard",
   "engines": { "node": ">=22.5" },
   "version": "0.10.0",
   "type": "module",
