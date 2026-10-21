@@ -254,6 +254,23 @@ check, the app backs off (a notice in the window says for how long) rather
 than pushing through. Please don't point it at whole labels you won't listen
 to, and buy what you keep coming back to.
 
+Bandcamp has no public API, and its
+[Acceptable Use Policy](https://get.bandcamp.help/articles/15263124-bandcamp-s-acceptable-use-and-moderation-policy)
+forbids scraping content "through the use of scripts, robots, bots, spiders,
+scrapers, crawlers, or other automated means". Campusboard reads the same pages
+a browser does, on your request, but it is still an unofficial client: using it
+is your call and your risk, and Bandcamp may block it at any time. Its
+[Terms of Use](https://bandcamp.com/terms_of_use) also limit streamed and
+downloaded music to personal, non-commercial use; that applies to offline
+copies too. Campusboard is not affiliated with or endorsed by Bandcamp.
+
+## Licence
+
+[PolyForm Noncommercial 1.0.0](LICENSE): you may use, copy, change and share
+the code for any non-commercial purpose (personal use, study, research,
+hobby projects, charities, schools). Commercial use needs separate permission.
+Keep the licence and its `Required Notice:` line with any copy you share.
+
 ## Not yet
 
 Windows and Linux builds, and a signed build. Planned work is tracked as
