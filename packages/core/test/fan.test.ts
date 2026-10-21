@@ -118,7 +118,7 @@ describe("fan page and list parsing", () => {
       ["track", "https://whiteward.bandcamp.com/track/when-gift-becomes-damnation-3"],
       ["album", "https://mypetflamingo.bandcamp.com/album/after-hours"],
     ]);
-    expect(page.next).toBe("1720541470:658791445:a::");
+    expect(page.next).toBe("1700000002:658791445:a::");
   });
 
   it("pages on from the last item's token, not last_token, and reports errors", () => {

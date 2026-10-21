@@ -1,6 +1,9 @@
 {
   "name": "bandcamp-player",
   "private": true,
+  "description": "Campusboard, a personal Bandcamp player for macOS",
+  "repository": "github:zeyuyang42/campusboard",
+  "engines": { "node": ">=22.5" },
   "version": "0.9.1",
   "type": "module",
   "workspaces": [

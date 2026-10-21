@@ -43,7 +43,7 @@ describe("backdrop (#110)", () => {
     const r = parseTheme(old);
     expect(r.error).toBeUndefined();
     expect(r.theme?.version).toBe(1);
-    expect(r.theme?.backdrop).toEqual({ mode: "morph", style: "ink", intensity: 0.7, motion: "drift" });
+    expect(r.theme?.backdrop).toEqual({ mode: "morph", style: "ink", intensity: 1, motion: "drift" });
     expect(DEFAULT_THEME.backdrop).toEqual(DEFAULT_BACKDROP);
     for (const p of PRESETS) expect(p.backdrop).toEqual(DEFAULT_BACKDROP);
   });

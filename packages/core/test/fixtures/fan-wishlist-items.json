@@ -31,7 +31,7 @@
    "is_preorder": false,
    "album_id": 4139956583,
    "album_title": "Origins",
-   "token": "1732173203:1490824272:t::"
+   "token": "1700000001:1490824272:t::"
   },
   {
    "item_id": 658791445,
@@ -64,12 +64,12 @@
    "is_preorder": false,
    "album_id": 658791445,
    "album_title": "After Hours",
-   "token": "1720541470:658791445:a::"
+   "token": "1700000002:658791445:a::"
   }
  ],
  "more_available": false,
  "item_lookup": {},
- "last_token": "1720541470:658791445:a::",
+ "last_token": "1700000002:658791445:a::",
  "tracklists": {},
  "purchase_infos": {},
  "collectors": {}

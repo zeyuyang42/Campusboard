@@ -32,33 +32,40 @@ npm run smoke:live               # re-parse one known live page
 ```
 packages/core/src/
   types.ts                 DTOs shared by core and web (import "@bc/core")
-  scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, fan (collection/wishlist), radio (Bandcamp Radio list + episode), discover (results, tag/place search, discover links), discoverGenres (genre/subgenre chips), schemas
-  db/Db.ts                 async Db interface {select,get,run}; SQL uses "?" and toDollar() rewrites to $n for the Tauri plugin
+  scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, fan (collection/wishlist), radio (Bandcamp Radio list + episode), discover (results, tag/place search, discover links), discoverGenres (genre/subgenre chips), schemas (zod, with the lenient str/num/items helpers), challenge (bot-check gate), errors (ScrapeError codes, describeError), html (entity decoding, clean, assertNotChallenge); url.ts has releaseUrlOrNull (every URL from markup, Bandcamp JSON or a library file goes through it before it is queued, stored or shown) and hostOf; http.ts has postJson for the JSON APIs
+  db/Db.ts                 async Db interface {select,get,run}; SQL uses "?" and toDollar() rewrites to $n for the Tauri plugin; placeholders()/chunks() for IN lists and chunked writes; sqlTime()/now()/sqlTimeIso() for the library's UTC "YYYY-MM-DD HH:MM:SS" timestamps
   db/repos/                one module per table; booleans stored 0/1, converted at the repo boundary
-  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping), miniPlayer (mini window state/command protocol, throttle), transition (gapless/crossfade scheduling, fade curve, state machine), libraryTransfer (library export/import file, VACUUM INTO backup), radio (episodes, tracklists, stream URLs), discover (preview queue entries + their stream URLs), offline (offline copies: download, local URL, sweep)
+  services/                importService (upsertTralbum, vacuumOrphans; the upsert only vacuums when tracks moved or the album changed artist), time (clock: m:ss / h:mm:ss), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping), miniPlayer (mini window state/command protocol, throttle), transition (gapless/crossfade scheduling, fade curve, state machine), libraryTransfer (library export/import file, VACUUM INTO backup), radio (episodes, tracklists, stream URLs), discover (preview queue entries + their stream URLs), offline (offline copies: download, local URL, sweep), resume (resume points for long tracks), sleepTimer, playRule (when a play counts), preorder, collectionRefresh (daily sync), idle (when background work may run), audioEvents (routing the two elements' events), playerToggle, volume
   theme/                   schema (zod), presets, color math (OKLCH, contrast), apply (CSS variables)
   palette/                 quantize + pick + extract (canvas) + fitPalette + artUrl; boost (palette v2: raw swatches -> vivid backdrop colours)
+  config.ts                settings keys and their parsers
   core.ts                  createCore({db, fetch, onJobsChange}) -> every function the UI calls
 packages/core/test/        vitest; helpers/nodeDb.ts runs src-tauri/migrations/*.sql on node:sqlite
 web/test/                  vitest + happy-dom for the player wiring; FakeAudio stands in for new Audio(), harness.ts boots a fresh store with a stub getCore()
 web/src/
-  api/core.ts              getCore() singleton; Tauri plugins, or browserDb.ts when VITE_BROWSER_MODE=1
-  api/queries.ts           TanStack Query hooks and mutations (names are stable; pages depend on them)
+  api/core.ts              getCore() singleton; tauriDb.ts + offlineFiles.ts over the Tauri plugins, or browserDb.ts when VITE_BROWSER_MODE=1
+  api/queries.ts           TanStack Query hooks and mutations (names are stable; pages depend on them); useAddRelease(url, onDone?) is the one card-level import tracker (Search, Discover, New releases, Radio, Browse), isJobActive the one job-status predicate
+  api/invalidate.ts        KEY_GROUPS (named query-key prefix groups: library, libraryTracks, history, offline, jobs), invalidateGroup(name) for code outside React, bindQueryClient
+  player/init.ts           boots the store, persistence, media session and mini bridge once; radio.ts = radio episode playback helpers
   player/store.ts          zustand store owning the two <audio> elements (audio.ts); load() asks core for a fresh stream URL; gapless/crossfade handover
   player/mediaSession.ts   Now Playing widget + media keys: navigator.mediaSession fed from the store, handlers call store actions
   player/miniBridge.ts     main-window side of the mini player: broadcasts MiniState, maps validated MiniCommands to store actions
   mini/                    the mini player window (mini.html entry): no store, no audio, no getCore; bus.ts = Tauri events or BroadcastChannel
+  theme/tokens.css         the :root fallback tokens, @property registrations and token transition both windows share; imported before styles.css and mini.css, which add only their own tokens
   theme/store.ts           theme state, persisted in settings.key='theme'; usePalette.ts maps art colors to CSS vars
   backdrop/                the album-art backdrop (#110): Backdrop.tsx (replaces Ambient), controller (pure rules), engine (loop, GL injected), gl (raw WebGL1), shaders (GLSL strings), swatches (boosted palette store)
+  components/Seek.tsx      the presentational scrub bar; SeekBar binds it to the store, the mini window to its seek command
+  lib/                     small shared helpers: useDebounced, openExternal, format (plural, formatDateTime, durations), navigation, removals
   ui/menu.ts + components/MenuHost.tsx   the one context menu / playlist picker for the whole app
+  ui/palette.ts + lib/paletteActions.ts   the ⌘K command palette (ui/store.ts holds its open state)
   ui/undo.ts + components/UndoNote.tsx   the one "Removed X. Undo" note; lib/removals.ts starts removals with it
   components/, pages/      plain CSS in styles.css driven by tokens on :root
 src-tauri/
-  src/lib.rs               registers sql/http/dialog/fs/opener/notification plugins, migrations, Dock reopen
+  src/lib.rs               registers sql/http/dialog/fs/opener/notification plugins, migrations (one migration!(version, description, file) line each), Dock reopen; MAIN_LABEL, main_window() and reveal() (unminimize, show, focus) for the main window
   src/geometry.rs          window size + position in points (window-geometry.json; -dev in debug builds)
   src/backup.rs            database backup destination check + atomic copy (Rust-side save dialog)
   src/menu.rs              native menu bar; custom items run `window.__bcMenu(id)` in the main webview (web/src/lib/appMenu.ts)
-  src/mini.rs              creates/toggles the `mini` window (Window > Mini Player, dock button command)
+  src/mini.rs              creates/toggles the `mini` window (Window > Mini Player, dock button command); tell_main(app, "hello" | "bye") is the only Rust emitter of mini:command
   src/tray.rs              optional menu-bar icon (Settings, off by default); `set_menu_bar` from web/src/lib/menuBar.ts; items reuse menu.rs ids
   migrations/*.sql         schema; every statement is IF NOT EXISTS so an old library.db can be adopted
   capabilities/default.json  URL scope for http (bandcamp.com, bcbits.com, custom-domain paths; LAN denied), fs per command (mkdir/copy-file/read-file in $APPDATA/backgrounds only; no static scope otherwise), window permissions, app commands
@@ -139,7 +146,10 @@ src-tauri/
   macOS 13.3, hence the minimum version.
 - `core:window:default` does not include `allow-start-dragging`, so the
   `data-tauri-drag-region` band only works because the capability file grants
-  it explicitly, along with hide/show/minimize/toggle-maximize/set-focus.
+  it explicitly, along with hide/show/minimize/toggle-maximize/set-focus. The main
+  window has no `core:window:allow-close` either: nothing in web/ calls the Tauri
+  `close()`; ⌘W closes from Rust and persist.ts prevents the close request and hides
+  (2026-10-21).
 - App commands are listed in `build.rs` (AppManifest), so each needs an
   `allow-<command>` entry in a capability; a new `#[tauri::command]` is unreachable
   until it is added there and granted (normally to `default.json`, the main window).
@@ -529,7 +539,8 @@ src-tauri/
   `mini.css` is scoped under `:root:not([data-backdrop="conservative"])`, and the conservative
   mode renders exactly the old DOM (`.ambient > .bg + .wash`). Keep it that way: a new
   frosted-panel, tint or motion rule goes under that scope, never on a bare selector, so
-  "Conservative" in Settings stays the look from before #110. Outside it `--ambient-1/2` come
+  "Conservative" in Settings stays the look from before #110. The tokens both windows share
+  live in `theme/tokens.css`; a token only the main window needs stays in `styles.css`. Outside it `--ambient-1/2` come
   from the boosted swatches, panels are `--panel-alpha` (floored at 0.68 for contrast) over a
   lightly tinted surface (blurred on the sidebar and player bar only, see the CPU figures
   above), `.main` floats with a 12 px margin, headings mix at most 14% toward the accent, and
@@ -567,8 +578,9 @@ src-tauri/
 ## Rules
 
 - Be polite to Bandcamp: keep `FetchQueue` serial at 1 req/s with the browser UA
-  and the 10-minute page cache. Palette art fetches bypass the queue on purpose
-  (static CDN, one small image per track change).
+  and the 10-minute page cache (`cachedFetchText` puts the age cutoff in the query, so a
+  stale row's HTML is never read out of the database). Palette art fetches bypass the queue
+  on purpose (static CDN, one small image per track change).
 - Keep parsing inside `packages/core/src/scrape/`. When markup changes: fix the
   parser, re-save fixtures, `npm test`.
 - Schema changes are a new numbered file in `src-tauri/migrations/` plus an entry
@@ -601,8 +613,20 @@ src-tauri/
   import still counts it as present), and a user import that brings it in again
   unmarks it; a collection sync or a stream refresh never does. A new query listing albums or
   their tracks must add `NOT_REMOVING` (repos/albumRemoval.ts) unless it goes
-  through `albumWhere`.
+  through `albumWhere`. By-URL lookups (Browse, Discover, search, a Radio tracklist, Play
+  without importing) go through `albums.albumIdsByUrl`, which carries it; a Radio tracklist
+  therefore shows no "Open album" for an album in its Undo window (2026-10-21).
   `ConfirmButton` stays for bulk and irreversible actions.
+- Jobs that are pending, queued or running are "active": `repos/jobs.ts` exports
+  `ACTIVE_SQL`/`activeSql(col)` and `activeJob(db, kind, inputUrl?)` (`core.downloadJobFor`
+  wraps it) and `types.ts` exports `isActiveJob`, so no query or component spells the three
+  statuses out itself. `vacuumOrphans` runs at startup, after removals, once per finished job
+  (`JobRunner.process`) and inside `upsertTralbum` only when that write moved tracks out of an
+  album, dropped tracks or changed the album's artist; a stream URL refresh on the play path
+  no longer sweeps (2026-10-21).
+- A plain-key shortcut (`player/shortcuts.ts`) or palette action (`lib/paletteActions.ts`) that
+  the menu bar also has runs `runMenuAction(id)` from `lib/appMenu.ts`; add a new action there
+  first.
 - Navigate from non-React code with `navigateTo()` in `web/src/lib/navigation.ts`;
   never `window.location.assign` (a reload drops the player state).
 - Chrome text is unselectable with the arrow cursor inside Tauri; add the
@@ -619,7 +643,10 @@ src-tauri/
    timers, a `FakeAudio` element whose events the test fires (`el.emit("pause", { paused: true })`)
    and an in-memory core stub. A fix to the player's event handling, the two-element
    handover or the save timers gets a test there first; the selftest and Playwright
-   cover what only a real WebKit element shows (timing, Now Playing).
+   cover what only a real WebKit element shows (timing, Now Playing). Component tests on
+   real timers use `flushAct()` from `test/harness.ts`. `cargo test` in `src-tauri` runs the
+   Rust unit tests; the migration-order test's last assertion names the newest migration's
+   table, so update it with each new migration.
 2. UI: run `VITE_BROWSER_MODE=1 npm run web:dev` and drive it with Playwright
    (installed outside the repo). Launch Chromium with
    `--autoplay-policy=no-user-gesture-required`; `window.__bcAudio` exposes the
