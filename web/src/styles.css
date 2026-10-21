@@ -592,8 +592,10 @@ html.is-tauri .discover-card .art.playable { cursor: default; }
   backdrop-filter: blur(var(--panel-blur)) saturate(1.15);
 }
 /* The panels float: the backdrop is strongest in the margins between them. */
-:root:not([data-backdrop="conservative"]) .sidebar { margin: 12px 0 12px 12px; border-right: 0; border-radius: var(--radius-lg); padding-top: calc(var(--titlebar) + 2px); }
-:root:not([data-backdrop="conservative"]) .main { margin: 12px; border-radius: var(--radius-lg); padding-top: calc(var(--titlebar) + 12px); }
+/* The panels start below the title bar band, so the traffic lights (16,18 in tauri.conf.json)
+   sit in the backdrop margin rather than on the sidebar's rounded corner. */
+:root:not([data-backdrop="conservative"]) .sidebar { margin: max(12px, var(--titlebar)) 0 12px 12px; border-right: 0; border-radius: var(--radius-lg); padding-top: 14px; }
+:root:not([data-backdrop="conservative"]) .main { margin: max(12px, var(--titlebar)) 12px 12px; border-radius: var(--radius-lg); padding-top: 24px; }
 :root:not([data-backdrop="conservative"]) .now-playing { background: color-mix(in oklab, var(--surface) 40%, transparent); }
 @media (max-width: 640px) {
   :root:not([data-backdrop="conservative"]) .sidebar { margin: 0; border-radius: 0; padding-top: calc(var(--titlebar) + 14px); }
