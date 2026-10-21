@@ -31,6 +31,8 @@ export interface ParsedTralbum {
   tags: string[];
   is_preorder: boolean;
   parent_album_id: number | null; // for /track pages: the album's bandcamp id, if any
+  /** The track the release page plays first (data-tralbum `featured_track_id`), if it names one. */
+  featured_track_id: number | null;
   tracks: ParsedTrack[];
 }
 
@@ -121,6 +123,7 @@ export function parseTralbumPage(html: string, fetchedAt = Date.now()): ParsedTr
     tags,
     is_preorder: !!t.is_preorder,
     parent_album_id: t.item_type === "track" ? (t.current.album_id ?? null) : null,
+    featured_track_id: t.featured_track_id ?? null,
     tracks,
   };
 }

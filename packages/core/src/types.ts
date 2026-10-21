@@ -376,6 +376,18 @@ export interface QueuePreview {
   stream_url: string;
 }
 
+/**
+ * A release to play without importing it (core.previewRelease): either the library album
+ * (`album_id` set, its own tracks, no request made) or preview entries for every track
+ * Bandcamp streams, in album order. `start` is the featured track's index in `tracks`.
+ */
+export interface ReleasePreview {
+  album_id: number | null;
+  title: string;
+  tracks: QueueTrack[];
+  start: number;
+}
+
 /** Bandcamp discover's sort: best-selling, new arrivals, surprise me. */
 export type DiscoverSlice = "top" | "new" | "rand";
 

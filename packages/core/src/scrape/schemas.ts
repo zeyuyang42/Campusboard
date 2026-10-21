@@ -24,6 +24,8 @@ export const TralbumSchema = z
     url: z.string(),
     album_release_date: z.string().nullable().optional(),
     is_preorder: z.union([z.boolean(), z.number()]).nullable().optional(),
+    // Only used to pick where a preview starts: a surprising value must never fail the parse.
+    featured_track_id: z.number().nullable().optional().catch(null),
     current: z
       .object({
         title: z.string(),

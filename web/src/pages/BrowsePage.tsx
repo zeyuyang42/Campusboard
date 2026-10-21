@@ -8,6 +8,7 @@ import { ArtImage } from "../components/ArtImage";
 import { ExternalLink } from "../components/ExternalLink";
 import { ExternalIcon } from "../components/Icons";
 import { JobProgress } from "../components/JobProgress";
+import { ReleasePlayButton, useReleasePreview } from "../components/ReleasePlayButton";
 import { friendlyError } from "../lib/errors";
 
 /** An artist's or label's releases on Bandcamp, with checkboxes to import just the ones you want. */
@@ -86,6 +87,7 @@ export function BrowsePage() {
 
 function BrowseCard({ item, checked, onToggle, onOpen }: { item: BrowseItem; checked: boolean; onToggle: () => void; onOpen: () => void }) {
   const owned = !!item.album_id;
+  const preview = useReleasePreview(item.url, item.album_id);
   return (
     <div className={`card browse-card ${checked ? "checked" : ""} ${owned ? "owned" : ""}`} onClick={owned ? onOpen : onToggle} role={owned ? "link" : "checkbox"} aria-checked={owned ? undefined : checked} tabIndex={0}
       onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); owned ? onOpen() : onToggle(); } }}>
@@ -93,9 +95,11 @@ function BrowseCard({ item, checked, onToggle, onOpen }: { item: BrowseItem; che
         <ArtImage artId={item.art_id} size={16} alt="" />
         {item.item_type === "track" && <span className="badge">single</span>}
         {owned ? <span className="badge right">In library</span> : <span className={`check ${checked ? "on" : ""}`} aria-hidden="true">{checked ? "✓" : ""}</span>}
+        <ReleasePlayButton className="play" title={item.title} preview={preview} />
       </div>
       <div className="title" title={item.title}>{item.title}</div>
       {item.artist && <div className="sub">{item.artist}</div>}
+      {preview.error != null && <div className="release-error error">{friendlyError(preview.error)}</div>}
     </div>
   );
 }

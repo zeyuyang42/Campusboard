@@ -3,7 +3,7 @@ import type { FetchQueue } from "../scrape/http.js";
 import { cachedFetchText } from "./pageCache.js";
 import { RADIO_CDN_URL } from "../scrape/radio.js";
 import { STREAM_REFRESH_ENDPOINT } from "../scrape/discover.js";
-import { parseTralbumPage, streamExpiry } from "../scrape/parseTralbum.js";
+import { parseTralbumPage, streamExpiry, type ParsedTralbum } from "../scrape/parseTralbum.js";
 import { ScrapeError } from "../scrape/errors.js";
 import { isFetchableBandcampUrl } from "../scrape/url.js";
 import { PAGE_CACHE_MS, STREAM_SAFETY_MS } from "../config.js";
@@ -28,6 +28,31 @@ export function previewQueueTrack(i: DiscoverItem): QueueTrack | null {
     album_title: i.title, artist_name: i.artist, art_id: i.art_id, album_url: i.url,
     preview: { item_url: i.url, track_id: f.track_id, stream_url: f.stream_url },
   };
+}
+
+/**
+ * Preview entries for a whole release page (search and Browse, see core.previewRelease):
+ * every track with an mp3-128 stream on the CDN, in album order (a pre-order's unreleased
+ * tracks have none and are left out). Same ids as previewQueueTrack, so a Discover preview
+ * and the same track previewed from Search are one entry. `start` is the featured track's
+ * index, or 0 when the page names none (or it has no stream).
+ */
+export function previewReleaseTracks(p: ParsedTralbum, fetchedUrl: string): { tracks: QueueTrack[]; start: number } {
+  // The page's own address when it is one the app may fetch again, else the one it was read from.
+  const itemUrl = isFetchableBandcampUrl(p.url) ? p.url : fetchedUrl;
+  const tracks: QueueTrack[] = [];
+  for (const t of p.tracks) {
+    if (!t.streamable || !t.stream_url || t.stream_quality !== "mp3-128" || !RADIO_CDN_URL.test(t.stream_url)) continue;
+    const id = previewQueueId(t.track_id);
+    tracks.push({
+      id, track_id: id, album_id: id, title: t.title, track_num: t.track_num, duration: t.duration,
+      track_artist: t.artist && t.artist !== p.artist.name ? t.artist : null, streamable: true, lyrics: null,
+      album_title: p.title, artist_name: p.artist.name, art_id: p.art_id, album_url: itemUrl,
+      preview: { item_url: itemUrl, track_id: t.track_id, stream_url: t.stream_url },
+    });
+  }
+  const f = p.featured_track_id == null ? -1 : tracks.findIndex((t) => t.preview?.track_id === p.featured_track_id);
+  return { tracks, start: Math.max(0, f) };
 }
 
 export const isPreviewTrack = (t: object | null | undefined): boolean => !!(t as { preview?: unknown } | null | undefined)?.preview;

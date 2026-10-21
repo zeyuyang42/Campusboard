@@ -6,6 +6,7 @@ import { JobProgress } from "../components/JobProgress";
 import { artUrl } from "../lib/art";
 import { friendlyError } from "../lib/errors";
 import { ExternalLink } from "../components/ExternalLink";
+import { ReleasePlayButton, useReleasePreview } from "../components/ReleasePlayButton";
 
 function useDebounced<T>(v: T, ms: number): T {
   const [d, setD] = useState(v);
@@ -62,6 +63,7 @@ function Result({ r }: { r: SearchResult }) {
   const img = r.type === "band" ? r.img : artUrl(r.art_id, 7) ?? r.img;
   const add = async () => { const j = await imp.mutateAsync({ url: r.url }); setJobId(j.id); };
   const label = "Add";
+  const preview = useReleasePreview(r.url, null, r.in_library);
   return (
     <div>
       <div className="result">
@@ -78,12 +80,18 @@ function Result({ r }: { r: SearchResult }) {
           <span className="row">
             <button className="btn sm primary" onClick={() => nav(`/browse?url=${encodeURIComponent(r.url)}`)}>Browse releases</button>
           </span>
-        ) : r.in_library ? (
-          <Link className="btn sm" to="/library">In library</Link>
         ) : (
-          <button className="btn sm primary" onClick={add} disabled={imp.isPending || (!!job && (job.status === "pending" || job.status === "queued" || job.status === "running"))}>{label}</button>
+          <span className="row result-actions">
+            <ReleasePlayButton className="icon-btn" title={r.name} preview={preview} />
+            {r.in_library ? (
+              <Link className="btn sm" to="/library">In library</Link>
+            ) : (
+              <button className="btn sm primary" onClick={add} disabled={imp.isPending || (!!job && (job.status === "pending" || job.status === "queued" || job.status === "running"))}>{label}</button>
+            )}
+          </span>
         )}
       </div>
+      {preview.error != null && <div className="release-error error result-error">{friendlyError(preview.error)}</div>}
       {job && <JobProgress job={job} compact />}
     </div>
   );
