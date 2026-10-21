@@ -1,6 +1,8 @@
 import type { Db } from "./db/Db.js";
 import { FetchQueue, type FetchLike } from "./scrape/http.js";
 import { searchBandcamp } from "./scrape/search.js";
+import { ScrapeError } from "./scrape/errors.js";
+import { parseTralbumPage } from "./scrape/parseTralbum.js";
 import * as artists from "./db/repos/artists.js";
 import * as albums from "./db/repos/albums.js";
 import * as tracks from "./db/repos/tracks.js";
@@ -22,7 +24,7 @@ import { parseMusicPage } from "./scrape/parseMusic.js";
 import { normalizeBandcampUrl } from "./scrape/url.js";
 import { getFreshStreamUrl, refreshAlbum } from "./services/streamService.js";
 import { RadioService } from "./services/radio.js";
-import { PreviewService } from "./services/discover.js";
+import { PreviewService, previewReleaseTracks } from "./services/discover.js";
 import { discoverBatch, locationSuggestions, tagSuggestions } from "./scrape/discover.js";
 import { OfflineService, type OfflineFiles } from "./services/offline.js";
 import { vacuumOrphans } from "./services/importService.js";
@@ -39,7 +41,7 @@ import {
   backupDatabase, exportLibrary, importLibrary, parseLibraryExport, previewLibraryImport,
   type LibraryExport, type LibraryImportOptions,
 } from "./services/libraryTransfer.js";
-import type { BrowseResult, DiscoverLocation, DiscoverPage, DiscoverParams, DiscoverTag, HistoryCursor, PlayState, QueuePreview, SearchResult, StatsPeriod } from "./types.js";
+import type { BrowseResult, DiscoverLocation, DiscoverPage, DiscoverParams, DiscoverTag, HistoryCursor, PlayState, QueuePreview, ReleasePreview, SearchResult, StatsPeriod } from "./types.js";
 
 export interface CoreDeps {
   db: Db;
@@ -187,6 +189,31 @@ export function createCore(deps: CoreDeps) {
     },
     /** A Discover preview's audio URL; `force` gets a new one (after a media error). */
     previewStreamUrl: (preview: QueuePreview, force = false) => previews.streamUrl(preview, force),
+    /**
+     * Play a search or Browse result without importing it. A release already in the library
+     * comes back as that album (no request); otherwise its page is read once (page cache)
+     * and every streamable track becomes a preview entry. Only album and track links.
+     */
+    previewRelease: async (input: string): Promise<ReleasePreview> => {
+      const n = normalizeBandcampUrl(input);
+      if (n.kind === "artist") throw new ScrapeError("invalid_url", "Not an album or track link");
+      const inLibrary = async (url: string): Promise<ReleasePreview | null> => {
+        const row = await db.get<{ id: number }>(`SELECT al.id FROM albums al WHERE al.url = ? AND ${albumRemoval.NOT_REMOVING}`, [url]);
+        const a = row ? await albums.getAlbumWithTracks(db, row.id) : null;
+        return a ? { album_id: a.id, title: a.title, tracks: a.tracks.filter((t) => t.streamable).map((t) => ({ ...t, album_title: a.title, artist_name: a.artist_name, art_id: a.art_id })), start: 0 } : null;
+      };
+      const hit = await inLibrary(n.url);
+      if (hit) return hit;
+      const parsed = parseTralbumPage(await cachedFetchText(db, queue, n.url));
+      // The page may name another address (a custom domain) that the library knows.
+      if (parsed.url !== n.url) {
+        const again = await inLibrary(parsed.url);
+        if (again) return again;
+      }
+      const { tracks, start } = previewReleaseTracks(parsed);
+      if (!tracks.length) throw new ScrapeError("not_streamable", `"${parsed.title}" has nothing to stream yet`);
+      return { album_id: null, title: parsed.title, tracks, start };
+    },
     /** Sync the purchased collection and wishlist of the Bandcamp account in Settings. */
     syncCollection: () => runner.enqueueSync(),
     /** Start the background collection refresh (first look a few minutes later). Not started by createCore. */

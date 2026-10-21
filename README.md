@@ -42,7 +42,11 @@ delete **Bandcamp Player.app** (and re-pin Campusboard in the Dock if you kept t
   checkboxes, so you import only what you want (or everything). Imports run one
   page per second and resume after a restart.
 - **Search**: searches Bandcamp directly; "Add" imports an album or track,
-  "Browse releases" opens an artist's or label's page.
+  "Browse releases" opens an artist's or label's page. The play button next to
+  an album or track (and on each cover of a browse page) plays the whole release
+  from its featured track without importing it: one page read when you press it,
+  or the library copy if you already have it. Like Discover previews, these don't
+  count in listening history and can't go into playlists.
 - **Your collection**: Settings → Bandcamp account. Enter your username and press
   **Sync now** to import what you've bought and your wishlist (public collections
   need nothing else); the Library's **Show** menu filters to Purchased or Wishlist.
