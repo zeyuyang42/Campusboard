@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseTheme, parseThemeJson, PRESETS, DEFAULT_THEME, themeVars, fontStack, resolveTheme } from "../src/theme/index.js";
+import { parseTheme, parseThemeJson, PRESETS, DEFAULT_THEME, DEFAULT_BACKDROP, themeVars, backdropVars, applyTheme, fontStack, resolveTheme, PANEL_ALPHA_FLOOR } from "../src/theme/index.js";
 import { contrast, ensureContrast, hexToRgb, rgbToOklch, oklchToRgb, rgbToHex } from "../src/theme/color.js";
 
 describe("ThemeSchema", () => {
@@ -23,6 +23,54 @@ describe("ThemeSchema", () => {
     expect(r.theme).toBeDefined();
     expect("extra" in r.theme!).toBe(false);
     expect("bonus" in r.theme!.palette).toBe(false);
+  });
+});
+
+describe("backdrop (#110)", () => {
+  const dark = (over: Partial<typeof DEFAULT_BACKDROP> = {}) => resolveTheme({ ...PRESETS[0], backdrop: { ...DEFAULT_BACKDROP, ...over } }, true);
+
+  it("a theme without `backdrop` (saved before #110) parses to the morph + ink default, version 1", () => {
+    const { backdrop: _dropped, ...old } = PRESETS[0];
+    const r = parseTheme(old);
+    expect(r.error).toBeUndefined();
+    expect(r.theme?.version).toBe(1);
+    expect(r.theme?.backdrop).toEqual({ mode: "morph", style: "ink", intensity: 0.7, motion: "drift" });
+    expect(DEFAULT_THEME.backdrop).toEqual(DEFAULT_BACKDROP);
+    for (const p of PRESETS) expect(p.backdrop).toEqual(DEFAULT_BACKDROP);
+  });
+  it("rejects values outside the bounds with readable messages", () => {
+    expect(parseTheme({ ...DEFAULT_THEME, backdrop: { ...DEFAULT_BACKDROP, mode: "disco" } }).error).toMatch(/backdrop.mode/);
+    expect(parseTheme({ ...DEFAULT_THEME, backdrop: { ...DEFAULT_BACKDROP, style: "three.js" } }).error).toMatch(/backdrop.style/);
+    expect(parseTheme({ ...DEFAULT_THEME, backdrop: { ...DEFAULT_BACKDROP, intensity: 1.5 } }).error).toMatch(/backdrop.intensity/);
+    expect(parseTheme({ ...DEFAULT_THEME, backdrop: { ...DEFAULT_BACKDROP, intensity: -0.1 } }).error).toMatch(/backdrop.intensity/);
+    expect(parseTheme({ ...DEFAULT_THEME, backdrop: { ...DEFAULT_BACKDROP, motion: "fast" } }).error).toMatch(/backdrop.motion/);
+    expect(parseTheme({ ...DEFAULT_THEME, backdrop: { mode: "wash" } }).error).toMatch(/backdrop/);
+  });
+  it("themeVars: conservative is opaque, unblurred, untinted and keeps `ambient` as the wash strength", () => {
+    const v = themeVars(dark({ mode: "conservative", intensity: 0.9 }));
+    expect(v["--panel-alpha"]).toBe("1");
+    expect(v["--panel-blur"]).toBe("0px");
+    expect(v["--panel-tint"]).toBe("0");
+    expect(v["--ambient-strength"]).toBe(String(PRESETS[0].ambient));
+    expect(v["--backdrop-intensity"]).toBe("0.9");
+  });
+  it("themeVars: the other modes let the backdrop through by intensity, floored for contrast", () => {
+    const v = themeVars(dark({ mode: "morph", intensity: 0.7 }));
+    expect(Number(v["--panel-alpha"])).toBeCloseTo(0.71, 3);
+    expect(v["--panel-blur"]).toBe("28px");
+    expect(v["--panel-tint"]).toBe("0.04");
+    expect(v["--ambient-strength"]).toBe("0.7");
+    expect(Number(themeVars(dark({ mode: "wash", intensity: 1 }))["--panel-alpha"])).toBe(0.68);
+    expect(Number(themeVars(dark({ mode: "wash", intensity: 0 }))["--panel-alpha"])).toBe(0.78);
+    for (let i = 0; i <= 1; i += 0.05) expect(Number(backdropVars({ backdrop: { ...DEFAULT_BACKDROP, intensity: i } })["--panel-alpha"])).toBeGreaterThanOrEqual(PANEL_ALPHA_FLOOR);
+  });
+  it("applyTheme writes data-backdrop, so the stylesheet can scope the vivid rules", () => {
+    const root = { style: { setProperty: () => undefined }, dataset: {} as DOMStringMap };
+    applyTheme(dark({ mode: "conservative" }), root);
+    expect(root.dataset.backdrop).toBe("conservative");
+    expect(root.dataset.theme).toBe("dark");
+    applyTheme(dark({ mode: "morph" }), root);
+    expect(root.dataset.backdrop).toBe("morph");
   });
 });
 
