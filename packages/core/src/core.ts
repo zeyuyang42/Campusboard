@@ -12,12 +12,14 @@ import * as playState from "./db/repos/playState.js";
 import * as jobs from "./db/repos/jobs.js";
 import * as settings from "./db/repos/settings.js";
 import * as palettes from "./db/repos/palettes.js";
+import * as swatches from "./db/repos/swatches.js";
 import * as plays from "./db/repos/plays.js";
 import * as stats from "./db/repos/stats.js";
 import * as albumNotes from "./db/repos/albumNotes.js";
 import * as resumePositions from "./db/repos/resumePositions.js";
 import * as albumRemoval from "./db/repos/albumRemoval.js";
-import { artUrl, extractPalette, type ArtPalette } from "./palette/index.js";
+import { artUrl, extractArt, type ArtPalette, type ArtSwatches } from "./palette/index.js";
+import { radioImageUrl } from "./scrape/radio.js";
 import { JobRunner, type ImportRequest, type ImportSelectionRequest } from "./services/jobRunner.js";
 import { cachedFetchText } from "./services/pageCache.js";
 import { parseMusicPage } from "./scrape/parseMusic.js";
@@ -365,24 +367,50 @@ export function createCore(deps: CoreDeps) {
       if (cached) return cached;
       const url = artUrl(artId, 2);
       if (!url) return null;
-      // Bypasses FetchQueue on purpose (static CDN), so it needs its own timeout.
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), ART_FETCH_TIMEOUT_MS);
-      let bytes: ArrayBuffer;
-      try {
-        const res = await deps.fetch(url, { headers: { Accept: "image/*" }, signal: ctrl.signal });
-        if (!res.ok) return null;
-        bytes = await res.arrayBuffer();
-      } catch {
-        return null; // timed out or network error: no palette, the UI keeps its defaults
-      } finally {
-        clearTimeout(timer);
-      }
-      const p = await extractPalette(bytes);
-      await palettes.cachePalette(db, artId, p);
-      return p;
+      const bytes = await fetchArtBytes(url);
+      if (!bytes) return null; // timed out or network error: no palette, the UI keeps its defaults
+      const art = await extractArt(bytes);
+      await palettes.cachePalette(db, artId, art.palette);
+      // One decode fills both caches (palette v2, #110).
+      await swatches.cacheSwatches(db, artId, art.swatches);
+      return art.palette;
+    },
+    /**
+     * Raw swatches for the vivid backdrop (#110), cached per image: album art by art_id, a Radio
+     * episode's image by image_id (negative key). A miss fetches the image once and fills the
+     * conservative palette cache too, so the two never cost two requests.
+     */
+    getArtSwatches: async (key: swatches.ArtKey): Promise<ArtSwatches | null> => {
+      const artKey = swatches.artKeyOf(key);
+      if (artKey == null) return null;
+      const cached = await swatches.getCachedSwatches(db, artKey);
+      if (cached) return cached;
+      const url = "artId" in key ? artUrl(key.artId, 2) : radioImageUrl(key.imageId, 2);
+      if (!url) return null;
+      const bytes = await fetchArtBytes(url);
+      if (!bytes) return null;
+      const art = await extractArt(bytes);
+      await swatches.cacheSwatches(db, artKey, art.swatches);
+      if (artKey > 0) await palettes.cachePalette(db, artKey, art.palette);
+      return art.swatches;
     },
   };
+
+  /** The bytes of one art image, or null on timeout, network error or a non-OK status. */
+  async function fetchArtBytes(url: string): Promise<ArrayBuffer | null> {
+    // Bypasses FetchQueue on purpose (static CDN), so it needs its own timeout.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ART_FETCH_TIMEOUT_MS);
+    try {
+      const res = await deps.fetch(url, { headers: { Accept: "image/*" }, signal: ctrl.signal });
+      if (!res.ok) return null;
+      return await res.arrayBuffer();
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 }
 
 function refusePrivate(key: string): void {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { quantize, pickColors, fitPalette, artUrl } from "../src/palette/index.js";
+import { quantize, pickColors, fitPalette, artUrl, swatchesOf, ArtSwatchesSchema } from "../src/palette/index.js";
 import { contrast, hexToRgb, rgbToOklch } from "../src/theme/color.js";
 
 function bitmap(colors: [number, number, number][], weights: number[], n = 400): number[] {
@@ -38,6 +38,26 @@ describe("palette", () => {
     const onDark = fitPalette(raw, "#23262D");
     expect(rgbToOklch(hexToRgb(onLight.ambient1)).L).toBeGreaterThanOrEqual(0.7);
     expect(rgbToOklch(hexToRgb(onDark.ambient2)).L).toBeLessThanOrEqual(0.56);
+  });
+  it("swatchesOf (palette v2) gives the raw clusters as hex with weights from the same bitmap pickColors reads", () => {
+    const px = bitmap([[90, 90, 90], [230, 120, 30], [40, 60, 200]], [0.6, 0.25, 0.15]);
+    const s = swatchesOf(px);
+    expect(s.version).toBe(1);
+    expect(s.swatches.length).toBeGreaterThanOrEqual(3);
+    expect(s.swatches.length).toBeLessThanOrEqual(6);
+    expect(s.swatches[0].hex.toLowerCase()).toBe("#5a5a5a"); // the dominant grey comes first
+    expect(s.swatches.map((x) => x.weight).reduce((a, b) => a + b)).toBeCloseTo(1, 2);
+    for (let i = 1; i < s.swatches.length; i++) expect(s.swatches[i - 1].weight).toBeGreaterThanOrEqual(s.swatches[i].weight);
+    expect(s.swatches.map((x) => x.hex.toLowerCase())).toEqual(expect.arrayContaining(["#e6781e", "#283cc8"]));
+    expect(ArtSwatchesSchema.safeParse(s).success).toBe(true);
+    // The conservative trio is untouched: same five-cluster pick as before.
+    expect(pickColors(quantize(px, 5)).accent.toLowerCase()).toBe("#e6781e");
+  });
+  it("ArtSwatchesSchema refuses what the cache must never hold", () => {
+    expect(ArtSwatchesSchema.safeParse({ version: 2, swatches: [] }).success).toBe(false);
+    expect(ArtSwatchesSchema.safeParse({ version: 1, swatches: [{ hex: "red", weight: 0.5 }] }).success).toBe(false);
+    expect(ArtSwatchesSchema.safeParse({ version: 1, swatches: Array.from({ length: 7 }, () => ({ hex: "#000000", weight: 0.1 })) }).success).toBe(false);
+    expect(ArtSwatchesSchema.safeParse({ version: 1, swatches: [{ hex: "#000000", weight: 1.5 }] }).success).toBe(false);
   });
   it("artUrl pads the id", () => {
     expect(artUrl(872064409, 10)).toBe("https://f4.bcbits.com/img/a0872064409_10.jpg");

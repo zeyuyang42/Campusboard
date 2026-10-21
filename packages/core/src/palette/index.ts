@@ -5,10 +5,28 @@ export interface ArtPalette {
   ambient2: string;
 }
 
+/** Palette v2 (#110): one raw k-means cluster of the art, as cached (`art_swatches`). */
+export interface RawSwatch { hex: string; weight: number }
+/** The cached row: up to six raw clusters, ordered by weight. Boosting happens at read time. */
+export interface ArtSwatches { version: 1; swatches: RawSwatch[] }
+/** A swatch after boostSwatches: the painted hex plus its OKLCH, weight normalised to 1. */
+export interface BoostedSwatch { hex: string; weight: number; L: number; C: number; h: number }
+/** What the backdrop paints with. `neutral`: the art was grey, so these are a tinted neutral ramp. */
+export interface BoostedPalette { swatches: BoostedSwatch[]; neutral: boolean }
+
+export const ART_SWATCHES_VERSION = 1;
+export const ART_SWATCHES_MAX = 6;
+export const ArtSwatchesSchema = z.object({
+  version: z.literal(1),
+  swatches: z.array(z.object({ hex: z.string().regex(/^#[0-9a-fA-F]{6}$/), weight: z.number().min(0).max(1) })).max(ART_SWATCHES_MAX),
+});
+
 export { quantize, type Cluster } from "./quantize.js";
 export { pickColors } from "./pick.js";
-export { extractPalette } from "./extract.js";
+export { extractPalette, extractArt, swatchesOf, type ExtractedArt } from "./extract.js";
+export { boostSwatches, BOOST_MIN_WEIGHT, BOOST_MAX_SWATCHES } from "./boost.js";
 
+import { z } from "zod";
 import { ensureContrast, hexToRgb, rgbToHex, textOn, rgbToOklch, oklchToRgb, toGamut } from "../theme/color.js";
 
 export interface AppliedPalette { accent: string; accentText: string; ambient1: string; ambient2: string }
