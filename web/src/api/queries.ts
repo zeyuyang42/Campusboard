@@ -39,7 +39,7 @@ export const keys = {
   offline: ["offline"] as const,
   // Not under "albums": an import must not refetch every loaded page (one POST each). A card
   // marks its own album from its import job instead.
-  discover: (p: DiscoverParams) => ["discover", p.tags.join(","), p.slice, p.time, p.location] as const,
+  discover: (p: DiscoverParams) => ["discover", p.tags.join(","), p.slice, p.time, p.location, p.category] as const,
   discoverTags: (prefix: string) => ["discover", "tags", prefix] as const,
   discoverLocations: (q: string) => ["discover", "locations", q] as const,
 };

@@ -83,6 +83,9 @@ describe("the remembered Discover setup", () => {
     expect(setupQuery({ tags: ["electronic", "glitch"], slice: "new", time: 1, location: 2950159, location_label: "Berlin, Berlin" }))
       .toBe("tags=electronic%2Cglitch&s=new&t=1&loc=2950159&locname=Berlin%2C%20Berlin");
     expect(setupQuery({ tags: [3, "ok"], slice: "bogus", time: 99, location: -4, location_label: "x" })).toBe("tags=ok&s=top");
+    expect(setupQuery({ tags: ["electronic"], slice: "top", time: null, location: null, category: 2, location_label: null })).toBe("tags=electronic&s=top&cat=vinyl");
+    expect(setupQuery({ tags: [], slice: "top", category: 5 })).toBe("s=top");
+    expect(setupQuery({ tags: [], slice: "top", category: 4 })).toBe("s=top&cat=cassette");
     expect(setupQuery(null)).toBeNull();
     expect(setupQuery("nope")).toBeNull();
   });

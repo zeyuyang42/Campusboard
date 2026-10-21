@@ -8,3 +8,4 @@ export * from "./discover.js";
 export { FetchQueue, type FetchLike } from "./http.js";
 export { ChallengeGate, clockTime, type ChallengeState, type ChallengeStore } from "./challenge.js";
 export * from "./fan.js";
+export * from "./discoverGenres.js";

@@ -6,7 +6,7 @@ import { NodeDb } from "./helpers/nodeDb.js";
 import { fixture } from "./helpers.js";
 import { FetchQueue } from "../src/scrape/http.js";
 import {
-  DISCOVER_ENDPOINT, LOCATION_SEARCH_ENDPOINT, STREAM_REFRESH_ENDPOINT, TAG_SEARCH_ENDPOINT,
+  DEFAULT_DISCOVER, DISCOVER_ENDPOINT, LOCATION_SEARCH_ENDPOINT, STREAM_REFRESH_ENDPOINT, TAG_SEARCH_ENDPOINT,
   discoverBatch, discoverBody, discoverQuery, discoverWebUrl, locationSuggestions, parseDiscoverResponse, parseDiscoverUrl, tagSuggestions,
 } from "../src/scrape/discover.js";
 import { PreviewService, previewQueueTrack, previewQueueId, isPreviewTrack, isQueuePreview } from "../src/services/discover.js";
@@ -68,16 +68,16 @@ describe("parseDiscoverResponse (discover_web)", () => {
 
   it("posts the body Bandcamp's own page sends", async () => {
     const fetch = vi.fn(async () => new Response(json("discover")));
-    const p = await discoverBatch(new FetchQueue(fetch, 0), { tags: ["electronic", "breaks"], slice: "new", time: 2, location: 2950159 }, "abc");
+    const p = await discoverBatch(new FetchQueue(fetch, 0), { tags: ["electronic", "breaks"], slice: "new", time: 2, location: 2950159, category: 2 }, "abc");
     expect(p.items).toHaveLength(12);
     const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(DISCOVER_ENDPOINT);
     expect(init.method).toBe("POST");
     expect(JSON.parse(String(init.body))).toEqual({
-      category_id: 0, tag_norm_names: ["electronic", "breaks"], geoname_id: 2950159, slice: "new", time_facet_id: 2,
+      category_id: 2, tag_norm_names: ["electronic", "breaks"], geoname_id: 2950159, slice: "new", time_facet_id: 2,
       cursor: "abc", size: 60, include_result_types: ["a", "s"], followed_bands: false,
     });
-    expect(discoverBody({ tags: [], slice: "top", time: null, location: null }, null)).toMatchObject({ cursor: "*", geoname_id: 0, time_facet_id: null });
+    expect(discoverBody({ tags: [], slice: "top", time: null, location: null, category: 0 }, null)).toMatchObject({ cursor: "*", geoname_id: 0, time_facet_id: null });
   });
 });
 
@@ -100,13 +100,28 @@ describe("tag and location suggestions", () => {
 
 describe("discover links", () => {
   it("reads the tags from the path", () => {
-    expect(parseDiscoverUrl("https://bandcamp.com/discover/electronic+breaks+glitch")).toEqual({ tags: ["electronic", "breaks", "glitch"], slice: "top", time: null, location: null });
+    expect(parseDiscoverUrl("https://bandcamp.com/discover/electronic+breaks+glitch")).toEqual({ tags: ["electronic", "breaks", "glitch"], slice: "top", time: null, location: null, category: 0 });
   });
-  it("reads s, t (slug or id), loc and tags=, and ignores the category", () => {
+  it("reads s, t (slug or id), loc, tags= and the category segment", () => {
     expect(parseDiscoverUrl("https://bandcamp.com/discover/electronic/vinyl?s=new&t=this-week&loc=2950159&tags=glitch-hop,breaks"))
-      .toEqual({ tags: ["electronic", "glitch-hop", "breaks"], slice: "new", time: 1, location: 2950159 });
-    expect(parseDiscoverUrl("https://bandcamp.com/discover?t=3&s=rand")).toMatchObject({ tags: [], slice: "rand", time: 3 });
-    expect(parseDiscoverUrl("https://bandcamp.com/discover/all/cassette?s=bogus&t=fresh&loc=x")).toEqual({ tags: [], slice: "top", time: null, location: null });
+      .toEqual({ tags: ["electronic", "glitch-hop", "breaks"], slice: "new", time: 1, location: 2950159, category: 2 });
+    expect(parseDiscoverUrl("https://bandcamp.com/discover?t=3&s=rand")).toMatchObject({ tags: [], slice: "rand", time: 3, category: 0 });
+    expect(parseDiscoverUrl("https://bandcamp.com/discover/all/cassette?s=bogus&t=fresh&loc=x")).toEqual({ tags: [], slice: "top", time: null, location: null, category: 4 });
+  });
+  it("honours digital, vinyl, cd and cassette, and nothing else, as the category", () => {
+    const cat = (u: string) => parseDiscoverUrl(u)?.category;
+    expect(cat("https://bandcamp.com/discover/electronic+breaks+glitch/vinyl")).toBe(2);
+    expect(cat("https://bandcamp.com/discover/jazz/digital")).toBe(1);
+    expect(cat("https://bandcamp.com/discover/jazz/CD")).toBe(3);
+    expect(cat("https://bandcamp.com/discover/jazz/tshirt")).toBe(0);
+    expect(cat("https://bandcamp.com/discover/jazz/all")).toBe(0);
+    expect(cat("https://bandcamp.com/discover/jazz/5")).toBe(0);
+    expect(cat("https://bandcamp.com/discover/jazz/2")).toBe(0);
+    expect(cat("https://bandcamp.com/discover/jazz?cat=2")).toBe(0);
+    expect(cat("https://bandcamp.com/discover/jazz?cat=vinyl")).toBe(2);
+    expect(cat("https://bandcamp.com/discover/jazz/cassette?cat=vinyl")).toBe(4);
+    expect(cat("https://bandcamp.com/discover/jazz?cat=9")).toBe(0);
+    expect(discoverBody({ ...DEFAULT_DISCOVER, category: 3 }, null).category_id).toBe(3);
   });
   it("takes only https links and drops overlong tags", () => {
     expect(parseDiscoverUrl("http://bandcamp.com/discover/electronic")).toBeNull();
@@ -119,11 +134,17 @@ describe("discover links", () => {
     expect(parseDiscoverUrl("not a url at all")).toBeNull();
   });
   it("round-trips through the app's query and Bandcamp's link", () => {
-    const p = { tags: ["electronic", "glitch"], slice: "new" as const, time: 1, location: 2950159 };
+    const p = { tags: ["electronic", "glitch"], slice: "new" as const, time: 1, location: 2950159, category: 0 };
     expect(parseDiscoverUrl(`https://bandcamp.com/discover?${discoverQuery(p)}`)).toEqual(p);
     expect(discoverWebUrl(p)).toBe("https://bandcamp.com/discover/electronic+glitch?s=new&t=this-week&loc=2950159");
     expect(parseDiscoverUrl(discoverWebUrl(p))).toEqual(p);
-    expect(discoverQuery({ tags: [], slice: "top", time: null, location: null })).toBe("s=top");
+    expect(discoverQuery({ tags: [], slice: "top", time: null, location: null, category: 0 })).toBe("s=top");
+    const v = { ...p, category: 2 };
+    expect(discoverQuery(v)).toContain("cat=vinyl");
+    expect(parseDiscoverUrl(`https://bandcamp.com/discover?${discoverQuery(v)}`)).toEqual(v);
+    expect(discoverWebUrl(v)).toBe("https://bandcamp.com/discover/electronic+glitch/vinyl?s=new&t=this-week&loc=2950159");
+    expect(parseDiscoverUrl(discoverWebUrl(v))).toEqual(v);
+    expect(discoverWebUrl({ ...DEFAULT_DISCOVER, category: 4 })).toBe("https://bandcamp.com/discover/all/cassette");
   });
 });
 
@@ -212,12 +233,12 @@ describe("core.discover", () => {
     const parsed = parseTralbumPage(fixture("album"));
     const albumId = await upsertTralbum(db, { ...parsed, url: "https://resonantlanguage.bandcamp.com/album/eviscerate" });
     const core = createCore({ db, fetch: async () => new Response(json("discover")) });
-    const page = await core.discover({ tags: ["electronic"], slice: "top", time: null, location: null });
+    const page = await core.discover({ tags: ["electronic"], slice: "top", time: null, location: null, category: 0 });
     expect(page.items[1].album_id).toBe(albumId);
     expect(page.items.filter((i) => i.album_id)).toHaveLength(1);
     // An album waiting for its delete (#93) is not in the library.
     await core.removeAlbumLater(albumId);
-    expect((await core.discover({ tags: [], slice: "top", time: null, location: null })).items[1].album_id).toBeNull();
+    expect((await core.discover({ tags: [], slice: "top", time: null, location: null, category: 0 })).items[1].album_id).toBeNull();
     expect(await core.discoverTags("g")).toEqual([]);
     expect(await core.discoverLocations("be")).toEqual([]);
   });

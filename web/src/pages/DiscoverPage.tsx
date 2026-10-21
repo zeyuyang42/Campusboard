@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
-  DISCOVER_MAX_TAG_LENGTH, DISCOVER_MAX_TAGS, DISCOVER_SLICES, DISCOVER_TIMES, discoverParamsFromQuery, discoverQuery, discoverWebUrl, parseDiscoverUrl,
+  DISCOVER_CATEGORIES, DISCOVER_GENRES, DISCOVER_MAX_TAG_LENGTH, DISCOVER_MAX_TAGS, DISCOVER_SLICES, DISCOVER_TIMES, discoverParamsFromQuery, discoverQuery,
+  discoverSubgenres, discoverWebUrl, genreFits, isDiscoverGenre, parseDiscoverUrl, selectedGenre, toggleTag, withGenre,
   previewQueueTrack, type DiscoverItem, type DiscoverParams, type DiscoverSetup, type QueueTrack,
 } from "@bc/core";
 import { getCore } from "../api/core";
@@ -33,6 +34,8 @@ export function setupQuery(s: unknown): string | null {
   if (typeof o.slice === "string") q.set("s", o.slice);
   if (typeof o.time === "number") q.set("t", String(o.time));
   if (typeof o.location === "number") q.set("loc", String(o.location));
+  const cat = DISCOVER_CATEGORIES.find((c) => c.id === o.category);
+  if (cat) q.set("cat", cat.slug);
   const p = discoverParamsFromQuery(q);
   const label = p.location && typeof o.location_label === "string" ? o.location_label.slice(0, 120) : null;
   return withLabel(discoverQuery(p), label);
@@ -77,7 +80,13 @@ export function DiscoverPage() {
         </span>
       </div>
       <div className="discover-filters">
+        <GenreChips tags={params.tags} onChange={(tags) => update({ ...params, tags })} />
         <TagInput tags={params.tags} onChange={(tags) => update({ ...params, tags })} onLink={(p) => update(p, null)} />
+        <div className="discover-chips" role="group" aria-label="Format">
+          {DISCOVER_CATEGORIES.map((c) => (
+            <Chip key={c.id} on={params.category === c.id} onClick={() => update({ ...params, category: c.id })}>{c.label}</Chip>
+          ))}
+        </div>
         <div className="toolbar">
           <div className="segmented" role="group" aria-label="Sort">
             {DISCOVER_SLICES.map((s) => (
@@ -182,6 +191,41 @@ function DiscoverCard({ item }: { item: DiscoverItem }) {
   );
 }
 
+const FULL_TITLE = `Up to ${DISCOVER_MAX_TAGS} tags: remove one first`;
+
+function Chip({ on, onClick, disabled, children }: { on: boolean; onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
+  const off = !!disabled && !on;
+  return <button type="button" className={`chip pick ${on ? "on" : ""}`} aria-pressed={on} disabled={off} title={off ? FULL_TITLE : undefined} onClick={onClick}>{children}</button>;
+}
+
+/** Bandcamp's genre row (one genre at a time) and, under a genre, its subgenres (any number). */
+function GenreChips({ tags, onChange }: { tags: string[]; onChange: (tags: string[]) => void }) {
+  const genre = selectedGenre(tags);
+  const subs = discoverSubgenres(genre);
+  const full = tags.length >= DISCOVER_MAX_TAGS;
+  return (
+    <>
+      <div className="discover-chips" role="group" aria-label="Genre">
+        <Chip on={!genre} onClick={() => onChange(withGenre(tags, null))}>all genres</Chip>
+        {DISCOVER_GENRES.map((g) => <Chip key={g.slug} on={genre === g.slug} disabled={!genreFits(tags, g.slug)} onClick={() => onChange(withGenre(tags, g.slug))}>{g.label}</Chip>)}
+      </div>
+      {subs.length > 0 && (
+        <div className="discover-chips subgenres" role="group" aria-label="Subgenres">
+          {subs.map((s) => (
+            <Chip key={s.slug} on={tags.includes(s.slug)} disabled={full} onClick={() => onChange(toggleTag(tags, s.slug))}>{s.label}</Chip>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Tags a genre or subgenre chip already shows, so the tag field leaves them out. */
+function chipTags(tags: string[]): Set<string> {
+  const genre = selectedGenre(tags);
+  return new Set(genre ? [genre, ...discoverSubgenres(genre).map((s) => s.slug).filter((s) => tags.includes(s))] : []);
+}
+
 /** A small suggestion list under a text field; ↑/↓ and Enter pick, Escape closes. */
 function useSuggestions<T>(list: T[], open: boolean) {
   const [hi, setHi] = useState(0);
@@ -205,16 +249,20 @@ function TagInput({ tags, onChange, onLink }: { tags: string[]; onChange: (tags:
   // Only the answer for what is typed now: an older prefix's list is never shown.
   const list = useMemo(() => (prefix === typed ? (data ?? []).filter((t) => !tags.includes(t.norm_name)).slice(0, 8) : []), [data, prefix, typed, tags]);
   const open = focused && typed.length >= 2 && list.length > 0;
+  const shown = useMemo(() => { const hide = chipTags(tags); return tags.filter((t) => !hide.has(t)); }, [tags]);
   const add = (norm: string) => {
     const n = norm.trim().toLowerCase().replace(/\s+/g, "-");
-    if (n && n.length <= DISCOVER_MAX_TAG_LENGTH && !tags.includes(n) && tags.length < DISCOVER_MAX_TAGS) onChange([...tags, n]);
+    const subOfGenre = discoverSubgenres(selectedGenre(tags)).some((s) => s.slug === n);
+    // A typed genre is picked like its chip (it replaces the genre); a subgenre lights up its chip.
+    if (n && isDiscoverGenre(n) && !subOfGenre) { if (genreFits(tags, n)) onChange(withGenre(tags, n)); }
+    else if (n && n.length <= DISCOVER_MAX_TAG_LENGTH && !tags.includes(n) && tags.length < DISCOVER_MAX_TAGS) onChange([...tags, n]);
     setText("");
   };
   const s = useSuggestions(list, open);
   const input = useRef<HTMLInputElement>(null);
   return (
     <div className="discover-tags" onClick={() => input.current?.focus()}>
-      {tags.map((t) => (
+      {shown.map((t) => (
         <span className="chip tag-chip" key={t}>
           <span className="selectable">{t.replace(/-/g, " ")}</span>
           <button className="icon-btn" title={`Remove ${t}`} aria-label={`Remove ${t}`} onClick={(e) => { e.stopPropagation(); onChange(tags.filter((x) => x !== t)); }}><CloseIcon size={14} /></button>
@@ -224,7 +272,7 @@ function TagInput({ tags, onChange, onLink }: { tags: string[]; onChange: (tags:
         <input
           ref={input}
           aria-label="Add a tag"
-          placeholder={tags.length ? "Add a tag" : "Tags, e.g. electronic, glitch"}
+          placeholder={shown.length ? "Add a tag" : "More tags, e.g. glitch"}
           disabled={tags.length >= DISCOVER_MAX_TAGS}
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -237,7 +285,7 @@ function TagInput({ tags, onChange, onLink }: { tags: string[]; onChange: (tags:
           onKeyDown={(e) => {
             if (s.key(e, (t) => add(t.norm_name))) return;
             if (e.key === "Enter" && typed) { e.preventDefault(); add(typed); }
-            else if (e.key === "Backspace" && !text && tags.length) onChange(tags.slice(0, -1));
+            else if (e.key === "Backspace" && !text && shown.length) { const last = shown[shown.length - 1]; onChange(tags.filter((x) => x !== last)); }
             else if (e.key === "Escape") setText("");
           }}
         />

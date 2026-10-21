@@ -979,7 +979,7 @@ async function offlineCheck(core: Core, album: AlbumDetail, s: Step) {
  */
 async function discoverCheck(core: Core, s: Step) {
   s("discover_web");
-  const page = await core.discover({ tags: ["electronic"], slice: "top", time: null, location: null });
+  const page = await core.discover({ tags: ["electronic"], slice: "top", time: null, location: null, category: 0 });
   s("tag search");
   const tags = await core.discoverTags("glit");
   const item = page.items.find((i) => i.featured);

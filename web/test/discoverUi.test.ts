@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, createElement as h } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
-import { QueryClient } from "@tanstack/react-query";
-import { previewQueueTrack, type DiscoverItem, type DiscoverPage } from "@bc/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { DEFAULT_DISCOVER, previewQueueTrack, type DiscoverItem, type DiscoverPage, type DiscoverParams } from "@bc/core";
 import { useTrackActions } from "../src/lib/useTrackActions";
-import { keys, markDiscoverInLibrary } from "../src/api/queries";
+import { keys, markDiscoverInLibrary, useDiscover } from "../src/api/queries";
 import type { MenuContent } from "../src/ui/menu";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -44,7 +44,7 @@ describe("the track menu on a Discover preview (#104)", () => {
 describe("markDiscoverInLibrary", () => {
   it("patches every cached discover page holding the release, and nothing else", () => {
     const qc = new QueryClient();
-    const params = { tags: ["x"], slice: "top" as const, time: null, location: null };
+    const params = { tags: ["x"], slice: "top" as const, time: null, location: null, category: 0 };
     const page: DiscoverPage = { items: [ITEM, { ...ITEM, url: "https://b.bandcamp.com/album/y" }], total: 2, cursor: null };
     qc.setQueryData(keys.discover(params), { pages: [page], pageParams: [null] });
     const tags = [{ norm_name: "glitch", display_name: "glitch", count: 1 }];
@@ -53,5 +53,23 @@ describe("markDiscoverInLibrary", () => {
     const d = qc.getQueryData<{ pages: DiscoverPage[] }>(keys.discover(params))!;
     expect(d.pages[0].items.map((i) => i.album_id)).toEqual([42, null]);
     expect(qc.getQueryData(keys.discoverTags("gl"))).toEqual(tags);
+  });
+});
+
+describe("the discover query and its format (category)", () => {
+  it("keys on the category, so picking vinyl asks Bandcamp again", async () => {
+    expect(keys.discover({ ...DEFAULT_DISCOVER, category: 2 })).not.toEqual(keys.discover(DEFAULT_DISCOVER));
+    const discover = vi.fn(async (_p: DiscoverParams, _cursor: string | null): Promise<DiscoverPage> => ({ items: [], total: 0, cursor: null }));
+    (globalThis as { __fakeCore?: unknown }).__fakeCore = { discover };
+    const qc = new QueryClient();
+    function Probe({ p }: { p: DiscoverParams }) { useDiscover(p); return null; }
+    const show = async (p: DiscoverParams) => {
+      await act(async () => { root.render(h(QueryClientProvider, { client: qc }, h(Probe, { p }))); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    };
+    await show({ ...DEFAULT_DISCOVER, tags: ["electronic"] });
+    await show({ ...DEFAULT_DISCOVER, tags: ["electronic"], category: 2 });
+    expect(discover.mock.calls.map((c) => c[0].category)).toEqual([0, 2]);
+    delete (globalThis as { __fakeCore?: unknown }).__fakeCore;
   });
 });

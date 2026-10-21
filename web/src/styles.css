@@ -536,6 +536,11 @@ details.about-wrap summary { cursor: pointer; color: var(--text-muted); margin-t
 /* ---------- discover (#104) ---------- */
 .discover-filters { margin-bottom: 8px; max-width: 960px; }
 .discover-filters .toolbar { margin-bottom: 18px; }
+.discover-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.discover-chips.subgenres { padding-left: 12px; border-left: 2px solid var(--line); }
+.chip.pick { padding: 3px 11px; font-size: 13px; font-weight: 500; color: var(--text-muted); background: transparent; }
+.chip.pick:not(.on):hover:not(:disabled) { color: var(--text); background: var(--surface-hover); }
+.chip.pick.on { color: var(--accent-text); background: var(--accent); border-color: var(--accent); }
 .discover-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 5px 6px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-raised); }
 .discover-tags:focus-within { border-color: var(--accent); }
 .discover-tags .suggest-wrap { flex: 1; min-width: 180px; }
