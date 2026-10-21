@@ -44,6 +44,10 @@ html.is-tauri.is-fullscreen { --titlebar: 8px; }
 @media (prefers-reduced-motion: reduce) {
   :root { transition: none; }
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  /* Infinite alternating animations would flip every frame at 0.01ms: stop them outright. */
+  .eq, .eq::before, .eq::after,
+  :root:not([data-backdrop="conservative"]) .ambient .wash.drift::before,
+  :root:not([data-backdrop="conservative"]) .ambient .wash.drift::after { animation: none !important; }
 }
 
 * { box-sizing: border-box; }
@@ -564,3 +568,65 @@ html.is-tauri .discover-card .art.playable { cursor: default; }
 .discover-card.current .title { color: var(--accent); }
 .discover-card .sub a { color: inherit; }
 .discover-more { display: flex; justify-content: center; margin: 28px 0 8px; }
+
+/* ---------- vivid backdrop (#110) ---------- */
+/* Every rule below is scoped to :root:not([data-backdrop="conservative"]), so the conservative
+   mode's CSS is exactly what it was before the backdrop existed. applyTheme writes the panel
+   tokens; the values here only hold until it runs. */
+:root:not([data-backdrop="conservative"]) {
+  --backdrop-intensity: 0.7;
+  --panel-alpha: 0.71;
+  --panel-blur: 28px;
+  --panel-tint: 0.04;
+  --panel-bg: color-mix(in oklab, var(--ambient-1) calc(var(--panel-tint) * 100%), var(--surface));
+  --panel: color-mix(in oklab, var(--panel-bg) calc(var(--panel-alpha) * 100%), transparent);
+}
+:root:not([data-backdrop="conservative"]) .sidebar,
+:root:not([data-backdrop="conservative"]) .main,
+:root:not([data-backdrop="conservative"]) .player { background: var(--panel); }
+/* The sidebar and the player bar frost the backdrop; .main is tinted-translucent without blur:
+   re-filtering the largest panel over an animating canvas cost ~2 CPU points (AGENTS.md). */
+:root:not([data-backdrop="conservative"]) .sidebar,
+:root:not([data-backdrop="conservative"]) .player {
+  -webkit-backdrop-filter: blur(var(--panel-blur)) saturate(1.15);
+  backdrop-filter: blur(var(--panel-blur)) saturate(1.15);
+}
+/* The panels float: the backdrop is strongest in the margins between them. */
+:root:not([data-backdrop="conservative"]) .sidebar { margin: 12px 0 12px 12px; border-right: 0; border-radius: var(--radius-lg); padding-top: calc(var(--titlebar) + 2px); }
+:root:not([data-backdrop="conservative"]) .main { margin: 12px; border-radius: var(--radius-lg); padding-top: calc(var(--titlebar) + 12px); }
+:root:not([data-backdrop="conservative"]) .now-playing { background: color-mix(in oklab, var(--surface) 40%, transparent); }
+@media (max-width: 640px) {
+  :root:not([data-backdrop="conservative"]) .sidebar { margin: 0; border-radius: 0; padding-top: calc(var(--titlebar) + 14px); }
+}
+/* Medium accent tint on the chrome. The heading mix stays at 14% so text keeps its contrast. */
+:root:not([data-backdrop="conservative"]) .nav a.active { background: color-mix(in oklab, var(--accent) 16%, var(--surface-hover)); }
+:root:not([data-backdrop="conservative"]) .seek .bar .fill { background: var(--accent); }
+:root:not([data-backdrop="conservative"]) .page-title,
+:root:not([data-backdrop="conservative"]) h2 { color: color-mix(in oklab, var(--text) 86%, var(--accent)); }
+/* Ambient wash: the two corner washes plus two drifting layers; paused with the player. */
+:root:not([data-backdrop="conservative"]) .ambient .wash.drift::before,
+:root:not([data-backdrop="conservative"]) .ambient .wash.drift::after {
+  content: ""; position: absolute; inset: -25%;
+  animation: wash-drift 45s ease-in-out infinite alternate;
+}
+:root:not([data-backdrop="conservative"]) .ambient .wash.drift {
+  background:
+    radial-gradient(80% 65% at 12% 0%, color-mix(in oklab, var(--ambient-1) calc(var(--ambient-strength) * 85%), transparent), transparent 70%),
+    radial-gradient(70% 60% at 88% 100%, color-mix(in oklab, var(--ambient-2) calc(var(--ambient-strength) * 95%), transparent), transparent 70%);
+}
+:root:not([data-backdrop="conservative"]) .ambient .wash.drift::before {
+  background: radial-gradient(50% 45% at 30% 40%, color-mix(in oklab, var(--ambient-1) calc(var(--ambient-strength) * 80%), transparent), transparent 70%);
+}
+:root:not([data-backdrop="conservative"]) .ambient .wash.drift::after {
+  background: radial-gradient(45% 50% at 70% 60%, color-mix(in oklab, var(--ambient-2) calc(var(--ambient-strength) * 85%), transparent), transparent 70%);
+  animation-duration: 57s; animation-direction: alternate-reverse;
+}
+:root:not([data-backdrop="conservative"]) .ambient[data-paused] .wash.drift::before,
+:root:not([data-backdrop="conservative"]) .ambient[data-paused] .wash.drift::after { animation-play-state: paused; }
+@keyframes wash-drift {
+  from { transform: translate(-6%, -4%) scale(1); }
+  to { transform: translate(6%, 5%) scale(1.15); }
+}
+/* Generative morph: the canvas, with the wash underneath as the fallback for a lost context. */
+:root:not([data-backdrop="conservative"]) .ambient canvas.morph { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+:root:not([data-backdrop="conservative"]) .ambient[data-gl="ok"] .wash { display: none; }

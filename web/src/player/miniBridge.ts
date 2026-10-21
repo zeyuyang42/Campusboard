@@ -7,6 +7,7 @@ import { buildMiniState, MINI_EVENTS, miniLiveAfter, MiniStateThrottle, parseMin
 import { elementPaused, usePlayer } from "./store";
 import { useTheme } from "../theme/store";
 import { appliedPalette, onPaletteChange } from "../theme/usePalette";
+import { currentSwatches, onSwatchesChange } from "../backdrop/swatches";
 import { createBus, type MiniBus } from "../mini/bus";
 import { isTauri } from "../lib/env";
 
@@ -72,7 +73,14 @@ export async function initMiniBridge() {
   let bus: MiniBus;
   try { bus = await createBus("mini"); } catch { return; }
   const throttle = new MiniStateThrottle(1000);
-  const current = () => buildMiniState(usePlayer.getState(), appliedPalette(), useTheme.getState().resolved);
+  /** The fitted palette plus the boosted swatches (#110) for the mini window's gradient. */
+  const palette = () => {
+    const p = appliedPalette();
+    if (!p) return null;
+    const swatches = currentSwatches()?.swatches.map((s) => s.hex);
+    return swatches?.length ? { ...p, swatches } : p;
+  };
+  const current = () => buildMiniState(usePlayer.getState(), palette(), useTheme.getState().resolved);
   const push = (force: boolean) => {
     const s = current();
     if (force) throttle.reset();
@@ -94,4 +102,5 @@ export async function initMiniBridge() {
   usePlayer.subscribe(() => { if (live()) push(false); });
   useTheme.subscribe(() => { if (live()) push(false); });
   onPaletteChange(() => { if (live()) push(false); });
+  onSwatchesChange(() => { if (live()) push(false); });
 }

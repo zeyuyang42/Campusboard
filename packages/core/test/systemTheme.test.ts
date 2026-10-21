@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  parseTheme, PRESETS, DEFAULT_THEME, LEGACY_DEFAULT_THEME, presetByName, resolveTheme, withMode, withPalette, themeVars, accentRatio, accentSurface,
+  parseTheme, PRESETS, DEFAULT_THEME, DEFAULT_BACKDROP, LEGACY_DEFAULT_THEME, presetByName, resolveTheme, withMode, withPalette, themeVars, accentRatio, accentSurface,
   type Theme,
 } from "../src/theme/index.js";
 import { contrast, hexToRgb } from "../src/theme/color.js";
@@ -22,7 +22,8 @@ describe("system mode: schema compatibility", () => {
     for (const f of [V1_DARK, V1_LIGHT]) {
       const r = parseTheme(f);
       expect(r.error).toBeUndefined();
-      expect(r.theme).toEqual({ ...f, contrast: "standard" });
+      // Additive defaults only: contrast (system themes) and backdrop (#110) land on their defaults.
+      expect(r.theme).toEqual({ ...f, contrast: "standard", backdrop: DEFAULT_BACKDROP });
     }
   });
   it("keeps the version at 1 and accepts a system theme with both palettes", () => {

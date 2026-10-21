@@ -36,7 +36,14 @@ function paint(s: MiniState) {
     root.style.setProperty("--ambient-1", "transparent");
     root.style.setProperty("--ambient-2", "transparent");
   }
+  // The boosted swatches (#110) for the vivid gradient; mini.css falls back to the ambients.
+  for (let i = 0; i < SWATCH_VARS; i++) {
+    const hex = p?.swatches?.[i];
+    if (hex) root.style.setProperty(`--swatch-${i + 1}`, hex);
+    else root.style.removeProperty(`--swatch-${i + 1}`);
+  }
 }
+const SWATCH_VARS = 4;
 
 /** The state plus when it arrived, so the position can be extrapolated between ticks. */
 function useMiniState() {

@@ -1,10 +1,14 @@
 // Keeps --accent / --ambient-* on :root in step with the playing track's artwork and the theme.
-import { accentRatio, accentSurface, fitPalette, type AppliedPalette, type ArtPalette } from "@bc/core";
+// Palette v2 (#110): the same art change also fetches the raw swatches and publishes them
+// boosted (backdrop/swatches.ts); outside the conservative backdrop the ambient colours come
+// from the boosted swatches, so the wash and the panel tint follow the vivid palette.
+import { accentRatio, accentSurface, artKeyOf, fitPalette, type AppliedPalette, type ArtKey, type ArtPalette } from "@bc/core";
 import { usePlayer } from "../player/store";
 import { useTheme } from "./store";
 import { getCore } from "../api/core";
+import { currentSwatches, publishSwatches, setSwatchAppearance } from "../backdrop/swatches";
 
-let currentArt: number | null = null;
+let currentKey: number | null = null;
 let currentPalette: ArtPalette | null = null;
 let seq = 0;
 let applied: AppliedPalette | null = null;
@@ -21,43 +25,62 @@ export function onPaletteChange(fn: () => void): () => void {
 function paint() {
   const root = document.documentElement.style;
   const theme = useTheme.getState().resolved;
-  if (!currentPalette) {
+  setSwatchAppearance(theme.mode === "dark");
+  const vivid = theme.backdrop.mode === "conservative" ? null : currentSwatches();
+  const fit = currentPalette ? fitPalette(currentPalette, accentSurface(theme), accentRatio(theme)) : null;
+  if (fit) {
+    root.setProperty("--accent", fit.accent);
+    root.setProperty("--accent-text", fit.accentText);
+  } else {
     root.removeProperty("--accent");
     root.removeProperty("--accent-text");
-    root.setProperty("--ambient-1", "transparent");
-    root.setProperty("--ambient-2", "transparent");
-    applied = null;
-    listeners.forEach((fn) => fn());
-    return;
   }
-  const fit = fitPalette(currentPalette, accentSurface(theme), accentRatio(theme));
-  root.setProperty("--accent", fit.accent);
-  root.setProperty("--accent-text", fit.accentText);
-  root.setProperty("--ambient-1", fit.ambient1);
-  root.setProperty("--ambient-2", fit.ambient2);
+  if (vivid?.swatches.length) {
+    root.setProperty("--ambient-1", vivid.swatches[0].hex);
+    root.setProperty("--ambient-2", (vivid.swatches[1] ?? vivid.swatches[0]).hex);
+  } else {
+    root.setProperty("--ambient-1", fit?.ambient1 ?? "transparent");
+    root.setProperty("--ambient-2", fit?.ambient2 ?? "transparent");
+  }
   applied = fit;
   listeners.forEach((fn) => fn());
 }
 
-async function onArtChange(artId: number | null) {
-  if (artId === currentArt) return;
-  currentArt = artId;
+/** The art of a queue entry: album art by art_id, a Radio episode by its image_id. */
+function artKeyFor(entry: { art_id: number | null; radio?: { image_id: number | null } | null } | undefined): ArtKey | null {
+  if (!entry) return null;
+  if (entry.art_id) return { artId: entry.art_id };
+  if (entry.radio?.image_id) return { imageId: entry.radio.image_id };
+  return null;
+}
+
+async function onArtChange(key: ArtKey | null) {
+  const k = key ? artKeyOf(key) : null;
+  if (k === currentKey) return;
+  currentKey = k;
   const mySeq = ++seq;
-  if (!artId) { currentPalette = null; paint(); return; }
+  if (!key || k == null) { currentPalette = null; publishSwatches(null, null); paint(); return; }
+  let palette: ArtPalette | null = null;
+  let swatches: Awaited<ReturnType<Awaited<ReturnType<typeof getCore>>["getArtSwatches"]>> = null;
   try {
-    const p = await (await getCore()).getArtPalette(artId);
+    const core = await getCore();
+    // Swatches first: a miss fetches the image once and fills the palette cache too, so the
+    // palette call that follows is a cache hit (one small image per track change, never two).
+    swatches = await core.getArtSwatches(key).catch(() => null);
     if (mySeq !== seq) return;
-    currentPalette = p;
+    palette = "artId" in key ? await core.getArtPalette(key.artId).catch(() => null) : null;
   } catch {
-    if (mySeq !== seq) return;
-    currentPalette = null;
+    palette = null; swatches = null;
   }
+  if (mySeq !== seq) return;
+  currentPalette = palette;
+  publishSwatches(k, swatches?.swatches ?? null);
   paint();
 }
 
 export function initPalette() {
-  usePlayer.subscribe((s) => void onArtChange(s.queue[s.index]?.art_id ?? null));
+  usePlayer.subscribe((s) => void onArtChange(artKeyFor(s.queue[s.index])));
   useTheme.subscribe(() => paint());
   const s = usePlayer.getState();
-  void onArtChange(s.queue[s.index]?.art_id ?? null);
+  void onArtChange(artKeyFor(s.queue[s.index]));
 }

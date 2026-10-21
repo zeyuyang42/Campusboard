@@ -37,6 +37,7 @@ export { releaseTime, preorderRecheckDue, PREORDER_RECHECK_GRACE_MS } from "./se
 export { normalizeIdentityCookie } from "./services/account.js";
 export * as repos from "./db/repos/index.js";
 export { normalizePlaylistName, PlaylistNameError, PLAYLIST_NAME_MAX } from "./db/repos/playlists.js";
+export { artKeyOf, type ArtKey } from "./db/repos/swatches.js";
 export {
   parseLibraryExport, LIBRARY_FORMAT, LIBRARY_EXPORT_VERSION,
   type LibraryExport, type LibraryImportPreview, type LibraryImportOptions, type LibraryImportResult,

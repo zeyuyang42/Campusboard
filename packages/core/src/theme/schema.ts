@@ -12,6 +12,20 @@ export const PaletteSchema = z.object({
   danger: Hex,
 });
 
+export const BACKDROP_MODES = ["conservative", "wash", "morph"] as const;
+export const BACKDROP_STYLES = ["ink", "aurora", "grain", "lava"] as const;
+export const BackdropSchema = z.object({
+  mode: z.enum(BACKDROP_MODES),
+  /** The generative style, used by "morph" only (kept across mode switches). */
+  style: z.enum(BACKDROP_STYLES),
+  /** How much of the surface the art colours take: 0 is the bare surface, 1 is full colour. */
+  intensity: z.number().min(0).max(1),
+  /** "still": no drift at all, only the cross-fade on a track change. */
+  motion: z.enum(["drift", "still"]),
+});
+export type Backdrop = z.infer<typeof BackdropSchema>;
+export const DEFAULT_BACKDROP: Backdrop = { mode: "morph", style: "ink", intensity: 0.7, motion: "drift" };
+
 export const ThemeSchema = z.object({
   version: z.literal(1),
   name: z.string().trim().min(1).max(40),
@@ -42,6 +56,13 @@ export const ThemeSchema = z.object({
       message: "a background file must be a plain file name", path: ["value"],
     })
     .default({ source: "none", value: "", blur: 12, dim: 0.5 }),
+  /**
+   * The album-art backdrop (#110). "conservative" is the look before it: the two corner washes
+   * at `ambient` strength and opaque panels. "wash" drifts those washes in CSS; "morph" paints
+   * a generative canvas in one of four styles. Additive with a default, so older saved themes
+   * and theme files still parse (version stays 1).
+   */
+  backdrop: BackdropSchema.default(DEFAULT_BACKDROP),
 }).refine((t) => t.mode !== "system" || (t.paletteDark && t.paletteLight), {
   message: "a system theme needs both paletteDark and paletteLight", path: ["mode"],
 });

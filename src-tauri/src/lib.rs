@@ -80,6 +80,12 @@ fn migrations() -> Vec<Migration> {
             sql: include_str!("../migrations/0011_smart_playlists.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 12,
+            description: "raw art swatches for the vivid backdrop",
+            sql: include_str!("../migrations/0012_art_swatches.sql"),
+            kind: MigrationKind::Up,
+        },
     ]
 }
 

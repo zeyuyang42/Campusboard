@@ -29,6 +29,8 @@ export interface MiniPalette {
   accentText: string;
   ambient1: string;
   ambient2: string;
+  /** The art's boosted swatches (#110), up to six hex colours, for the mini window's gradient. */
+  swatches?: string[];
 }
 
 export interface MiniState {
@@ -60,6 +62,7 @@ const MAX_SEEK_SEC = 24 * 3600;
 const STATUSES = new Set<string>(["idle", "loading", "playing", "paused"]);
 const HEX = /^#[0-9a-f]{6}([0-9a-f]{2})?$/i;
 const MAX_TEXT = 300;
+const MAX_SWATCHES = 6;
 
 const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
 const finiteNonNeg = (x: unknown) => (typeof x === "number" && Number.isFinite(x) && x >= 0 ? x : null);
@@ -79,7 +82,10 @@ function parsePalette(x: unknown): MiniPalette | null {
   if (!isObj(x)) return null;
   const keys = ["accent", "accentText", "ambient1", "ambient2"] as const;
   if (!keys.every((k) => typeof x[k] === "string" && HEX.test(x[k] as string))) return null;
-  return { accent: x.accent as string, accentText: x.accentText as string, ambient1: x.ambient1 as string, ambient2: x.ambient2 as string };
+  const p: MiniPalette = { accent: x.accent as string, accentText: x.accentText as string, ambient1: x.ambient1 as string, ambient2: x.ambient2 as string };
+  // Swatches are optional; anything that isn't a hex colour is dropped, never the whole palette.
+  const swatches = Array.isArray(x.swatches) ? x.swatches.filter((s): s is string => typeof s === "string" && HEX.test(s)).slice(0, MAX_SWATCHES) : [];
+  return swatches.length ? { ...p, swatches } : p;
 }
 
 function parseTrack(x: unknown): MiniTrack | null {

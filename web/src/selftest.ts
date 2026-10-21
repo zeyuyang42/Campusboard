@@ -16,6 +16,7 @@ import { appConfigDir, appDataDir, join } from "@tauri-apps/api/path";
 import { storeBackgroundImage } from "./lib/files";
 import { backupLibraryDatabase, exportLibraryFile } from "./lib/libraryFile";
 import { miniBridgeInfo } from "./player/miniBridge";
+import { webglAvailable } from "./backdrop/gl";
 import { usePalette } from "./ui/palette";
 import { DEFAULT_THEME, MINI_EVENTS, positionToGain, previewQueueTrack, RESUME_MAX_ROWS, toggleAction, type Track } from "@bc/core";
 import { FAN_ITEMS_ENDPOINT, fanPageUrl, parseFanItemsResponse, parseFanPage, repos, type FanItem } from "@bc/core";
@@ -492,7 +493,10 @@ async function windowCheck(s: Step) {
   await step("setFocus", () => win.setFocus()); await sleep(300);
   const visibleAgain = await step("isVisibleAgain", () => win.isVisible());
   const focused = await step("isFocused", () => win.isFocused());
-  const result = { maximized, minimized, hidden: visibleWhileHidden === false, visibleAgain, focused, errors };
+  // The vivid backdrop (#110) needs WebGL in this webview; informational, the CSS wash is the fallback.
+  const webgl = webglAvailable();
+  const backdrop = window.__bcBackdrop ? { state: window.__bcBackdrop.state, frames: window.__bcBackdrop.frames } : null;
+  const result = { maximized, minimized, hidden: visibleWhileHidden === false, visibleAgain, focused, webgl, backdrop, errors };
   // `focused` is informational: a background terminal can keep focus from the window.
   return { ok: Object.keys(errors).length === 0 && maximized === true && minimized === true && result.hidden && visibleAgain === true, ...result };
 }
@@ -744,6 +748,63 @@ async function transitionCheck(tracks: Track[], s: Step) {
     return { ok, muted: activeAudio().muted, handovers };
   } finally {
     usePlayer.getState().setPlayback(saved);
+  }
+}
+
+/**
+ * The vivid backdrop (#110), muted, window visible: in morph mode the canvas should draw about
+ * 30 fps while a track plays (frames ≈ 150 in 5 s) and nothing at all once paused. Runs the
+ * same 5 s twice, with and without the blur on .main, so a CPU sampler outside the app (ps
+ * cputime deltas of the WebContent process, keyed on selftest_progress) can tell the two
+ * apart (plan §0/§7). The theme is put back as it was.
+ */
+async function backdropCheck(s: Step, core: Awaited<ReturnType<typeof getCore>>, playable: Track[]) {
+  const { useTheme } = await import("./theme/store");
+  const webgl = webglAvailable();
+  const bd = () => ({ state: window.__bcBackdrop?.state ?? null, frames: window.__bcBackdrop?.frames ?? 0 });
+  if (!webgl) return { ok: true, status: "skipped (no WebGL)", webgl };
+  let tracks = playable;
+  if (!tracks.length) {
+    const albums = await core.albums();
+    const album = albums.length ? await core.album(albums[0].id) : null;
+    tracks = album?.tracks.filter((t) => t.streamable) ?? [];
+  }
+  if (!tracks.length) return { ok: true, status: "skipped (no playable track in the library)", webgl };
+  const saved = useTheme.getState().theme;
+  const basePreset = useTheme.getState().basePreset;
+  useTheme.getState().update({ backdrop: { mode: "morph", style: "ink", motion: "drift" } });
+  try {
+    const playingNow = () => usePlayer.getState().status === "playing" && !activeAudio().paused;
+    if (!playingNow()) usePlayer.getState().playTracks(tracks, 0);
+    for (let t = 0; t < 10_000 && !playingNow(); t += 100) await sleep(100);
+    await sleep(500);
+    const start = bd();
+    s("drift with .main blur");
+    const t0 = performance.now();
+    await sleep(5000);
+    const blur = bd();
+    const blurSec = (performance.now() - t0) / 1000;
+    s("drift without .main blur");
+    document.documentElement.style.setProperty("--panel-blur", "0px");
+    const t1 = performance.now();
+    await sleep(5000);
+    const noBlur = bd();
+    const noBlurSec = (performance.now() - t1) / 1000;
+    document.documentElement.style.removeProperty("--panel-blur");
+    s("paused");
+    usePlayer.getState().pause();
+    await sleep(700);
+    const pausedAt = bd();
+    await sleep(1500);
+    const pausedLater = bd();
+    const fpsBlur = (blur.frames - start.frames) / blurSec;
+    const fpsNoBlur = (noBlur.frames - blur.frames) / noBlurSec;
+    const framesStopped = pausedLater.frames === pausedAt.frames;
+    // Right after the track starts the 2 s palette cross-fade may still be running (gl-fading).
+    const ok = (start.state === "gl-drift" || start.state === "gl-fading") && fpsBlur > 24 && fpsBlur < 36 && fpsNoBlur > 24 && fpsNoBlur < 36 && pausedLater.state === "gl-frozen" && framesStopped;
+    return { ok, webgl, playing: playingNow() || pausedAt.state === "gl-frozen", stateWhilePlaying: start.state, fpsBlur: Math.round(fpsBlur * 10) / 10, fpsNoBlur: Math.round(fpsNoBlur * 10) / 10, stateWhenPaused: pausedLater.state, framesStopped, muted: activeAudio().muted };
+  } finally {
+    useTheme.getState().replace(saved, basePreset);
   }
 }
 
@@ -1093,6 +1154,7 @@ export async function runSelfTest() {
     }, 30_000);
     out.mediaSession = await block("mediaSession", (s) => mediaSessionCheck(s), 30_000);
     out.airplay = await block("airplay", async () => airplayCheck(), 5_000);
+    out.backdrop = await block("backdrop", (s) => backdropCheck(s, core, playable), 40_000);
     out.miniPlayer = await block("miniPlayer", (s) => miniPlayerCheck(s), 90_000);
     out.audioAfterNext = await block("next", async (s) => {
       usePlayer.getState().next();

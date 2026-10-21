@@ -40,6 +40,8 @@ export function themeVars(t: ResolvedTheme): ThemeVars {
   const { hover, active } = surfaceMixes(t);
   const accent = ensureContrast(hexToRgb(t.palette.accent), hexToRgb(accentSurface(t)), accentRatio(t));
   const compact = t.density === "compact";
+  const b = t.backdrop;
+  const conservative = b.mode === "conservative";
   return {
     "--surface": t.palette.surface,
     "--surface-raised": t.palette.surfaceRaised,
@@ -58,10 +60,31 @@ export function themeVars(t: ResolvedTheme): ThemeVars {
     "--pad-page": compact ? "24px" : "32px",
     "--font-display": fontStack(t.fonts.display, "display"),
     "--font-ui": fontStack(t.fonts.ui, "ui"),
-    "--ambient-strength": String(t.ambient),
+    "--ambient-strength": String(conservative ? t.ambient : b.intensity),
     "--bg-blur": `${t.background.blur}px`,
     "--bg-dim": String(t.background.dim),
     "--color-scheme": t.mode,
+    ...backdropVars(t),
+  };
+}
+
+/** The panels never go below this opacity, so text keeps its contrast over any art (#110). */
+export const PANEL_ALPHA_FLOOR = 0.68;
+
+/**
+ * The frosted-panel variables (#110). Conservative: opaque panels, no blur, no tint, exactly
+ * the look before the backdrop existed. Otherwise the panels let `0.22 + 0.1·intensity` of the
+ * backdrop through (floored at PANEL_ALPHA_FLOOR), blur it and take a light tint of the art.
+ */
+export function backdropVars(t: Pick<ResolvedTheme, "backdrop">): ThemeVars {
+  const b = t.backdrop;
+  const conservative = b.mode === "conservative";
+  const alpha = conservative ? 1 : Math.max(PANEL_ALPHA_FLOOR, 0.78 - 0.1 * b.intensity);
+  return {
+    "--backdrop-intensity": String(b.intensity),
+    "--panel-alpha": String(Math.round(alpha * 1000) / 1000),
+    "--panel-blur": conservative ? "0px" : "28px",
+    "--panel-tint": conservative ? "0" : "0.04",
   };
 }
 
@@ -69,5 +92,9 @@ export function themeVars(t: ResolvedTheme): ThemeVars {
 export function applyTheme(t: ResolvedTheme, root: { style: { setProperty(name: string, value: string): void }; dataset?: DOMStringMap }): void {
   const vars = themeVars(t);
   for (const [k, v] of Object.entries(vars)) root.style.setProperty(k, v);
-  if (root.dataset) root.dataset.theme = t.mode;
+  if (root.dataset) {
+    root.dataset.theme = t.mode;
+    // The stylesheet scopes every frosted-panel rule under :not([data-backdrop="conservative"]).
+    root.dataset.backdrop = t.backdrop.mode;
+  }
 }

@@ -78,3 +78,12 @@ button:focus:not(:focus-visible) { outline: none; }
 .mini.tall .mini-body { padding: 10px 14px 8px; gap: 4px; }
 .mini.tall .mini-title { font-size: 15px; }
 .mini.tall .mini-tools { opacity: 1; }
+
+/* Vivid backdrop (#110): outside the conservative mode the gradient uses the art's boosted
+   swatches (--swatch-1..4 from the main window's state), falling back to the ambients. */
+:root:not([data-backdrop="conservative"]) .mini-ambient {
+  background:
+    radial-gradient(90% 120% at 100% 0%, color-mix(in oklab, var(--swatch-1, var(--ambient-1)) calc(var(--ambient-strength) * 70%), transparent), transparent 75%),
+    radial-gradient(80% 120% at 40% 100%, color-mix(in oklab, var(--swatch-2, var(--ambient-2)) calc(var(--ambient-strength) * 70%), transparent), transparent 75%),
+    linear-gradient(135deg, color-mix(in oklab, var(--swatch-3, var(--ambient-1)) calc(var(--ambient-strength) * 45%), var(--surface)), color-mix(in oklab, var(--swatch-4, var(--ambient-2)) calc(var(--ambient-strength) * 30%), var(--surface)));
+}

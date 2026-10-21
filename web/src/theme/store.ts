@@ -33,6 +33,7 @@ function merge(theme: Theme, patch: DeepPartial<Theme>): Theme {
     ...patch,
     fonts: { ...theme.fonts, ...(patch.fonts ?? {}) },
     background: { ...theme.background, ...(patch.background ?? {}) },
+    backdrop: { ...theme.backdrop, ...(patch.backdrop ?? {}) },
   } as Theme;
 }
 

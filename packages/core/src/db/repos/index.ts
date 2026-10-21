@@ -15,3 +15,4 @@ export * from "./resumePositions.js";
 export * from "./smartPlaylists.js";
 export * from "./albumRemoval.js";
 export * from "./stats.js";
+export * from "./swatches.js";

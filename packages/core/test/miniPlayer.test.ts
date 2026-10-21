@@ -50,6 +50,17 @@ describe("parseMiniState", () => {
     expect(parseMiniState({ ...base(), palette: { ...palette, ambient2: "#12345" } })?.palette).toBeNull();
   });
 
+  it("keeps hex swatches (#110), drops bad ones and caps them at six, and never fails the palette over them", () => {
+    const good = ["#112233", "#445566"];
+    expect(parseMiniState({ ...base(), palette: { ...palette, swatches: good } })?.palette?.swatches).toEqual(good);
+    const mixed = ["#112233", "url(x)", 7, null, "#44556", "#AABBCCDD"];
+    expect(parseMiniState({ ...base(), palette: { ...palette, swatches: mixed } })?.palette?.swatches).toEqual(["#112233", "#AABBCCDD"]);
+    expect(parseMiniState({ ...base(), palette: { ...palette, swatches: "nope" } })?.palette).toEqual(palette);
+    expect(parseMiniState({ ...base(), palette: { ...palette, swatches: ["bad"] } })?.palette).toEqual(palette);
+    const many = Array.from({ length: 9 }, (_, i) => `#00000${i}`);
+    expect(parseMiniState({ ...base(), palette: { ...palette, swatches: many } })?.palette?.swatches).toHaveLength(6);
+  });
+
   it("sanitises numbers and text", () => {
     const s = parseMiniState({ ...base(), position: 999, duration: 200, track: { ...base().track, title: "t".repeat(1000), artId: -3 } })!;
     expect(s.position).toBe(200);

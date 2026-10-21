@@ -1,4 +1,4 @@
-import type { Palette, Theme } from "./schema.js";
+import { DEFAULT_BACKDROP, type Palette, type Theme } from "./schema.js";
 
 const base = {
   version: 1 as const,
@@ -8,6 +8,7 @@ const base = {
   fonts: { display: "Bricolage Grotesque Variable", ui: "Instrument Sans Variable" },
   ambient: 0.6,
   background: { source: "none" as const, value: "", blur: 12, dim: 0.5 },
+  backdrop: { ...DEFAULT_BACKDROP },
 };
 
 // Each preset family has a dark and a light side, so any preset can follow the system.
