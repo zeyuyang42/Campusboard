@@ -237,16 +237,14 @@ function timeOf(v: string | null): number | null {
   return t && t.id >= 0 ? t.id : null;
 }
 
-/** A category slug or id as a category id; 0 (all) for anything unknown. */
+/** A category slug as a category id; 0 (all) for anything else, numbers included. */
 function categoryOf(v: string | null | undefined): number {
-  if (!v) return 0;
-  const c = DISCOVER_CATEGORIES.find((x) => x.slug === v) ?? (/^\d+$/.test(v) ? DISCOVER_CATEGORIES.find((x) => x.id === Number(v)) : undefined);
-  return c?.id ?? 0;
+  return (v && DISCOVER_CATEGORIES.find((x) => x.slug === v)?.id) || 0;
 }
 
 /**
  * Filters from query parameters: `tags=a,b`, `s=<slice>`, `t=<time id or slug>`, `loc=<geoname id>`
- * (the same names Bandcamp's links use) and `cat=<category slug or id>` (Bandcamp has it in the
+ * (the same names Bandcamp's links use) and `cat=<category slug>` (Bandcamp has it in the
  * path). `extraTags` come first and `pathCategory` wins over `cat` (a discover link's path).
  */
 export function discoverParamsFromQuery(q: URLSearchParams, extraTags: string[] = [], pathCategory?: string): DiscoverParams {

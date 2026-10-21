@@ -116,6 +116,8 @@ describe("discover links", () => {
     expect(cat("https://bandcamp.com/discover/jazz/tshirt")).toBe(0);
     expect(cat("https://bandcamp.com/discover/jazz/all")).toBe(0);
     expect(cat("https://bandcamp.com/discover/jazz/5")).toBe(0);
+    expect(cat("https://bandcamp.com/discover/jazz/2")).toBe(0);
+    expect(cat("https://bandcamp.com/discover/jazz?cat=2")).toBe(0);
     expect(cat("https://bandcamp.com/discover/jazz?cat=vinyl")).toBe(2);
     expect(cat("https://bandcamp.com/discover/jazz/cassette?cat=vinyl")).toBe(4);
     expect(cat("https://bandcamp.com/discover/jazz?cat=9")).toBe(0);

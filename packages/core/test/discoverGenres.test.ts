@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { DISCOVER_MAX_TAGS } from "../src/scrape/discover.js";
-import { DISCOVER_GENRES, DISCOVER_SUBGENRES, discoverSubgenres, isDiscoverGenre, selectedGenre, toggleTag, withGenre } from "../src/scrape/discoverGenres.js";
+import { DISCOVER_GENRES, DISCOVER_SUBGENRES, discoverSubgenres, isDiscoverGenre, genreFits, selectedGenre, toggleTag, withGenre } from "../src/scrape/discoverGenres.js";
 
 const full = Array.from({ length: DISCOVER_MAX_TAGS }, (_, i) => `t${i}`);
 
@@ -43,7 +43,12 @@ describe("discover genres and subgenres", () => {
     // acoustic's "rock" subgenre is a genre too.
     expect(withGenre(["acoustic", "rock"], "rock")).toEqual(["rock"]);
     expect(withGenre(["x"], "not-a-genre")).toEqual(["x"]);
-    expect(withGenre(full, "jazz")).toEqual(["jazz", ...full.slice(0, -1)]);
+    // Never drops a user's tag: a genre that doesn't fit is refused by genreFits.
+    expect(withGenre(full, "jazz")).toEqual(["jazz", ...full]);
+    expect(genreFits(full, "jazz")).toBe(false);
+    expect(genreFits(full, null)).toBe(true);
+    expect(genreFits(["electronic", ...full.slice(1)], "jazz")).toBe(true);
+    expect(genreFits(["electronic", "breaks", ...full.slice(2)], "jazz")).toBe(true);
   });
 
   it("toggles a subgenre on and off, within the tag limit", () => {

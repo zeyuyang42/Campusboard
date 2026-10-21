@@ -300,13 +300,19 @@ export function selectedGenre(tags: readonly string[]): string | null {
 /**
  * The tags with `genre` as the one genre (first), or with no genre for null. Genres are
  * exclusive: every genre tag goes, and so do the old genre's subgenres; other tags stay.
+ * Never drops anything else, so the result can exceed DISCOVER_MAX_TAGS: check `genreFits`.
  */
 export function withGenre(tags: readonly string[], genre: string | null): string[] {
   const current = selectedGenre(tags);
   if (genre === current) return [...tags];
   const oldSubs = new Set(discoverSubgenres(current).map((s) => s.slug));
   const rest = tags.filter((t) => !isDiscoverGenre(t) && !oldSubs.has(t));
-  return (genre && isDiscoverGenre(genre) ? [genre, ...rest] : rest).slice(0, DISCOVER_MAX_TAGS);
+  return genre && isDiscoverGenre(genre) ? [genre, ...rest] : rest;
+}
+
+/** Whether picking `genre` keeps the tags within DISCOVER_MAX_TAGS. */
+export function genreFits(tags: readonly string[], genre: string | null): boolean {
+  return withGenre(tags, genre).length <= DISCOVER_MAX_TAGS;
 }
 
 /** Toggles one tag (a subgenre chip): removed if present, else appended while there's room. */
