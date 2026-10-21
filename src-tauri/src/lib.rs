@@ -1,4 +1,5 @@
 mod backup;
+mod fullscreen;
 mod geometry;
 mod menu;
 mod mini;
@@ -20,6 +21,9 @@ pub fn main_window<R: tauri::Runtime, M: Manager<R>>(m: &M) -> Option<tauri::Web
 
 /// Bring a window to the front: unminimized if it was minimized, shown, focused.
 pub fn reveal<R: tauri::Runtime>(w: &tauri::WebviewWindow<R>) -> tauri::Result<()> {
+    if w.label() == MAIN_LABEL {
+        fullscreen::revealed(); // a close still leaving full screen must not hide it now
+    }
     if w.is_minimized().unwrap_or(false) {
         let _ = w.unminimize(); // best effort: a window that will not unminimize can still show
     }
@@ -525,7 +529,7 @@ pub fn run() {
             app.manage(geo);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![library_db_url, offline_dir, backup_library, selftest_take_backup, selftest_file, selftest_window, selftest_sleep, mini::toggle_mini_player, menu::selftest_menu, tray::set_menu_bar])
+        .invoke_handler(tauri::generate_handler![library_db_url, offline_dir, backup_library, selftest_take_backup, selftest_file, selftest_window, selftest_sleep, mini::toggle_mini_player, fullscreen::hide_main_window, fullscreen::show_main_window, menu::selftest_menu, tray::set_menu_bar])
         .build(context)
         .unwrap_or_else(|e| startup_failed(&e));
 

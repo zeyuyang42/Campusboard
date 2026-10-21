@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlayState } from "@bc/core";
 import { boot, flush, tracks, useFakeTimers, type Harness } from "./harness";
 
+const invoke = vi.hoisted(() => vi.fn(async (_cmd: string) => undefined as unknown));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: (cmd: string) => invoke(cmd) }));
+
 let h: Harness;
 let persist: typeof import("../src/player/persist");
 const list = tracks(3);
@@ -17,7 +20,7 @@ beforeEach(async () => {
   await persist.initPersistence();
   await flush();
 });
-afterEach(() => { vi.useRealTimers(); });
+afterEach(() => { vi.useRealTimers(); invoke.mockReset(); invoke.mockResolvedValue(undefined); });
 
 /** Start the restored track playing, as the element would report it. */
 function play(at = 0) {
@@ -124,7 +127,7 @@ describe("closing the window (#59)", () => {
     expect(preventDefault).toHaveBeenCalled();
     expect(h.core.savePlayState).toHaveBeenCalledTimes(1);
     expect(h.core.savePlayState.mock.calls[0][0]).toMatchObject({ repeat: "one" });
-    expect(h.win.hide).toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith("hide_main_window");
     vi.advanceTimersByTime(400);
     await flush();
     expect(h.core.savePlayState).toHaveBeenCalledTimes(1);
@@ -137,5 +140,33 @@ describe("closing the window (#59)", () => {
     vi.advanceTimersByTime(5000);
     await flush();
     expect(h.core.savePlayPosition).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides through the hide_main_window command, which leaves full screen first", async () => {
+    await h.win.closeHandler!({ preventDefault: () => undefined });
+    expect(invoke).toHaveBeenCalledWith("hide_main_window");
+    expect(h.win.hide).not.toHaveBeenCalled();
+  });
+
+  it("a second click while the first close is still waiting joins it", async () => {
+    let finish!: () => void;
+    invoke.mockImplementationOnce(() => new Promise<void>((r) => { finish = r; }));
+    const first = h.win.closeHandler!({ preventDefault: () => undefined });
+    await flush();
+    const second = h.win.closeHandler!({ preventDefault: () => undefined });
+    await flush();
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(h.core.savePlayState).toHaveBeenCalledTimes(1);
+    finish();
+    await Promise.all([first, second]);
+    // The next close is a fresh one.
+    await h.win.closeHandler!({ preventDefault: () => undefined });
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to hiding from the page when the command fails", async () => {
+    invoke.mockRejectedValueOnce(new Error("not allowed"));
+    await h.win.closeHandler!({ preventDefault: () => undefined });
+    expect(h.win.hide).toHaveBeenCalledTimes(1);
   });
 });

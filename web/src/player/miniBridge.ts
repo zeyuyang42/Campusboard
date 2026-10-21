@@ -27,6 +27,9 @@ const record = (): ToggleRecord => {
 
 async function showMain() {
   if (!isTauri) { window.focus(); return; }
+  // Through Rust's reveal(), which also cancels a hide still waiting on full screen.
+  const { invoke } = await import("@tauri-apps/api/core");
+  if (await invoke("show_main_window").then(() => true, () => false)) return;
   const { getCurrentWindow } = await import("@tauri-apps/api/window");
   const w = getCurrentWindow();
   await w.unminimize().catch(() => undefined);

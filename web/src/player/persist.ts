@@ -1,5 +1,6 @@
 import { loadPlayState, savePlayPosition, savePlayState } from "../api/queries";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import { playbackPosition, saveResumePoint, usePlayer } from "./store";
 import { finishUndo } from "../ui/undo";
 import { gainToPosition, positionToGain, type PlayState } from "@bc/core";
@@ -57,8 +58,10 @@ export async function initPersistence() {
   // Music.app). Flush first so the position survives either way.
   try {
     const win = getCurrentWindow();
-    await win.onCloseRequested(async (event) => {
-      event.preventDefault();
+    // A second click joins a close still saving; a close during the full-screen exit is
+    // absorbed by PENDING in fullscreen.rs.
+    let closing: Promise<void> | null = null;
+    const close = async () => {
       if (timer) window.clearTimeout(timer);
       // The pending full save is replaced by this one; clear the handle too, or the 5 s
       // position saves (which wait while a full save is pending) would stop for good.
@@ -67,7 +70,14 @@ export async function initPersistence() {
       await saveResumePoint().catch(() => undefined);
       // A removal still offering Undo (#93) becomes final: the note goes with the window.
       await finishUndo();
-      await win.hide().catch(() => undefined);
+      // Hiding a window in native full screen leaves its Space behind, black and empty:
+      // Rust leaves full screen first and hides once AppKit says it is out (fullscreen.rs).
+      await invoke("hide_main_window").catch(() => win.hide()).catch(() => undefined);
+    };
+    await win.onCloseRequested(async (event) => {
+      event.preventDefault();
+      closing ??= close().finally(() => { closing = null; });
+      await closing;
     });
   } catch { /* not inside Tauri */ }
 }

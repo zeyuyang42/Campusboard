@@ -23,6 +23,8 @@
     "allow-selftest-window",
     "allow-selftest-sleep",
     "allow-toggle-mini-player",
+    "allow-hide-main-window",
+    "allow-show-main-window",
     "allow-selftest-menu",
     "allow-set-menu-bar",
     "sql:default",
