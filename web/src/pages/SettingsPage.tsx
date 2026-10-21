@@ -145,9 +145,43 @@ export function SettingsPage() {
       <section>
         <h2>Backdrop</h2>
         <div className="field-row">
-          <label>Album-art wash <span className="muted">{Math.round(theme.ambient * 100)}%</span>
-            <input type="range" min={0} max={1} step={0.05} value={theme.ambient} onChange={(e) => update({ ambient: Number(e.target.value) })} />
+          <label>Mode
+            <div className="segmented">
+              {([["conservative", "Conservative"], ["wash", "Ambient wash"], ["morph", "Generative"]] as const).map(([m, label]) => (
+                <button key={m} className={theme.backdrop.mode === m ? "on" : ""} onClick={() => update({ backdrop: { mode: m } })}>{label}</button>
+              ))}
+            </div>
           </label>
+          {theme.backdrop.mode === "morph" && (
+            <label>Style
+              <select value={theme.backdrop.style} onChange={(e) => update({ backdrop: { style: e.target.value as Theme["backdrop"]["style"] } })}>
+                <option value="ink">Fluid ink</option>
+                <option value="aurora">Aurora bands</option>
+                <option value="grain">Grain gradient</option>
+                <option value="lava">Lava blobs</option>
+              </select>
+            </label>
+          )}
+          {theme.backdrop.mode !== "conservative" && (
+            <label>Motion
+              <div className="segmented">
+                {([["drift", "Drift"], ["still", "Still"]] as const).map(([m, label]) => (
+                  <button key={m} className={theme.backdrop.motion === m ? "on" : ""} onClick={() => update({ backdrop: { motion: m } })}>{label}</button>
+                ))}
+              </div>
+            </label>
+          )}
+        </div>
+        <div className="field-row">
+          {theme.backdrop.mode === "conservative" ? (
+            <label>Album-art wash <span className="muted">{Math.round(theme.ambient * 100)}%</span>
+              <input type="range" min={0} max={1} step={0.05} value={theme.ambient} onChange={(e) => update({ ambient: Number(e.target.value) })} />
+            </label>
+          ) : (
+            <label>Intensity <span className="muted">{Math.round(theme.backdrop.intensity * 100)}%</span>
+              <input type="range" min={0} max={1} step={0.05} value={theme.backdrop.intensity} onChange={(e) => update({ backdrop: { intensity: Number(e.target.value) } })} />
+            </label>
+          )}
           <label>Background image
             <select value={theme.background.source} onChange={(e) => update({ background: { source: e.target.value as Theme["background"]["source"], value: e.target.value === "none" ? "" : theme.background.value } })}>
               <option value="none">None</option>
