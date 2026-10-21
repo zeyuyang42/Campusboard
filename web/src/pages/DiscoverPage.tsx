@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
-  DISCOVER_MAX_TAGS, DISCOVER_SLICES, DISCOVER_TIMES, discoverParamsFromQuery, discoverQuery, discoverWebUrl, parseDiscoverUrl,
+  DISCOVER_MAX_TAG_LENGTH, DISCOVER_MAX_TAGS, DISCOVER_SLICES, DISCOVER_TIMES, discoverParamsFromQuery, discoverQuery, discoverWebUrl, parseDiscoverUrl,
   previewQueueTrack, type DiscoverItem, type DiscoverParams, type DiscoverSetup, type QueueTrack,
 } from "@bc/core";
 import { getCore } from "../api/core";
-import { useDiscover, useDiscoverLocations, useDiscoverTags, useImport, useInvalidateLibrary, useJob } from "../api/queries";
+import { markDiscoverInLibrary, useDiscover, useDiscoverLocations, useDiscoverTags, useImport, useInvalidateLibrary, useJob } from "../api/queries";
+import { useQueryClient } from "@tanstack/react-query";
 import { usePlayer } from "../player/store";
 import { ArtImage } from "../components/ArtImage";
 import { ExternalLink } from "../components/ExternalLink";
@@ -138,9 +139,16 @@ function DiscoverCard({ item }: { item: DiscoverItem }) {
   const [jobId, setJobId] = useState<number | null>(null);
   const { data: job } = useJob(jobId);
   const invalidate = useInvalidateLibrary();
+  const qc = useQueryClient();
   const finished = job?.status === "done" || job?.status === "failed";
-  useEffect(() => { if (finished) invalidate(); }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
-  const albumId = item.album_id ?? (job?.status === "done" ? job.items?.find((x) => x.album_id)?.album_id ?? null : null);
+  const imported = job?.status === "done" ? job.items?.find((x) => x.album_id)?.album_id ?? null : null;
+  useEffect(() => {
+    if (!finished) return;
+    invalidate();
+    // The cached pages learn it too (no request), so coming back shows "In library".
+    if (imported) markDiscoverInLibrary(qc, item.url, imported);
+  }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
+  const albumId = item.album_id ?? imported;
   const busy = imp.isPending || (!!job && !finished);
   const play = () => {
     const p = usePlayer.getState();
@@ -199,7 +207,7 @@ function TagInput({ tags, onChange, onLink }: { tags: string[]; onChange: (tags:
   const open = focused && typed.length >= 2 && list.length > 0;
   const add = (norm: string) => {
     const n = norm.trim().toLowerCase().replace(/\s+/g, "-");
-    if (n && !tags.includes(n) && tags.length < DISCOVER_MAX_TAGS) onChange([...tags, n]);
+    if (n && n.length <= DISCOVER_MAX_TAG_LENGTH && !tags.includes(n) && tags.length < DISCOVER_MAX_TAGS) onChange([...tags, n]);
     setText("");
   };
   const s = useSuggestions(list, open);

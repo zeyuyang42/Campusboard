@@ -441,8 +441,10 @@ src-tauri/
   `{ok, results: [{id: "<string>", name, fullname}]}`. `GET api/stream/1/refresh?url=<stream_url>`
   -> `{track_id, url}` (tried on a URL not yet expired; core falls back to the release
   page's `data-tralbum` if it fails). Costs: one POST per filter change or "Show
-  more" (TanStack Query keeps a page 10 min, never refetched on its own and not
-  under the "albums" key, so an import doesn't refetch every loaded page), the
+  more" (TanStack Query: `staleTime: Infinity`, so loaded pages are never refetched on
+  their own, dropped 5 min after the page leaves the screen; not under the "albums"
+  key, so an import doesn't refetch them: a finished Add patches the cached pages
+  with `setQueriesData`), the
   autocompletes debounced 300 ms (2+ / 3+ characters), nothing prefetched. A
   preview is a queue entry with `id = album_id = -(1e10 + track id)` and a
   `preview` field (`services/discover.ts`): never counted, never in a playlist,

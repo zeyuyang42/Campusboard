@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCore } from "./core";
-import { repos, type DiscoverParams, type HistoryCursor, type Job, type PlayState, type StatsPeriod } from "@bc/core";
+import { repos, type DiscoverPage, type DiscoverParams, type HistoryCursor, type Job, type PlayState, type StatsPeriod } from "@bc/core";
 
 export const keys = {
   albums: (sort: string, filter = "all", q = "", tag = "") => ["albums", sort, filter, q, tag] as const,
@@ -280,7 +280,8 @@ export const usePendingImports = () => useQuery({ queryKey: keys.pendingImports,
 
 /**
  * Bandcamp discover (#104), 60 releases a page; the next page only on fetchNextPage ("Show
- * more"). Kept for 10 minutes like the page cache, never refetched on its own.
+ * more"). Never stale, so it is never refetched on its own (a remount would refetch every
+ * loaded page); it is dropped gcTime (5 min) after the page leaves the screen.
  */
 export const useDiscover = (p: DiscoverParams) =>
   useInfiniteQuery({
@@ -288,10 +289,17 @@ export const useDiscover = (p: DiscoverParams) =>
     queryFn: async ({ pageParam }) => (await core()).discover(p, pageParam),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.cursor,
-    staleTime: 10 * 60_000,
+    staleTime: Infinity,
     refetchOnReconnect: false,
     retry: false,
   });
+/** Mark `url` as library album `albumId` in every cached discover page (after its import). No request. */
+export function markDiscoverInLibrary(qc: ReturnType<typeof useQueryClient>, url: string, albumId: number) {
+  qc.setQueriesData<{ pages: DiscoverPage[]; pageParams: unknown[] }>({ queryKey: ["discover"] }, (d) =>
+    d && Array.isArray(d.pages)
+      ? { ...d, pages: d.pages.map((p) => (p.items.some((i) => i.url === url) ? { ...p, items: p.items.map((i) => (i.url === url ? { ...i, album_id: albumId } : i)) } : p)) }
+      : d);
+}
 /** Bandcamp's tag autocomplete for a (debounced) prefix of 2+ characters. */
 export const useDiscoverTags = (prefix: string) =>
   useQuery({ queryKey: keys.discoverTags(prefix), queryFn: async () => (await core()).discoverTags(prefix), enabled: prefix.length >= 2, staleTime: 60 * 60_000, retry: false });

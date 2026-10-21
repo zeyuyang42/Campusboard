@@ -41,6 +41,8 @@ export const DISCOVER_TIMES: readonly { id: number; slug: string; label: string 
 export const DEFAULT_DISCOVER: DiscoverParams = { tags: [], slice: "top", time: null, location: null };
 /** Bandcamp's tag input takes up to this many tags. */
 export const DISCOVER_MAX_TAGS = 10;
+/** Longer tags (from a link or the query) are dropped. */
+export const DISCOVER_MAX_TAG_LENGTH = 64;
 
 const str = z.unknown().transform((v) => (typeof v === "string" ? v : null));
 const num = z.unknown().transform((v) => (typeof v === "number" && Number.isFinite(v) ? v : null));
@@ -232,7 +234,7 @@ export function discoverParamsFromQuery(q: URLSearchParams, extraTags: string[] 
   const tags: string[] = [];
   for (const t of [...extraTags, ...(q.get("tags") ?? "").split(",")]) {
     const n = normTag(t);
-    if (n && !tags.includes(n) && tags.length < DISCOVER_MAX_TAGS) tags.push(n);
+    if (n && n.length <= DISCOVER_MAX_TAG_LENGTH && !tags.includes(n) && tags.length < DISCOVER_MAX_TAGS) tags.push(n);
   }
   const s = q.get("s") ?? "";
   const loc = Number(q.get("loc"));
@@ -268,7 +270,7 @@ export function parseDiscoverUrl(input: string): DiscoverParams | null {
   }
   const host = u.hostname.toLowerCase().replace(/\.$/, "");
   if (host !== "bandcamp.com" && host !== "www.bandcamp.com") return null;
-  if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+  if (u.protocol !== "https:" || u.port || u.username || u.password) return null;
   const parts = u.pathname.split("/").filter(Boolean);
   if (parts[0] !== "discover") return null;
   const first = parts[1] && parts[1] !== "all" ? parts[1] : "";

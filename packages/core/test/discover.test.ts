@@ -108,6 +108,11 @@ describe("discover links", () => {
     expect(parseDiscoverUrl("https://bandcamp.com/discover?t=3&s=rand")).toMatchObject({ tags: [], slice: "rand", time: 3 });
     expect(parseDiscoverUrl("https://bandcamp.com/discover/all/cassette?s=bogus&t=fresh&loc=x")).toEqual({ tags: [], slice: "top", time: null, location: null });
   });
+  it("takes only https links and drops overlong tags", () => {
+    expect(parseDiscoverUrl("http://bandcamp.com/discover/electronic")).toBeNull();
+    expect(parseDiscoverUrl("https://bandcamp.com:8443/discover/electronic")).toBeNull();
+    expect(parseDiscoverUrl(`https://bandcamp.com/discover/electronic+${"x".repeat(65)}?tags=${"y".repeat(64)}`)?.tags).toEqual(["electronic", "y".repeat(64)]);
+  });
   it("is null for anything else", () => {
     expect(parseDiscoverUrl("https://bandcamp.com/radio")).toBeNull();
     expect(parseDiscoverUrl("https://artist.bandcamp.com/discover/x")).toBeNull();
@@ -136,6 +141,8 @@ describe("preview queue entries", () => {
     expect(isRadioTrack({ id: -5 })).toBe(true); // an old saved episode without its field
     // A short preview doesn't resume like an episode would.
     expect(resumeEligible(t)).toBe(false);
+    // Not even a long one: previews never take resume rows.
+    expect(resumeEligible({ ...t, duration: 3600 }, 3600)).toBe(false);
     expect(isQueuePreview(t.preview)).toBe(true);
     expect(isQueuePreview({ ...t.preview, stream_url: "https://evil.example/stream/x" })).toBe(false);
     expect(isQueuePreview({ ...t.preview, track_id: -1 })).toBe(false);
@@ -184,6 +191,13 @@ describe("PreviewService.streamUrl", () => {
       expect((await svc.streamUrl({ item_url: ALBUM_URL, track_id: TRACK, stream_url: cdn(TRACK, -1) })).url).toBe(want);
       expect(fetch.mock.calls.map((c) => String(c[0]).split("?")[0])).toEqual([STREAM_REFRESH_ENDPOINT, ALBUM_URL]);
     }
+  });
+
+  it("rejects a refresh answer for another track and reads the page instead", async () => {
+    const want = parseTralbumPage(album).tracks.find((t) => t.track_id === TRACK)!.stream_url;
+    const { fetch, svc } = setup(() => new Response(JSON.stringify({ track_id: TRACK + 1, url: cdn(TRACK + 1, 24) })));
+    expect((await svc.streamUrl({ item_url: ALBUM_URL, track_id: TRACK, stream_url: cdn(TRACK, -1) })).url).toBe(want);
+    expect(fetch.mock.calls.map((c) => String(c[0]).split("?")[0])).toEqual([STREAM_REFRESH_ENDPOINT, ALBUM_URL]);
   });
 
   it("refuses a track the page doesn't have", async () => {

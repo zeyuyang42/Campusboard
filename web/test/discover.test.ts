@@ -87,3 +87,16 @@ describe("the remembered Discover setup", () => {
     expect(setupQuery("nope")).toBeNull();
   });
 });
+
+describe("previews and resume points", () => {
+  it("never saves or reads one, even for a preview over 20 minutes", async () => {
+    const long = preview({ featured: { ...ITEM.featured!, duration: 3600 } });
+    const el = await h.startPlaying([long], 0, 3600);
+    el.emit("timeupdate", { currentTime: 2480 });
+    h.state().pause();
+    el.emit("pause");
+    await flush();
+    expect(h.core.saveResumePosition).not.toHaveBeenCalled();
+    expect(h.core.resumePosition).not.toHaveBeenCalled();
+  });
+});
