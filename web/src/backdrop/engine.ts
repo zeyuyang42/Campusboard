@@ -48,6 +48,30 @@ const rgb01 = (hex: string): [number, number, number] => {
   return [r / 255, g / 255, b / 255];
 };
 
+/**
+ * paletteSlots and rgb01, remembered per palette object and surface: a frame at 30 fps would
+ * otherwise rebuild four typed arrays and re-parse every hex. One entry per palette (held weakly)
+ * plus one for "no palette"; a new surface replaces an entry.
+ */
+class SlotCache {
+  private readonly byPalette = new WeakMap<BoostedPalette, { surface: string; slots: Slots }>();
+  private none: { surface: string; slots: Slots } | null = null;
+  private surfaceRgb: { hex: string; rgb: [number, number, number] } | null = null;
+
+  slots(p: BoostedPalette | null, surface: string): Slots {
+    const hit = p ? this.byPalette.get(p) : this.none;
+    if (hit && hit.surface === surface) return hit.slots;
+    const entry = { surface, slots: paletteSlots(p, surface) };
+    if (p) this.byPalette.set(p, entry); else this.none = entry;
+    return entry.slots;
+  }
+
+  rgb(hex: string): [number, number, number] {
+    if (this.surfaceRgb?.hex !== hex) this.surfaceRgb = { hex, rgb: rgb01(hex) };
+    return this.surfaceRgb.rgb;
+  }
+}
+
 export class BackdropEngine {
   frames = 0;
   state: BackdropState = "off";
@@ -66,6 +90,7 @@ export class BackdropEngine {
   private readonly gate = new FrameGate(30);
   private readonly clock = new DriftClock();
   private readonly listeners = new Set<(s: BackdropState) => void>();
+  private readonly slots = new SlotCache();
   private size: [number, number] = [1, 1];
 
   constructor(private readonly deps: EngineDeps) {}
@@ -191,13 +216,13 @@ export class BackdropEngine {
   private render(now: number, drifting: boolean, fading: boolean) {
     if (!this.gl) return;
     const i = this.input;
-    const a = paletteSlots(this.palA, i.surface);
-    const b = paletteSlots(fading ? this.palB : this.palA, i.surface);
+    const a = this.slots.slots(this.palA, i.surface);
+    const b = this.slots.slots(fading ? this.palB : this.palA, i.surface);
     const u: GlUniforms = {
       time: this.clock.tick(now, drifting),
       mix: fading && this.fadeStart !== null ? fadeMix(this.fadeStart, now) : 0,
       intensity: i.intensity,
-      surface: rgb01(i.surface),
+      surface: this.slots.rgb(i.surface),
       colA: a.col, wA: a.w, colB: b.col, wB: b.w,
       seed: fading && this.fadeStart !== null ? this.seedA + (this.seedB - this.seedA) * fadeMix(this.fadeStart, now) : this.seedA,
       dark: i.dark,

@@ -15,6 +15,9 @@ import { isTauri } from "../lib/env";
 import { setNavigator } from "../lib/navigation";
 import { useNavigate } from "react-router-dom";
 
+/** How long after the last resize event the full-screen state is read. */
+const FULLSCREEN_SYNC_MS = 150;
+
 export function AppShell() {
   const queueOpen = usePlayer((s) => s.queueOpen);
   const sidebarOpen = useUi((s) => s.sidebarOpen);
@@ -35,14 +38,16 @@ export function AppShell() {
     // The listener arrives after an await: a cleanup that ran first (StrictMode) drops it then.
     let unlisten: (() => void) | undefined;
     let cancelled = false;
+    let timer: number | undefined;
     void import("@tauri-apps/api/window").then(async ({ getCurrentWindow }) => {
       const win = getCurrentWindow();
       const sync = async () => document.documentElement.classList.toggle("is-fullscreen", await win.isFullscreen().catch(() => false));
       await sync();
-      const u = await win.onResized(() => { void sync(); });
+      // A live resize fires many events a second; one isFullscreen() round trip once it settles is enough.
+      const u = await win.onResized(() => { window.clearTimeout(timer); timer = window.setTimeout(() => { timer = undefined; void sync(); }, FULLSCREEN_SYNC_MS); });
       if (cancelled) u(); else unlisten = u;
     });
-    return () => { cancelled = true; unlisten?.(); };
+    return () => { cancelled = true; unlisten?.(); window.clearTimeout(timer); };
   }, []);
   return (
     <>

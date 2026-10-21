@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { useShallow } from "zustand/react/shallow";
 import { formatResumeAt, formatSleepLeft, sleepChoiceOf, toggleAction, type SleepChoice } from "@bc/core";
 import { usePlayer } from "../player/store";
 import { ExternalLink } from "./ExternalLink";
@@ -73,9 +74,16 @@ function ResumeHint() {
 }
 
 export function PlayerBar() {
-  const s = usePlayer();
-  const cur = s.queue[s.index] ?? null;
-  const { nowPlayingOpen, setNowPlayingOpen, toggleSidebar } = useUi();
+  // Only what the bar shows (the seek bar, sleep and resume lines read their own fields), so a
+  // position tick leaves it alone. The actions are stable references on the store.
+  const s = usePlayer(useShallow((p) => ({
+    cur: p.queue[p.index] ?? null, status: p.status, wantsPlay: p.wantsPlay, shuffle: p.shuffle, repeat: p.repeat, volume: p.volume, sleep: p.sleep, queueOpen: p.queueOpen, error: p.error,
+    toggleShuffle: p.toggleShuffle, prev: p.prev, toggle: p.toggle, next: p.next, cycleRepeat: p.cycleRepeat, toggleMute: p.toggleMute, setVolume: p.setVolume, setQueueOpen: p.setQueueOpen,
+  })));
+  const cur = s.cur;
+  const nowPlayingOpen = useUi((u) => u.nowPlayingOpen);
+  const setNowPlayingOpen = useUi((u) => u.setNowPlayingOpen);
+  const toggleSidebar = useUi((u) => u.toggleSidebar);
   const { entry } = useRadioNow(cur?.radio ? cur : null, s.wantsPlay || s.status === "playing");
   return (
     <footer className="player">

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import type { Track } from "@bc/core";
 import { usePlayer } from "../player/store";
@@ -31,21 +31,23 @@ export function TrackList({ tracks, showAlbum = false, useTrackNum = false, reor
   const status = usePlayer((s) => s.status);
   const playTracks = usePlayer((s) => s.playTracks);
   const toggle = usePlayer((s) => s.toggle);
-  const ids = tracks.map((t) => t.id);
+  const ids = useMemo(() => tracks.map((t) => t.id), [tracks]);
   const sel = useSelection(ids);
+  const { selected, selectAll, clear } = sel;
   const drag = useRowDrag(reorder?.onMove ?? (() => {}));
   const actions = useTrackActions();
   const tableRef = useRef<HTMLTableElement>(null);
 
+  // Registered again only when the selection changes (selectAll and clear are stable).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!tableRef.current?.contains(document.activeElement) && document.activeElement !== document.body) return;
-      if ((e.metaKey || e.ctrlKey) && e.key === "a" && tableRef.current?.contains(document.activeElement)) { e.preventDefault(); sel.selectAll(); }
-      if (e.key === "Escape" && sel.selected.size) sel.clear();
+      if ((e.metaKey || e.ctrlKey) && e.key === "a" && tableRef.current?.contains(document.activeElement)) { e.preventDefault(); selectAll(); }
+      if (e.key === "Escape" && selected.size) clear();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sel]);
+  }, [selected, selectAll, clear]);
 
   const playFrom = (i: number) => {
     const t = tracks[i];
