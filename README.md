@@ -6,7 +6,7 @@
 
 <p align="center">A personal Mac app for listening to Bandcamp, named after the climbing training board. Paste a link, keep a library, make playlists, and play in a window that takes its colours from the album art.</p>
 
-<p align="center"><a href="https://github.com/zeyuyang42/campusboard/releases/latest"><b>Download the latest release</b></a> (macOS 13.3+, Apple Silicon)</p>
+<p align="center"><a href="https://github.com/zeyuyang42/Campusboard/releases/latest"><b>Download the latest release</b></a> (macOS 13.3+, Apple Silicon)</p>
 
 ![Library](docs/library.png)
 
@@ -24,7 +24,7 @@ It is an unofficial client, not affiliated with Bandcamp; see
 
 ## Install
 
-1. Download the `.dmg` from the [releases page](https://github.com/zeyuyang42/campusboard/releases/latest), open it, and drag **Campusboard** to Applications.
+1. Download the `.dmg` from the [releases page](https://github.com/zeyuyang42/Campusboard/releases/latest), open it, and drag **Campusboard** to Applications.
 2. The app isn't signed with an Apple Developer ID, so macOS refuses it the first
    time. Right-click the app, choose **Open** and confirm (or System Settings →
    Privacy & Security → **Open Anyway**). Once is enough.

@@ -366,7 +366,7 @@ async fn selftest_sleep(ms: u64) -> Result<(), String> {
 }
 
 
-const RELEASES_URL: &str = "https://github.com/zeyuyang42/campusboard/releases/latest";
+const RELEASES_URL: &str = "https://github.com/zeyuyang42/Campusboard/releases/latest";
 
 /// Why startup failed, from the error `Builder::build` returned.
 #[derive(Debug, PartialEq, Eq)]
