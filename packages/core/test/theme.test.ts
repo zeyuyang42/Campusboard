@@ -29,6 +29,15 @@ describe("ThemeSchema", () => {
 describe("backdrop (#110)", () => {
   const dark = (over: Partial<typeof DEFAULT_BACKDROP> = {}) => resolveTheme({ ...PRESETS[0], backdrop: { ...DEFAULT_BACKDROP, ...over } }, true);
 
+  it("style \"grain\" (the 0.9.0 name) parses as \"glitch\" (#113), version 1; other unknown styles are still refused", () => {
+    const r = parseTheme({ ...DEFAULT_THEME, backdrop: { ...DEFAULT_BACKDROP, style: "grain" } });
+    expect(r.error).toBeUndefined();
+    expect(r.theme?.version).toBe(1);
+    expect(r.theme?.backdrop.style).toBe("glitch");
+    expect(parseThemeJson(JSON.stringify({ ...DEFAULT_THEME, backdrop: { ...DEFAULT_BACKDROP, style: "glitch" } })).theme?.backdrop.style).toBe("glitch");
+    expect(parseTheme({ ...DEFAULT_THEME, backdrop: { ...DEFAULT_BACKDROP, style: "Grain" } }).error).toMatch(/backdrop.style/);
+    expect(parseTheme({ ...DEFAULT_THEME, backdrop: { ...DEFAULT_BACKDROP, style: "toString" } }).error).toMatch(/backdrop.style/);
+  });
   it("a theme without `backdrop` (saved before #110) parses to the morph + ink default, version 1", () => {
     const { backdrop: _dropped, ...old } = PRESETS[0];
     const r = parseTheme(old);

@@ -34,9 +34,13 @@ export function backdropState(i: ControllerInput): BackdropState {
 /** A track change cross-fades the two palettes over this long. */
 export const FADE_MS = 2000;
 
-/** Frames per second per style: the grain gradient is film-like at 4, the others drift at 30. */
-export function fps(style: Backdrop["style"]): number {
-  return style === "grain" ? 4 : 30;
+/**
+ * Frames per second per style. Every style drifts at 30 since #113 (the 4 fps film-like cap
+ * belonged to the grain gradient, which the glitch style replaced); the function stays so a
+ * future style can cap itself here, the one lever for CPU besides the buffer size.
+ */
+export function fps(_style: Backdrop["style"]): number {
+  return 30;
 }
 
 /** 0..1 eased progress of a fade that started at `startedAt`. */

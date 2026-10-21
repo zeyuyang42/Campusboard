@@ -156,8 +156,8 @@ export function SettingsPage() {
             <label>Style
               <select value={theme.backdrop.style} onChange={(e) => update({ backdrop: { style: e.target.value as Theme["backdrop"]["style"] } })}>
                 <option value="ink">Fluid ink</option>
-                <option value="aurora">Aurora bands</option>
-                <option value="grain">Grain gradient</option>
+                <option value="aurora">Aurora curtains</option>
+                <option value="glitch">Glitch</option>
                 <option value="lava">Lava blobs</option>
               </select>
             </label>

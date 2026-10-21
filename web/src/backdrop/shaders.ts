@@ -28,6 +28,7 @@ uniform vec3 u_colB[6];
 uniform float u_wB[6];
 uniform float u_seed;
 uniform float u_dark;
+uniform float u_still;
 
 float hash(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
@@ -93,51 +94,141 @@ void main() {
 }
 `;
 
-/** Aurora bands: four horizontal bands with sinusoidal and noise undulation, one swatch each. */
+/**
+ * Aurora curtains (#113): five tall sheets, one swatch each, hanging from a wavy lower edge and
+ * fading toward the top. Each sheet undulates in x along its height (the 17 s wave plus a slow
+ * noise wander), is brightest in a narrow core and is streaked by fine vertical rays that
+ * follow its folds. Where sheets overlap the colours average and the coverage builds up
+ * (a soft union of the gaussians), so they mix without blowing out on a light surface.
+ */
 const AURORA = HEADER + `
 void main() {
   vec2 uv = gl_FragCoord.xy / u_res;
-  float s = u_time * 0.04;
-  vec3 acc = vec3(0.0);
-  float wsum = 0.0;
-  for (int i = 0; i < 4; i++) {
-    float fi = float(i);
-    float base = 0.2 + 0.2 * fi;
-    float y = base + 0.08 * sin(uv.x * 2.4 + s + fi * 1.7 + u_seed) + 0.07 * (noise(vec2(uv.x * 3.0 + fi * 7.0 + u_seed, s * 0.6)) - 0.5);
-    float width = 0.16 + 0.04 * sin(s * 0.5 + fi);
-    float d = (uv.y - y) / width;
-    float g = exp(-d * d);
-    acc += pal((fi + 0.5) / 4.0) * g;
-    wsum += g;
-  }
-  // A dim fill of the middle swatch under the bands, so the gaps are not bare surface.
-  vec3 fill = mix(u_surface, pal(0.5), 0.3);
-  vec3 col = mix(fill, acc / max(wsum, 1e-3), clamp(wsum * 1.5, 0.0, 1.0));
-  gl_FragColor = vec4(finish(col), 1.0);
-}
-`;
-
-/** Grain gradient: five gaussian blobs on slow Lissajous paths, plus hash grain of about 3%. */
-const GRAIN = HEADER + `
-void main() {
-  vec2 uv = gl_FragCoord.xy / u_res;
-  vec2 asp = vec2(u_res.x / u_res.y, 1.0);
-  float s = u_time / 90.0 * 6.2831;
+  float s = u_time * 0.37;  // 2*pi / 17 s
   vec3 acc = vec3(0.0);
   float wsum = 0.0;
   for (int i = 0; i < 5; i++) {
     float fi = float(i);
-    vec2 c = vec2(0.5 + 0.38 * sin(s * (1.0 + 0.3 * fi) + fi * 1.3 + u_seed), 0.5 + 0.38 * sin(s * (1.3 + 0.2 * fi) + fi * 2.1 + u_seed * 0.7));
-    vec2 d = (uv - c) * asp;
-    float g = exp(-dot(d, d) * 7.0);
-    acc += pal((fi + 0.5) / 5.0) * g;
+    // The sheet's x at this height: spread across the width, swinging with the wave and wandering.
+    float x = 0.1 + 0.2 * fi
+      + 0.11 * sin(uv.y * 2.2 + s + fi * 1.7 + u_seed)
+      + 0.06 * sin(s * 0.41 + fi * 2.3 + u_seed * 0.5)
+      + 0.12 * (noise(vec2(uv.y * 1.6 + fi * 7.0 + u_seed, s * 0.35 + fi)) - 0.5);
+    float dx = uv.x - x;
+    float width = 0.075 + 0.02 * sin(s * 0.6 + fi * 0.9);
+    float body = exp(-dx * dx / (width * width));
+    float core = exp(-dx * dx / (width * width * 0.12));
+    // The lower hem wanders a little; above it the sheet fades out slowly toward the top.
+    float hem = 0.07 + 0.05 * sin(uv.x * 3.1 + s * 0.7 + fi);
+    float vert = smoothstep(hem, hem + 0.12, uv.y) * (1.0 - 0.6 * smoothstep(hem + 0.2, 1.0, uv.y));
+    // Rays: value noise stretched along y and sampled in the sheet's own frame, so the streaks
+    // bend with it; two octaves, sliding slowly along the sheet.
+    float rx = dx * 70.0 + fi * 31.0 + s * 0.8;
+    float r1 = noise(vec2(rx, uv.y * 2.0 + s * 0.2));
+    float r2 = noise(vec2(rx * 2.3 + 11.0, uv.y * 3.0 - s * 0.15));
+    float rays = 0.35 + 0.65 * smoothstep(0.25, 0.85, 0.6 * r1 + 0.4 * r2);
+    float g = body * vert * rays;
+    vec3 col = pal((fi + 0.5) / 5.0);
+    // A brighter core on a dark surface, a denser one on a light surface.
+    col = mix(col, mix(col * 0.82, col * 1.45 + 0.08, u_dark), core * 0.7);
+    acc += col * g;
     wsum += g;
   }
-  // Between the blobs the surface shows through a little, so the mesh keeps some structure.
-  vec3 col = mix(u_surface, acc / max(wsum, 1e-4), clamp(0.55 + wsum, 0.0, 1.0));
-  float grain = (hash(gl_FragCoord.xy + fract(u_time) * 100.0) - 0.5) * 0.08;
-  col *= 1.0 + grain;
+  vec3 sheets = acc / max(wsum, 1e-4);
+  // Overlaps brighten (dark) or deepen (light) a little, as light would add up; on a light
+  // surface the sheets are also a touch deeper overall, or pale swatches vanish into it.
+  float over = clamp(wsum - 1.0, 0.0, 1.0);
+  sheets *= mix(0.9, 1.0, u_dark) + over * mix(-0.2, 0.3, u_dark);
+  float cover = 1.0 - exp(-wsum * mix(2.6, 1.8, u_dark));
+  vec3 fill = mix(u_surface, pal(0.5), 0.22);
+  vec3 col = mix(fill, sheets, cover);
   gl_FragColor = vec4(finish(col), 1.0);
+}
+`;
+
+/**
+ * Glitch (#113): the palette as 7 hard-edged posterized bands with an ordered (Bayer) dither,
+ * calm most of the time, torn by bursts. Everything is a function of u_time (and u_mix): a
+ * burst of about 0.5 s starts once in every 5 s slot at a hashed offset (so 2-8 s apart,
+ * reproducible), and a track change (u_mix between 0 and 1) is a longer, stronger one. During a
+ * burst horizontal slabs of hashed heights tear sideways, re-rolled every 1/12 s, some slabs
+ * jump to a neighbouring band's colour, the channels split, and a few rectangles of TV static
+ * flash. u_still (paused, Still, Reduce motion) clamps the burst to 0, so a frozen frame is never
+ * caught mid-tear. The posterize also steps the lightness, so a one-colour palette still bands.
+ */
+const GLITCH = HEADER + `
+const float STEPS = 7.0;
+float bayer2(vec2 p) {
+  p = mod(floor(p), 2.0);
+  return mod(p.x * 3.0 + p.y * 2.0, 4.0);
+}
+float bayer4(vec2 p) {
+  return (4.0 * bayer2(p * 0.5) + bayer2(p)) / 16.0 + 1.0 / 32.0;
+}
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_res;
+  float t = u_time;
+  // The periodic burst: one per 5 s slot, 0.5 s long, starting 1-4 s into the slot.
+  float slot = floor(t / 5.0);
+  float start = slot * 5.0 + 1.0 + 3.0 * hash(vec2(slot, u_seed));
+  float bu = t - start;
+  float env = step(0.0, bu) * step(bu, 0.5) * (1.0 - bu / 0.5);
+  // The track-change burst rides the cross-fade: strongest half way through it.
+  float change = clamp(u_mix * (1.0 - u_mix) * 4.4, 0.0, 1.0);
+  float burst = max(env, change) * (1.0 - u_still);
+  float frame = floor(t * 12.0);  // slabs and static re-roll every ~1/12 s
+  float bseed = hash(vec2(slot + 7.0, u_seed + 3.0)) + change * 0.37;
+
+  // Slabs: coarse and fine, each torn sideways by its own hashed offset when the burst is on.
+  vec2 p = uv;
+  float shift = 0.0;
+  if (burst > 0.0) {
+    float n1 = 5.0 + floor(hash(vec2(bseed, 1.0)) * 7.0);
+    float b1 = floor(uv.y * n1);
+    float h1 = hash(vec2(b1 + frame * 0.37, bseed));
+    float tear1 = step(0.45, hash(vec2(b1, frame + bseed)));
+    p.x += (h1 - 0.5) * 0.5 * burst * tear1;
+    float n2 = 20.0 + floor(hash(vec2(bseed, 2.0)) * 30.0);
+    float b2 = floor(uv.y * n2);
+    float h2 = hash(vec2(b2 * 1.7 + frame, bseed + 5.0));
+    float tear2 = step(0.7, hash(vec2(b2, frame * 0.53 + bseed)));
+    p.x += (h2 - 0.5) * 0.18 * burst * tear2;
+    // Some slabs jump a band up or down: a neighbouring swatch.
+    float h3 = hash(vec2(b1 + 13.0, frame + bseed * 2.0));
+    shift = step(0.6, h3) * (floor(hash(vec2(b1, bseed + 9.0)) * 3.0) - 1.0) * (1.4 / STEPS) * step(0.001, burst);
+  }
+  p.x = fract(p.x);
+
+  // The calm base: a diagonal gradient that leans slowly, posterized with an ordered dither.
+  float g = p.y * 0.78 + p.x * 0.28 + 0.07 * sin(p.x * 3.0 + t * 0.09 + u_seed) + 0.05 * sin(p.y * 4.0 - t * 0.07);
+  g += (bayer4(gl_FragCoord.xy) - 0.5) * (0.55 / STEPS);  // a dithered fringe, the edges stay hard
+  float q = floor(clamp(g + shift, 0.0, 0.999) * STEPS) / STEPS;
+  float tc = q + 0.5 / STEPS;
+  // The channels split a little while a burst is on.
+  float split = 0.06 * burst;
+  vec3 col = vec3(pal(tc + split).r, pal(tc).g, pal(tc - split).b);
+  // Lightness steps too, so bands show even when every swatch is the same colour (a narrower
+  // ramp on a light surface, where pale swatches would clip to white).
+  col *= mix(mix(0.78, 1.04, q), mix(0.72, 1.25, q), u_dark);
+  col += u_dark * (q - 0.5) * 0.08;
+
+  // TV static: 2-6 rectangles, each flashing on and off every few frames.
+  if (burst > 0.0) {
+    float count = 2.0 + floor(hash(vec2(bseed, 4.0)) * 5.0);
+    for (int i = 0; i < 6; i++) {
+      float fi = float(i);
+      if (fi >= count) break;
+      vec2 c = vec2(hash(vec2(fi, bseed + 11.0)), hash(vec2(fi + 20.0, bseed + 11.0)));
+      vec2 sz = vec2(0.08 + 0.3 * hash(vec2(fi + 40.0, bseed)), 0.03 + 0.14 * hash(vec2(fi + 60.0, bseed)));
+      float on = step(0.45, hash(vec2(fi + frame, bseed + 17.0))) * step(0.3, burst);
+      vec2 d = abs(uv - c) - sz * 0.5;
+      float inside = step(max(d.x, d.y), 0.0) * on;
+      float n = hash(gl_FragCoord.xy + frame * 13.7);
+      vec3 noiseCol = mix(vec3(0.05), vec3(0.96), step(0.5, n));
+      col = mix(col, noiseCol, inside * 0.9);
+    }
+  }
+  gl_FragColor = vec4(finish(clamp(col, 0.0, 1.0)), 1.0);
 }
 `;
 
@@ -167,4 +258,4 @@ void main() {
 }
 `;
 
-export const FRAGMENT: Record<Backdrop["style"], string> = { ink: INK, aurora: AURORA, grain: GRAIN, lava: LAVA };
+export const FRAGMENT: Record<Backdrop["style"], string> = { ink: INK, aurora: AURORA, glitch: GLITCH, lava: LAVA };
