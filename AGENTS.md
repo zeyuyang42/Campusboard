@@ -185,7 +185,16 @@ src-tauri/
   the state stream never waits on WebKit's `visibilitychange`.
 - Window behaviour follows Music.app: closing hides the window and playback
   continues (`persist.ts` prevents the close and calls `hide()`), the Dock icon
-  reopens it (`RunEvent::Reopen` in lib.rs), Cmd+Q quits. Menu accelerators use
+  reopens it (`RunEvent::Reopen` in lib.rs), Cmd+Q quits. Hiding a window in native
+  full screen leaves its Space behind, black and empty, so a close in full screen
+  (button or ⌘W) first calls `setFullscreen(false)` (`core:window:allow-set-fullscreen`,
+  main window) and hides once the transition is over; the window reopens windowed
+  (2026-10-21). tao 0.37 reports `isFullscreen()` false as soon as it is asked to
+  leave, so the end is taken from the resizes instead: the one AppKit sends when the
+  frame changes and the one tao sends from `windowDidExitFullScreen:`, then 250 ms of
+  quiet, capped at 1.5 s. Read from the tao source, not yet tried in a real full-screen
+  Space. `geometry.rs` skips a frame covering the whole screen, since tao no longer
+  says "full screen" while that frame is still reported. Menu accelerators use
   Cmd so they never fight text fields; plain-key shortcuts stay in `shortcuts.ts`.
 - Drag and drop (#92, checked 2026-10-20 in wry 0.57 / tauri-runtime-wry 2.12 source,
   selftest `dropLink`): with `dragDropEnabled` on (Tauri's default) the WKWebView

@@ -138,4 +138,49 @@ describe("closing the window (#59)", () => {
     await flush();
     expect(h.core.savePlayPosition).toHaveBeenCalledTimes(1);
   });
+
+  it("hides a windowed window directly, without touching full screen", async () => {
+    await h.win.closeHandler!({ preventDefault: () => undefined });
+    expect(h.win.setFullscreen).not.toHaveBeenCalled();
+    expect(h.win.onResized).not.toHaveBeenCalled();
+    expect(h.win.hide).toHaveBeenCalledTimes(1);
+  });
+
+  it("in full screen, leaves it and hides only once the transition has settled", async () => {
+    h.win.fullscreen = true;
+    const done = h.win.closeHandler!({ preventDefault: () => undefined });
+    await flush();
+    expect(h.win.setFullscreen).toHaveBeenCalledWith(false);
+    expect(h.win.hide).not.toHaveBeenCalled();
+    // A second click while the transition runs joins the first close.
+    void h.win.closeHandler!({ preventDefault: () => undefined });
+    await flush();
+    expect(h.win.setFullscreen).toHaveBeenCalledTimes(1);
+    h.win.resized(); // AppKit changes the frame
+    vi.advanceTimersByTime(400);
+    await flush();
+    expect(h.win.hide).not.toHaveBeenCalled();
+    h.win.resized(); // windowDidExitFullScreen:
+    vi.advanceTimersByTime(persist.FULLSCREEN_SETTLE_MS - 1);
+    await flush();
+    expect(h.win.hide).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    await done;
+    expect(h.win.hide).toHaveBeenCalledTimes(1);
+    expect(h.win.resizeHandlers.size).toBe(0);
+    expect(h.win.setFullscreen.mock.invocationCallOrder[0]).toBeLessThan(h.win.hide.mock.invocationCallOrder[0]);
+  });
+
+  it("hides after the cap when the transition never reports its end", async () => {
+    h.win.fullscreen = true;
+    const done = h.win.closeHandler!({ preventDefault: () => undefined });
+    await flush();
+    vi.advanceTimersByTime(persist.FULLSCREEN_EXIT_CAP_MS - 1);
+    await flush();
+    expect(h.win.hide).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    await done;
+    expect(h.win.hide).toHaveBeenCalledTimes(1);
+    expect(h.win.resizeHandlers.size).toBe(0);
+  });
 });

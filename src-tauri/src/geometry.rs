@@ -22,6 +22,15 @@ pub struct Rect {
 }
 
 impl Rect {
+    /// Whether this is a whole screen's frame, menu bar included: a full-screen window's
+    /// frame. A zoomed window fills only the work area, so it never matches.
+    fn covers(&self, screen: &Rect) -> bool {
+        (self.x - screen.x).abs() < 1.0
+            && (self.y - screen.y).abs() < 1.0
+            && (self.w - screen.w).abs() < 1.0
+            && (self.h - screen.h).abs() < 1.0
+    }
+
     fn overlap(&self, o: &Rect) -> f64 {
         let w = (self.x + self.w).min(o.x + o.w) - self.x.max(o.x);
         let h = (self.y + self.h).min(o.y + o.h) - self.y.max(o.y);
@@ -114,6 +123,17 @@ fn work_area(m: &tauri::Monitor) -> Rect {
     }
 }
 
+/// A screen's whole frame in points.
+fn screen_frame(m: &tauri::Monitor) -> Rect {
+    let k = m.scale_factor();
+    Rect {
+        x: m.position().x as f64 / k,
+        y: m.position().y as f64 / k,
+        w: m.size().width as f64 / k,
+        h: m.size().height as f64 / k,
+    }
+}
+
 pub struct Geometry {
     path: Option<PathBuf>,
     rects: Mutex<HashMap<String, Rect>>,
@@ -134,6 +154,9 @@ impl Geometry {
     /// Note where a window is now. Ignored while it is hidden, minimized or full screen, so
     /// those never become the size it reopens at. A zoomed window counts: on macOS that is
     /// just a frame (`isZoomed` is true for any window filling the screen), kept as it is.
+    /// tao stops reporting full screen as soon as `set_fullscreen(false)` is called (a close
+    /// in full screen, persist.ts), while the frame is still the screen's, so a frame that
+    /// covers its whole screen is skipped too.
     pub fn record<R: Runtime>(&self, w: &WebviewWindow<R>) {
         let normal = w.is_visible().unwrap_or(false)
             && !w.is_minimized().unwrap_or(true)
@@ -145,6 +168,11 @@ impl Geometry {
         let pos = pos.to_logical::<f64>(scale);
         let size = size.to_logical::<f64>(scale);
         let rect = Rect { x: pos.x, y: pos.y, w: size.width, h: size.height };
+        if let Ok(Some(m)) = w.current_monitor() {
+            if rect.covers(&screen_frame(&m)) {
+                return;
+            }
+        }
         self.rects.lock().unwrap().insert(w.label().to_string(), rect);
     }
 
@@ -229,6 +257,15 @@ mod tests {
         assert_eq!(place(Some(stretched), &[LAPTOP], &MINI), Placement { size: (340.0, 100.0), pos: Some((400.0, 230.0)) });
         let tall = Rect { x: 400.0, y: 230.0, w: 680.0, h: 300.0 };
         assert_eq!(place(Some(tall), &[LAPTOP], &MINI).size, (300.0, 404.0));
+    }
+
+    #[test]
+    fn only_a_whole_screen_frame_counts_as_full_screen() {
+        let screen = Rect { x: 0.0, y: 0.0, w: 1512.0, h: 982.0 };
+        assert!(Rect { x: 0.0, y: 0.0, w: 1512.0, h: 982.0 }.covers(&screen));
+        // Zoomed: the work area, below the menu bar.
+        assert!(!LAPTOP.covers(&screen));
+        assert!(!Rect { x: 100.0, y: 60.0, w: 1300.0, h: 800.0 }.covers(&screen));
     }
 
     #[test]

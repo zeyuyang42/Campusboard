@@ -57,8 +57,10 @@ export async function initPersistence() {
   // Music.app). Flush first so the position survives either way.
   try {
     const win = getCurrentWindow();
-    await win.onCloseRequested(async (event) => {
-      event.preventDefault();
+    // A second click on the close button while the first close is still leaving full
+    // screen joins it: tao already reports "not full screen" then, so it would hide at once.
+    let closing: Promise<void> | null = null;
+    const close = async () => {
       if (timer) window.clearTimeout(timer);
       // The pending full save is replaced by this one; clear the handle too, or the 5 s
       // position saves (which wait while a full save is pending) would stop for good.
@@ -67,7 +69,58 @@ export async function initPersistence() {
       await saveResumePoint().catch(() => undefined);
       // A removal still offering Undo (#93) becomes final: the note goes with the window.
       await finishUndo();
+      // Hiding a window in native full screen leaves its Space behind, black and empty.
+      await leaveFullscreen(win);
       await win.hide().catch(() => undefined);
+    };
+    await win.onCloseRequested(async (event) => {
+      event.preventDefault();
+      closing ??= close().finally(() => { closing = null; });
+      await closing;
     });
   } catch { /* not inside Tauri */ }
+}
+
+type FullscreenWindow = Pick<ReturnType<typeof getCurrentWindow>, "isFullscreen" | "setFullscreen" | "onResized">;
+
+/** Longest a close waits for the window to leave full screen before it hides anyway. */
+export const FULLSCREEN_EXIT_CAP_MS = 1500;
+/** Quiet time after the transition's last resize before the window counts as windowed. */
+export const FULLSCREEN_SETTLE_MS = 250;
+
+/**
+ * Leave native full screen and wait for the transition to end. tao reports "not full
+ * screen" as soon as it is asked to leave, so `isFullscreen()` can't tell when the
+ * animation is over. The end is the resize tao sends from `windowDidExitFullScreen:`,
+ * after the one AppKit sends when the frame changes: wait for at least two resizes and
+ * then a quiet spell, or the cap.
+ */
+export async function leaveFullscreen(win: FullscreenWindow) {
+  if (!(await win.isFullscreen().catch(() => false))) return;
+  await new Promise<void>((resolve) => {
+    let resizes = 0;
+    let quiet: ReturnType<typeof setTimeout> | undefined;
+    let unlisten: (() => void) | undefined;
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(quiet);
+      clearTimeout(cap);
+      unlisten?.();
+      resolve();
+    };
+    const cap = setTimeout(finish, FULLSCREEN_EXIT_CAP_MS);
+    win.onResized(() => {
+      resizes++;
+      clearTimeout(quiet);
+      if (resizes >= 2) quiet = setTimeout(finish, FULLSCREEN_SETTLE_MS);
+    })
+      .then((u) => {
+        if (done) { u(); return; }
+        unlisten = u;
+        return win.setFullscreen(false);
+      })
+      .catch(finish);
+  });
 }
