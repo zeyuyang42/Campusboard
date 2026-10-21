@@ -23,7 +23,7 @@ VITE_BROWSER_MODE=1 npm run web:dev   # UI in a normal browser: sql.js + Vite fe
 VITE_SELFTEST=1 npm run dev      # app runs web/src/selftest.ts and writes results to settings.key='selftest'
                                  # add VITE_SELFTEST_FAN=<public fan username> to include the collection check
 npm run scrape -- <url>          # print what the parser sees (Node)
-npm run fixtures:save -- <url> <name>   # refresh packages/core/test/fixtures/<name>.html
+npm run fixtures:save -- <url> <name>   # refresh packages/core/test/fixtures/<name>.html (scrubbed: no supporters, fan comments or visitor country)
 npm run smoke:live               # re-parse one known live page
 ```
 
