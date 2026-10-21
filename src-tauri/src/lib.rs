@@ -529,7 +529,7 @@ pub fn run() {
             app.manage(geo);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![library_db_url, offline_dir, backup_library, selftest_take_backup, selftest_file, selftest_window, selftest_sleep, mini::toggle_mini_player, fullscreen::hide_main_window, menu::selftest_menu, tray::set_menu_bar])
+        .invoke_handler(tauri::generate_handler![library_db_url, offline_dir, backup_library, selftest_take_backup, selftest_file, selftest_window, selftest_sleep, mini::toggle_mini_player, fullscreen::hide_main_window, fullscreen::show_main_window, menu::selftest_menu, tray::set_menu_bar])
         .build(context)
         .unwrap_or_else(|e| startup_failed(&e));
 

@@ -58,8 +58,8 @@ export async function initPersistence() {
   // Music.app). Flush first so the position survives either way.
   try {
     const win = getCurrentWindow();
-    // A second click on the close button while the first close is still leaving full
-    // screen joins it rather than starting another.
+    // A second click joins a close still saving; a close during the full-screen exit is
+    // absorbed by PENDING in fullscreen.rs.
     let closing: Promise<void> | null = null;
     const close = async () => {
       if (timer) window.clearTimeout(timer);

@@ -12,6 +12,7 @@ fn main() {
             "selftest_sleep",
             "toggle_mini_player",
             "hide_main_window",
+            "show_main_window",
             "selftest_menu",
             "set_menu_bar",
             "offline_dir",

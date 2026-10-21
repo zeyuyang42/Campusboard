@@ -191,9 +191,12 @@ src-tauri/
   through the `hide_main_window` command (`src/fullscreen.rs`): a windowed main window is
   hidden at once; a full-screen one gets a one-shot `NSWindowDidExitFullScreenNotification`
   observer on its NSWindow (objc2 `define_class!`), then `set_fullscreen(false)`, and the
-  observer removes itself and hides on the next event-loop turn. A 2 s fallback hides
-  anyway if the notification never comes; a `reveal()` during the wait (Dock reopen)
-  cancels the late hide, and a second close during it only re-arms it. The window
+  observer removes itself and hides on a later event-loop turn (queued from another
+  thread: `run_on_main_thread` called on the main thread runs inline, and sync commands
+  are on the main thread). A 2 s fallback hides anyway if the notification never comes;
+  a `reveal()` during the wait (Dock reopen, the mini player's Show through the
+  `show_main_window` command) cancels the late hide, and a second close during it only
+  re-arms it (`HideState`, unit-tested). The window
   reopens windowed. The end can't be read from tao 0.37: `set_fullscreen(None)` clears
   its `fullscreen` state synchronously (window.rs:1261), so `isFullscreen()` is false
   for the whole animation, and a close during the enter transition is queued by tao
