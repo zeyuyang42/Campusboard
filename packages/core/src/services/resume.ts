@@ -10,7 +10,7 @@ export const RESUME_EDGE_SEC = 30;
 /** The table keeps the most recently saved this many points. */
 export const RESUME_MAX_ROWS = 200;
 
-interface Entry { id: number; radio?: unknown; duration?: number | null }
+interface Entry { id: number; radio?: unknown; preview?: unknown; duration?: number | null }
 
 const longer = (d: number | null | undefined) => d != null && Number.isFinite(d) && d > RESUME_MIN_TRACK_SEC;
 const known = (d: number | null | undefined) => d != null && Number.isFinite(d) && d > 0;

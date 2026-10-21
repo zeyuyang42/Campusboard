@@ -37,6 +37,7 @@ export function Sidebar({ open }: { open: boolean }) {
       <div className="brand" data-tauri-drag-region><span className="dot" /><span>Campusboard</span></div>
       <NavLink to="/library" title="Library"><IconLibrary /><span className="label">Library</span></NavLink>
       <NavLink to="/search" title="Search"><IconSearch /><span className="label">Search</span></NavLink>
+      <NavLink to="/discover" title="Discover"><IconDiscover /><span className="label">Discover</span></NavLink>
       <NavLink to="/import" title="Import"><IconImport /><span className="label">Import</span></NavLink>
       <NavLink to="/playlists" title="Playlists" end><IconPlaylists /><span className="label">Playlists</span></NavLink>
       <NavLink to="/releases" title={newCount ? `New releases (${newCount})` : "New releases"}>
@@ -72,6 +73,7 @@ export function Sidebar({ open }: { open: boolean }) {
 const I = ({ d }: { d: string }) => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>;
 const IconLibrary = () => <I d="M4 5h3v14H4zM10 5h3v14h-3zM16 6l4-1 3 13-4 1z" />;
 const IconSearch = () => <I d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3" />;
+const IconDiscover = () => <I d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM15.5 8.5l-2 5-5 2 2-5z" />;
 const IconImport = () => <I d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v3h16v-3" />;
 const IconNew = () => <I d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM18 3v4M16 5h4" />;
 const IconRadio = () => <I d="M4 10h16v10H4zM8 10l9-6M8 15h4M16 15h.01" />;

@@ -32,10 +32,10 @@ npm run smoke:live               # re-parse one known live page
 ```
 packages/core/src/
   types.ts                 DTOs shared by core and web (import "@bc/core")
-  scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, fan (collection/wishlist), radio (Bandcamp Radio list + episode), schemas
+  scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, fan (collection/wishlist), radio (Bandcamp Radio list + episode), discover (results, tag/place search, discover links), schemas
   db/Db.ts                 async Db interface {select,get,run}; SQL uses "?" and toDollar() rewrites to $n for the Tauri plugin
   db/repos/                one module per table; booleans stored 0/1, converted at the repo boundary
-  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping), miniPlayer (mini window state/command protocol, throttle), transition (gapless/crossfade scheduling, fade curve, state machine), libraryTransfer (library export/import file, VACUUM INTO backup), radio (episodes, tracklists, stream URLs), offline (offline copies: download, local URL, sweep)
+  services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping), miniPlayer (mini window state/command protocol, throttle), transition (gapless/crossfade scheduling, fade curve, state machine), libraryTransfer (library export/import file, VACUUM INTO backup), radio (episodes, tracklists, stream URLs), discover (preview queue entries + their stream URLs), offline (offline copies: download, local URL, sweep)
   theme/                   schema (zod), presets, color math (OKLCH, contrast), apply (CSS variables)
   palette/                 quantize + pick + extract (canvas) + fitPalette + artUrl
   core.ts                  createCore({db, fetch, onJobsChange}) -> every function the UI calls
@@ -418,6 +418,36 @@ src-tauri/
   during which tracks without a copy fail at once and the #74 skip moves on to
   the downloaded ones. Radio episodes always stream. The library export never
   includes copies, names or sizes.
+
+- Discover (#104, verified 2026-10-21 with curl; fixtures `discover.json`,
+  `tag-search.json`, `geoname-search.json`): the `/discover/...` page carries only
+  its filters (`#pagedata[data-blob]` `appData.initialState`: categories, slices,
+  times, genres, locations, customTags). Results come from
+  `POST https://bandcamp.com/api/discover/1/discover_web` with
+  `{category_id, tag_norm_names, geoname_id, slice: top|new|rand, time_facet_id, cursor: "*"|<cursor>, size: 60, include_result_types: ["a","s"], followed_bands: false}`;
+  no cookie needed, `"t"` in `include_result_types` gives an error. The answer is
+  `{results, result_count, batch_result_count, cursor}`; each result has
+  `item_url` (custom domain when the artist has one, `?from=discover_page`
+  appended), `band_url`, `primary_image.image_id` (an art id: needs the `a`
+  prefix), `release_date` (`"2026-09-04 00:00:00 UTC"`), `is_album_preorder` and
+  `featured_track {id, title, band_name, duration, stream_url}` with a
+  `t4.bcbits.com/stream/.../mp3-128/<id>?...&ts=` URL (~24 h). Times: default -1
+  ("fresh", sent as `time_facet_id: null`), 0 today, 1 this week, 2-7 = 1-6 weeks
+  ago; Bandcamp's links write `t=<slug>` but its parser reads `t` as a number, so
+  `parseDiscoverUrl` takes both. Links: `/discover/<tag+tag>[/<category>]?s=&t=&loc=&tags=a,b`
+  (the category is ignored here). Tag autocomplete:
+  `POST api/bcsearch_public_api/1/tag_search {prefix}` -> `[{norm_name, display_name, count}]`;
+  places: `POST api/location/1/geoname_search {q, n: 5, geocoder_fallback: false}` ->
+  `{ok, results: [{id: "<string>", name, fullname}]}`. `GET api/stream/1/refresh?url=<stream_url>`
+  -> `{track_id, url}` (tried on a URL not yet expired; core falls back to the release
+  page's `data-tralbum` if it fails). Costs: one POST per filter change or "Show
+  more" (TanStack Query keeps a page 10 min, never refetched on its own and not
+  under the "albums" key, so an import doesn't refetch every loaded page), the
+  autocompletes debounced 300 ms (2+ / 3+ characters), nothing prefetched. A
+  preview is a queue entry with `id = album_id = -(1e10 + track id)` and a
+  `preview` field (`services/discover.ts`): never counted, never in a playlist,
+  `isRadioTrack` is false for it, and a restored one resolves its URL only on Play.
+  The last setup is `settings.key='discover_last'`.
 
 ## Collection sync facts (verified 2026-10-17 with curl against a public profile)
 

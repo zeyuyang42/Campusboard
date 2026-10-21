@@ -4,6 +4,7 @@ import { usePlayer } from "../player/store";
 import { useTrackLyrics } from "../api/queries";
 import { useUi } from "../ui/store";
 import { ArtImage } from "./ArtImage";
+import { ExternalLink } from "./ExternalLink";
 import { QueueList } from "./QueueList";
 import { RadioTracklist } from "./RadioTracklist";
 import { useRadioNow } from "../player/radio";
@@ -16,7 +17,9 @@ export function NowPlaying() {
   const [tab, setTab] = useState<"default" | "queue" | "lyrics" | "tracklist">("default");
   const radio = !!cur?.radio;
   // A radio episode has a tracklist instead of lyrics, and opens on it.
-  const shown = radio ? (tab === "queue" ? "queue" : "tracklist") : tab === "lyrics" ? "lyrics" : "queue";
+  // A Discover preview isn't in the library, so it has no lyrics to show.
+  const preview = !!cur?.preview;
+  const shown = radio ? (tab === "queue" ? "queue" : "tracklist") : tab === "lyrics" && !preview ? "lyrics" : "queue";
   const { entry } = useRadioNow(radio ? cur : null);
   const { data: lyrics, isPending: lyricsLoading } = useTrackLyrics(shown === "lyrics" ? cur?.id ?? null : null);
   useEffect(() => {
@@ -39,7 +42,9 @@ export function NowPlaying() {
         ) : (
           <div className="np-sub">
             <span>{cur.track_artist ?? cur.artist_name}</span>
-            <Link to={`/album/${cur.album_id}`} onClick={() => close(false)}>{cur.album_title}</Link>
+            {cur.preview
+              ? <ExternalLink href={cur.preview.item_url} title="Open on Bandcamp">{cur.album_title}</ExternalLink>
+              : <Link to={`/album/${cur.album_id}`} onClick={() => close(false)}>{cur.album_title}</Link>}
           </div>
         )}
       </div>
@@ -47,7 +52,7 @@ export function NowPlaying() {
         <div className="segmented">
           {radio && <button className={shown === "tracklist" ? "on" : ""} onClick={() => setTab("tracklist")}>Tracklist</button>}
           <button className={shown === "queue" ? "on" : ""} onClick={() => setTab("queue")}>Queue</button>
-          {!radio && <button className={shown === "lyrics" ? "on" : ""} onClick={() => setTab("lyrics")}>Lyrics</button>}
+          {!radio && !preview && <button className={shown === "lyrics" ? "on" : ""} onClick={() => setTab("lyrics")}>Lyrics</button>}
         </div>
         <div className="np-panel">
           {shown === "queue" ? <QueueList />

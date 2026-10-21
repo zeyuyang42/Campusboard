@@ -60,6 +60,12 @@ delete **Bandcamp Player.app** (and re-pin Campusboard in the Dock if you kept t
   Show and the rest). An episode plays as one long track; Now playing shows its
   tracklist with the release on air marked, and Import, Open album and Buy on
   Bandcamp for each. Episodes don't count in listening history.
+- **Discover**: Bandcamp's discover inside the app. Pick tags (with Bandcamp's
+  suggestions), Best-selling / New arrivals / Surprise me, a time window and a
+  place; click a cover to hear the release's featured track without importing
+  it, and **Add** the ones you like. The last setup comes back next time, and a
+  pasted or dropped `bandcamp.com/discover/...` link opens there. Previews don't
+  count in listening history and can't go into playlists.
 - **Playlists**: right-click any track or album, or select several tracks
   (click, Shift-click, Cmd-click) and use the bar that appears. Drag rows to
   reorder. A smart playlist (Playlists → New smart playlist) is a saved rule

@@ -48,6 +48,7 @@ export const PALETTE_ACTIONS: readonly PaletteAction[] = [
     id: "search-bandcamp", label: "Search Bandcamp…", keywords: "find online", navigates: true,
     run: (q) => navigateTo(q.trim() ? `/search?q=${encodeURIComponent(q.trim())}` : "/search"),
   },
+  go("discover", "Discover", "/discover", "browse tags genre explore new"),
   { id: "mini-player", label: "Mini Player", keywords: "window small", run: () => { void toggleMiniPlayer().catch(() => undefined); } },
   go("settings", "Settings", "/settings", "preferences"),
   ...SETTINGS.map(([hash, label, kw]) => go(`settings:${hash}`, `Settings: ${label}`, `/settings#${hash}`, kw)),

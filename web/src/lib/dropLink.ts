@@ -2,7 +2,7 @@
 // events because tauri.conf.json turns the native file-drop handler off for the main window
 // (see AGENTS.md); dropped files are never read, only link text is. lib.rs keeps the window
 // on the app's own pages whatever happens here.
-import { normalizeBandcampUrl, isBandcampHost } from "@bc/core";
+import { discoverQuery, normalizeBandcampUrl, isBandcampHost, parseDiscoverUrl } from "@bc/core";
 import { getCore } from "../api/core";
 import { navigateTo } from "./navigation";
 import { friendlyError } from "./errors";
@@ -37,7 +37,7 @@ export function extractDroppedUrl(dt: DropData): string | null {
   return [...fromList, ...fromText].find((s) => WEB_URL.test(s)) ?? null;
 }
 
-export type DropOutcome = { kind: "import" | "browse"; url: string } | { kind: "rejected"; message: string };
+export type DropOutcome = { kind: "import" | "browse" | "discover"; url: string } | { kind: "rejected"; message: string };
 
 export const NOT_BANDCAMP = "Not a Bandcamp link";
 
@@ -55,12 +55,19 @@ async function trustedArtist(raw: string, host: string): Promise<boolean> {
 
 /**
  * Route a dropped URL the way the Import page treats a pasted one: album and track links
- * start an import job and show its progress, artist and label links open Browse.
+ * start an import job and show its progress, artist and label links open Browse, and a
+ * bandcamp.com/discover link opens the same setup in Discover (#104).
  */
 export async function routeDroppedUrl(raw: string | null): Promise<DropOutcome> {
   let n: ReturnType<typeof normalizeBandcampUrl>;
   try {
     if (!raw) return { kind: "rejected", message: NOT_BANDCAMP };
+    const d = parseDiscoverUrl(raw);
+    if (d) {
+      const path = `/discover?${discoverQuery(d)}`;
+      navigateTo(path);
+      return { kind: "discover", url: path };
+    }
     n = normalizeBandcampUrl(raw);
   } catch {
     return { kind: "rejected", message: NOT_BANDCAMP };

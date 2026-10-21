@@ -23,7 +23,8 @@ export function radioQueueTrack(s: Pick<RadioShow, "id" | "title" | "program" | 
   };
 }
 
-export const isRadioTrack = (t: { id: number; radio?: unknown } | null | undefined): boolean => !!t && (!!t.radio || t.id < 0);
+/** A radio episode: its `radio` field, or (older saved queues) a negative id that isn't a Discover preview. */
+export const isRadioTrack = (t: { id: number; radio?: unknown; preview?: unknown } | null | undefined): boolean => !!t && (!!t.radio || (t.id < 0 && !t.preview));
 
 /** A restored queue entry's `radio` field, if it has the shape radioQueueTrack gives it. */
 export function isQueueRadio(x: unknown): boolean {

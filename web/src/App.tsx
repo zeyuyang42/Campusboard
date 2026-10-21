@@ -11,6 +11,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { BrowsePage } from "./pages/BrowsePage";
 import { NewReleasesPage } from "./pages/NewReleasesPage";
 import { RadioPage } from "./pages/RadioPage";
+import { DiscoverPage } from "./pages/DiscoverPage";
 
 export function App() {
   return (
@@ -29,6 +30,7 @@ export function App() {
         <Route path="/browse" element={<BrowsePage />} />
         <Route path="/releases" element={<NewReleasesPage />} />
         <Route path="/radio" element={<RadioPage />} />
+        <Route path="/discover" element={<DiscoverPage />} />
         <Route path="*" element={<Navigate to="/library" replace />} />
       </Route>
     </Routes>

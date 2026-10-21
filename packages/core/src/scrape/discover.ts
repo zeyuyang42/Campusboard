@@ -1,0 +1,287 @@
+import { z } from "zod";
+import type { FetchQueue } from "./http.js";
+import { ScrapeError } from "./errors.js";
+import { normalizeBandcampUrl } from "./url.js";
+import { RADIO_CDN_URL } from "./radio.js";
+import type { DiscoverItem, DiscoverLocation, DiscoverPage, DiscoverParams, DiscoverSlice, DiscoverTag } from "../types.js";
+
+/**
+ * Bandcamp discover (#104, verified 2026-10-21, see AGENTS.md). The /discover page carries
+ * only its filters; the results come from a JSON POST that its Vue app makes, 60 a page,
+ * paged with an opaque cursor. Each result names one featured track with a CDN stream URL.
+ */
+export const DISCOVER_ENDPOINT = "https://bandcamp.com/api/discover/1/discover_web";
+export const TAG_SEARCH_ENDPOINT = "https://bandcamp.com/api/bcsearch_public_api/1/tag_search";
+export const LOCATION_SEARCH_ENDPOINT = "https://bandcamp.com/api/location/1/geoname_search";
+/** Gives a fresh URL for a featured track's stream_url: `{ track_id, url }`. */
+export const STREAM_REFRESH_ENDPOINT = "https://bandcamp.com/api/stream/1/refresh";
+export const DISCOVER_PAGE_SIZE = 60;
+
+/** The page's `slices` (initialState), first is Bandcamp's default. */
+export const DISCOVER_SLICES: readonly { slug: DiscoverSlice; label: string }[] = [
+  { slug: "top", label: "Best-selling" },
+  { slug: "new", label: "New arrivals" },
+  { slug: "rand", label: "Surprise me" },
+];
+/**
+ * The page's `times`. Bandcamp's default is -1 ("fresh"), sent as `time_facet_id: null`;
+ * its links write the slug as `t=` (and read `t=` as a number), so both are accepted.
+ */
+export const DISCOVER_TIMES: readonly { id: number; slug: string; label: string }[] = [
+  { id: -1, slug: "fresh", label: "Fresh" },
+  { id: 0, slug: "today", label: "Today" },
+  { id: 1, slug: "this-week", label: "This week" },
+  { id: 2, slug: "1w", label: "Last week" },
+  { id: 3, slug: "2w", label: "2 weeks ago" },
+  { id: 4, slug: "3w", label: "3 weeks ago" },
+  { id: 5, slug: "4w", label: "4 weeks ago" },
+  { id: 6, slug: "5w", label: "5 weeks ago" },
+  { id: 7, slug: "6w", label: "6 weeks ago" },
+];
+export const DEFAULT_DISCOVER: DiscoverParams = { tags: [], slice: "top", time: null, location: null };
+/** Bandcamp's tag input takes up to this many tags. */
+export const DISCOVER_MAX_TAGS = 10;
+
+const str = z.unknown().transform((v) => (typeof v === "string" ? v : null));
+const num = z.unknown().transform((v) => (typeof v === "number" && Number.isFinite(v) ? v : null));
+
+const ResultSchema = z.object({
+  item_id: z.number().int().positive(),
+  item_type: str,
+  title: str,
+  item_url: z.string(),
+  band_name: str,
+  band_url: str,
+  release_date: str,
+  track_count: num,
+  is_album_preorder: z.unknown().optional(),
+  primary_image: z.object({ image_id: num }).passthrough().nullable().optional(),
+  featured_track: z.object({
+    id: z.number().int().positive(),
+    title: str,
+    band_name: str,
+    duration: num,
+    stream_url: str,
+  }).passthrough().nullable().optional(),
+}).passthrough();
+
+const ResponseSchema = z.object({
+  results: z.array(z.unknown()),
+  result_count: num,
+  cursor: str,
+}).passthrough();
+
+const TagSchema = z.object({ norm_name: z.string().min(1), display_name: str, count: num }).passthrough();
+const LocationSchema = z.object({ id: z.union([z.string(), z.number()]), name: str, fullname: str }).passthrough();
+
+const clean = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim();
+
+function json(text: string, what: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new ScrapeError("parse_failed", `${what} response was not JSON`);
+  }
+}
+
+async function post(queue: FetchQueue, url: string, body: unknown, what: string): Promise<unknown> {
+  const text = await queue.fetchText(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  return json(text, what);
+}
+
+/** A release URL in canonical form (`?from=discover_page` dropped), or null if it isn't one. */
+function releaseUrl(u: string | null | undefined): string | null {
+  if (!u) return null;
+  try {
+    const n = normalizeBandcampUrl(u);
+    return n.kind === "artist" ? null : n.url;
+  } catch {
+    return null;
+  }
+}
+function artistUrl(u: string | null | undefined): string | null {
+  if (!u) return null;
+  try {
+    const n = normalizeBandcampUrl(u);
+    return n.kind === "artist" ? n.url : null;
+  } catch {
+    return null;
+  }
+}
+
+/** One result, or null when it has no usable release URL. */
+export function parseDiscoverResult(x: unknown): DiscoverItem | null {
+  const r = ResultSchema.safeParse(x);
+  if (!r.success) return null;
+  const d = r.data;
+  const url = releaseUrl(d.item_url);
+  if (!url) return null;
+  const f = d.featured_track;
+  const stream = f?.stream_url?.trim() ?? "";
+  const art = d.primary_image?.image_id;
+  const artist = clean(d.band_name);
+  return {
+    url,
+    title: clean(d.title) || "Untitled",
+    artist,
+    artist_url: artistUrl(d.band_url),
+    art_id: typeof art === "number" && art > 0 ? art : null,
+    item_type: url.includes("/track/") ? "track" : "album",
+    // "2026-09-04 00:00:00 UTC": just the day.
+    release_date: d.release_date?.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? null,
+    track_count: d.track_count != null && d.track_count > 0 ? Math.round(d.track_count) : null,
+    preorder: d.is_album_preorder === true,
+    // Only a URL on Bandcamp's stream CDN ever reaches the <audio> element.
+    featured: f && RADIO_CDN_URL.test(stream) ? {
+      track_id: f.id,
+      title: clean(f.title) || clean(d.title) || "Untitled",
+      artist: clean(f.band_name) || artist,
+      duration: f.duration != null && f.duration > 0 ? f.duration : null,
+      stream_url: stream,
+    } : null,
+    album_id: null,
+  };
+}
+
+/** Parse a discover_web response (exported for tests). */
+export function parseDiscoverResponse(raw: unknown): DiscoverPage {
+  const res = ResponseSchema.safeParse(raw);
+  if (!res.success) {
+    const msg = raw && typeof raw === "object" && "error_message" in raw ? String((raw as { error_message: unknown }).error_message) : res.error.issues[0]?.path.join(".");
+    throw new ScrapeError("parse_failed", `Discover response schema mismatch: ${msg}`);
+  }
+  const seen = new Set<string>();
+  const items: DiscoverItem[] = [];
+  for (const x of res.data.results) {
+    const i = parseDiscoverResult(x);
+    if (i && !seen.has(i.url)) { seen.add(i.url); items.push(i); }
+  }
+  const cursor = res.data.cursor && res.data.results.length ? res.data.cursor : null;
+  return { items, total: res.data.result_count ?? items.length, cursor };
+}
+
+/** The request body Bandcamp's own page sends for these filters. */
+export function discoverBody(p: DiscoverParams, cursor: string | null) {
+  return {
+    category_id: 0,
+    tag_norm_names: p.tags,
+    geoname_id: p.location ?? 0,
+    slice: p.slice,
+    time_facet_id: p.time != null && p.time >= 0 ? p.time : null,
+    cursor: cursor ?? "*",
+    size: DISCOVER_PAGE_SIZE,
+    // "t" makes the endpoint answer with an error (2026-10-21).
+    include_result_types: ["a", "s"],
+    followed_bands: false,
+  };
+}
+
+/** One page of discover results: one POST through the queue. */
+export async function discoverBatch(queue: FetchQueue, p: DiscoverParams, cursor: string | null = null): Promise<DiscoverPage> {
+  return parseDiscoverResponse(await post(queue, DISCOVER_ENDPOINT, discoverBody(p, cursor), "Discover"));
+}
+
+/** Bandcamp's tag autocomplete. */
+export async function tagSuggestions(queue: FetchQueue, prefix: string): Promise<DiscoverTag[]> {
+  const raw = await post(queue, TAG_SEARCH_ENDPOINT, { prefix }, "Tag search");
+  const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" && Array.isArray((raw as { results?: unknown }).results) ? (raw as { results: unknown[] }).results : null;
+  if (!list) throw new ScrapeError("parse_failed", "Tag search response had no list");
+  const out: DiscoverTag[] = [];
+  for (const x of list) {
+    const r = TagSchema.safeParse(x);
+    if (r.success) out.push({ norm_name: r.data.norm_name, display_name: clean(r.data.display_name) || r.data.norm_name, count: r.data.count ?? 0 });
+  }
+  return out;
+}
+
+/** Bandcamp's place search (geonames ids, as the location filter takes them). */
+export async function locationSuggestions(queue: FetchQueue, q: string): Promise<DiscoverLocation[]> {
+  const raw = await post(queue, LOCATION_SEARCH_ENDPOINT, { q, n: 5, geocoder_fallback: false }, "Location search");
+  const list = raw && typeof raw === "object" && Array.isArray((raw as { results?: unknown }).results) ? (raw as { results: unknown[] }).results : [];
+  const out: DiscoverLocation[] = [];
+  for (const x of list) {
+    const r = LocationSchema.safeParse(x);
+    if (!r.success) continue;
+    const id = Number(r.data.id);
+    if (!Number.isInteger(id) || id <= 0) continue;
+    out.push({ id, label: clean(r.data.fullname) || clean(r.data.name) || String(id) });
+  }
+  return out;
+}
+
+const SLICE_SLUGS = new Set<string>(DISCOVER_SLICES.map((s) => s.slug));
+/** A tag as Bandcamp's norm_name has it: lowercase words joined by dashes. */
+const normTag = (t: string) => t.trim().toLowerCase().replace(/\s+/g, "-");
+
+/** A `t=` value (an id or a slug) as a time facet id; null for the default or anything unknown. */
+function timeOf(v: string | null): number | null {
+  if (!v) return null;
+  const t = DISCOVER_TIMES.find((x) => x.slug === v) ?? (/^-?\d+$/.test(v) ? DISCOVER_TIMES.find((x) => x.id === Number(v)) : undefined);
+  return t && t.id >= 0 ? t.id : null;
+}
+
+/**
+ * Filters from query parameters: `tags=a,b`, `s=<slice>`, `t=<time id or slug>`, `loc=<geoname id>`
+ * (the same names Bandcamp's links use). `extraTags` come first (a discover link's path).
+ */
+export function discoverParamsFromQuery(q: URLSearchParams, extraTags: string[] = []): DiscoverParams {
+  const tags: string[] = [];
+  for (const t of [...extraTags, ...(q.get("tags") ?? "").split(",")]) {
+    const n = normTag(t);
+    if (n && !tags.includes(n) && tags.length < DISCOVER_MAX_TAGS) tags.push(n);
+  }
+  const s = q.get("s") ?? "";
+  const loc = Number(q.get("loc"));
+  return {
+    tags,
+    slice: SLICE_SLUGS.has(s) ? (s as DiscoverSlice) : "top",
+    time: timeOf(q.get("t")),
+    location: Number.isInteger(loc) && loc > 0 ? loc : null,
+  };
+}
+
+/** The app's own /discover query for these filters (`s` always set, so it is never empty). */
+export function discoverQuery(p: DiscoverParams): string {
+  const q = new URLSearchParams();
+  if (p.tags.length) q.set("tags", p.tags.join(","));
+  q.set("s", p.slice);
+  if (p.time != null) q.set("t", String(p.time));
+  if (p.location) q.set("loc", String(p.location));
+  return q.toString();
+}
+
+/**
+ * A bandcamp.com/discover link's filters, or null if it isn't one. The path is
+ * /discover/<tag+tag…>[/<category>]; the category (vinyl, cassette…) is not a filter here.
+ */
+export function parseDiscoverUrl(input: string): DiscoverParams | null {
+  let u: URL;
+  try {
+    const trimmed = input.trim();
+    u = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
+  } catch {
+    return null;
+  }
+  const host = u.hostname.toLowerCase().replace(/\.$/, "");
+  if (host !== "bandcamp.com" && host !== "www.bandcamp.com") return null;
+  if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+  const parts = u.pathname.split("/").filter(Boolean);
+  if (parts[0] !== "discover") return null;
+  const first = parts[1] && parts[1] !== "all" ? parts[1] : "";
+  const pathTags = first.split(/[+\s]+/).map((t) => { try { return decodeURIComponent(t); } catch { return t; } });
+  return discoverParamsFromQuery(u.searchParams, pathTags);
+}
+
+/** The same filters on bandcamp.com (Open on Bandcamp). */
+export function discoverWebUrl(p: DiscoverParams): string {
+  const u = new URL(`https://bandcamp.com/discover${p.tags.length ? `/${p.tags.map(encodeURIComponent).join("+")}` : ""}`);
+  if (p.slice !== "top") u.searchParams.set("s", p.slice);
+  const t = DISCOVER_TIMES.find((x) => x.id === p.time);
+  if (t && t.id >= 0) u.searchParams.set("t", t.slug);
+  if (p.location) u.searchParams.set("loc", String(p.location));
+  return u.toString();
+}

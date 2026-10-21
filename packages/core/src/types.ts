@@ -175,6 +175,13 @@ export interface QueueTrack extends Track {
    * to a playlist.
    */
   radio?: QueueRadio;
+  /**
+   * Set for a Discover preview (#104, see services/discover.ts): an album's featured track
+   * played without importing it. `id` and `album_id` are then -(1e10 + Bandcamp track id),
+   * so it never matches a library track or a radio episode and is never counted or saved
+   * to a playlist.
+   */
+  preview?: QueuePreview;
 }
 
 export interface PlayState {
@@ -357,4 +364,71 @@ export interface QueueRadio {
   show_id: number;
   image_id: number | null;
   program: string;
+}
+
+/** What a queue entry carries when it is a Discover preview rather than a library track. */
+export interface QueuePreview {
+  /** The release on Bandcamp (canonical album or track URL), for Add and Open on Bandcamp. */
+  item_url: string;
+  /** Bandcamp's id of the featured track. */
+  track_id: number;
+  /** The CDN URL discover gave (expires ~24 h later; core refreshes it). */
+  stream_url: string;
+}
+
+/** Bandcamp discover's sort: best-selling, new arrivals, surprise me. */
+export type DiscoverSlice = "top" | "new" | "rand";
+
+/** The discover filters (#104). */
+export interface DiscoverParams {
+  /** Bandcamp tag norm names (e.g. "electronic", "glitch-hop"). */
+  tags: string[];
+  slice: DiscoverSlice;
+  /** Bandcamp's time facet id (0 = today, 1 = this week, 2.. = n weeks ago), null for the default. */
+  time: number | null;
+  /** A geonames id, null for anywhere. */
+  location: number | null;
+}
+
+/** One release in Bandcamp discover's results. */
+export interface DiscoverItem {
+  /** Canonical album or track URL (no ?from=). */
+  url: string;
+  title: string;
+  artist: string;
+  /** The artist's or label's /music page, for Browse. */
+  artist_url: string | null;
+  art_id: number | null;
+  item_type: ItemType;
+  /** YYYY-MM-DD. */
+  release_date: string | null;
+  track_count: number | null;
+  preorder: boolean;
+  featured: { track_id: number; title: string; artist: string; duration: number | null; stream_url: string } | null;
+  /** Library album id when already imported. */
+  album_id: number | null;
+}
+
+export interface DiscoverPage {
+  items: DiscoverItem[];
+  /** How many releases match on Bandcamp. */
+  total: number;
+  /** For the next page, null at the end. */
+  cursor: string | null;
+}
+
+export interface DiscoverTag {
+  norm_name: string;
+  display_name: string;
+  count: number;
+}
+
+export interface DiscoverLocation {
+  id: number;
+  label: string;
+}
+
+/** The last Discover setup (settings.key='discover_last'). */
+export interface DiscoverSetup extends DiscoverParams {
+  location_label: string | null;
 }
