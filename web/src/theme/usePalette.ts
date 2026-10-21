@@ -64,10 +64,11 @@ async function onArtChange(key: ArtKey | null) {
   let swatches: Awaited<ReturnType<Awaited<ReturnType<typeof getCore>>["getArtSwatches"]>> = null;
   try {
     const core = await getCore();
-    [palette, swatches] = await Promise.all([
-      "artId" in key ? core.getArtPalette(key.artId).catch(() => null) : Promise.resolve(null),
-      core.getArtSwatches(key).catch(() => null),
-    ]);
+    // Swatches first: a miss fetches the image once and fills the palette cache too, so the
+    // palette call that follows is a cache hit (one small image per track change, never two).
+    swatches = await core.getArtSwatches(key).catch(() => null);
+    if (mySeq !== seq) return;
+    palette = "artId" in key ? await core.getArtPalette(key.artId).catch(() => null) : null;
   } catch {
     palette = null; swatches = null;
   }

@@ -83,7 +83,7 @@ export class BackdropEngine {
     this.canvas = canvas;
     this.glOk = true;
     if (canvas) {
-      this.gl = this.deps.createGl(canvas, { onLost: () => this.setGlOk(false), onRestored: () => this.setGlOk(true) });
+      this.gl = this.deps.createGl(canvas, { onLost: () => this.setGlOk(false), onRestored: () => this.setGlOk(true), onFailed: () => this.setGlOk(false) });
       if (!this.gl) this.glOk = false;
       else { this.gl.setStyle(this.input.style); this.gl.resize(this.size[0], this.size[1]); }
     }
@@ -191,8 +191,8 @@ export class BackdropEngine {
       seed: fading && this.fadeStart !== null ? this.seedA + (this.seedB - this.seedA) * fadeMix(this.fadeStart, now) : this.seedA,
       dark: i.dark,
     };
-    this.gl.render(u);
-    this.frames++;
+    // Only a frame that reached the canvas counts (a lost context or a failed program draws nothing).
+    if (this.gl.render(u)) this.frames++;
     this.dirty = false;
   }
 }

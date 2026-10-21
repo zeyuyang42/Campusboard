@@ -59,6 +59,14 @@ describe("boostSwatches", () => {
     expect(hueDiff(b.swatches[0].h, most.h)).toBeLessThan(10);
   });
 
+  it("a grey cluster in a colourful cover borrows the dominant chromatic hue", () => {
+    const withGrey: RawSwatch[] = [{ hex: "#c8321e", weight: 0.5 }, { hex: "#303030", weight: 0.3 }, { hex: "#e8e8e8", weight: 0.2 }];
+    const b = boostSwatches(withGrey, { dark: true });
+    expect(b.neutral).toBe(false);
+    const red = o("#c8321e").h;
+    for (const s of b.swatches) expect(hueDiff(s.h, red)).toBeLessThan(8);
+  });
+
   it("drops clusters under the weight floor, keeps at most six, orders by weight and normalises weights", () => {
     const many: RawSwatch[] = Array.from({ length: 9 }, (_, i) => ({ hex: `#${(i * 28).toString(16).padStart(2, "0")}4a9e`, weight: i === 0 ? 0.01 : 0.11 }));
     const b = boostSwatches(many, { dark: true });

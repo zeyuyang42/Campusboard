@@ -53,9 +53,13 @@ export function boostSwatches(raw: readonly RawSwatch[], opts: { dark: boolean }
     const band = opts.dark ? NEUTRAL_L_DARK : NEUTRAL_L_LIGHT;
     swatches = kept.map((s, i) => ({ ...finish(spread(rank[i], kept.length, band), NEUTRAL_C, h), weight: s.weight / total }));
   } else {
+    // A grey cluster in a colourful cover (a black border, white type) has no hue worth
+    // boosting: it borrows the dominant chromatic one rather than landing on a random tint.
+    const dominant = kept.reduce((a, b) => (b.o.C > a.o.C ? b : a)).o.h;
     swatches = kept.map((s, i) => {
       const C = Math.min(CHROMA_CAP, Math.max(CHROMA_FLOOR, s.o.C * CHROMA_GAIN));
-      return { ...finish(spread(rank[i], kept.length, VIVID_L), C, s.o.h), weight: s.weight / total };
+      const h = s.o.C < NEUTRAL_MEAN_C ? dominant : s.o.h;
+      return { ...finish(spread(rank[i], kept.length, VIVID_L), C, h), weight: s.weight / total };
     });
   }
   return { swatches, neutral };

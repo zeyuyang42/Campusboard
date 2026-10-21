@@ -22,11 +22,13 @@ export interface GlUniforms {
 export interface GlLike {
   setStyle(style: Backdrop["style"]): void;
   resize(width: number, height: number): void;
-  render(u: GlUniforms): void;
+  /** True when a frame was drawn; false when nothing reached the canvas (lost context, no program). */
+  render(u: GlUniforms): boolean;
   dispose(): void;
 }
 
-export interface GlHooks { onLost(): void; onRestored(): void }
+/** onFailed: a program would not compile or link, so this canvas cannot be drawn (CSS fallback). */
+export interface GlHooks { onLost(): void; onRestored(): void; onFailed(): void }
 export type GlFactory = (canvas: HTMLCanvasElement, hooks: GlHooks) => GlLike | null;
 
 interface Program { program: WebGLProgram; loc: Record<string, WebGLUniformLocation | null> }
@@ -119,26 +121,41 @@ export const createGl: GlFactory = (canvas, hooks) => {
   canvas.addEventListener("webglcontextlost", onLost);
   canvas.addEventListener("webglcontextrestored", onRestored);
 
+  // A program that fails to compile or link is reported once, so the engine falls back to the
+  // CSS wash instead of leaving an undrawn (black, alpha: false) canvas on screen.
+  const failed = new Set<string>();
   const current = (): Program | null => {
     let p = programs.get(style);
-    if (!p) {
+    if (!p && !failed.has(style)) {
       p = link(ctx, FRAGMENT[style]) ?? undefined;
       if (p) programs.set(style, p);
+      else if (!ctx.isContextLost()) { failed.add(style); hooks.onFailed(); }
     }
     return p ?? null;
   };
+  // Compile the first style eagerly: a webview whose GLSL support is broken is found now.
+  const first = link(ctx, FRAGMENT[style]);
+  if (!first) {
+    canvas.removeEventListener("webglcontextlost", onLost);
+    canvas.removeEventListener("webglcontextrestored", onRestored);
+    return null;
+  }
+  programs.set(style, first);
 
   return {
-    setStyle(s) { style = s; },
+    setStyle(s) {
+      style = s;
+      // The new style compiles on the next frame; a failure there reports through onFailed.
+    },
     resize(width, height) {
       if (canvas.width !== width) canvas.width = width;
       if (canvas.height !== height) canvas.height = height;
       ctx.viewport(0, 0, width, height);
     },
     render(u) {
-      if (lost) return;
+      if (lost) return false;
       const p = current();
-      if (!p) return;
+      if (!p) return false;
       ctx.useProgram(p.program);
       ctx.uniform1f(p.loc.u_time, u.time);
       ctx.uniform2f(p.loc.u_res, canvas.width, canvas.height);
@@ -152,6 +169,7 @@ export const createGl: GlFactory = (canvas, hooks) => {
       ctx.uniform1f(p.loc.u_seed, u.seed);
       ctx.uniform1f(p.loc.u_dark, u.dark ? 1 : 0);
       ctx.drawArrays(ctx.TRIANGLES, 0, 3);
+      return true;
     },
     dispose() {
       canvas.removeEventListener("webglcontextlost", onLost);

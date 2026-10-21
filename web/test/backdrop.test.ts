@@ -11,9 +11,10 @@ function makeEngine() {
   let queue: (() => void)[] = [];
   const renders: GlUniforms[] = [];
   let hooks: GlHooks | null = null;
+  let draws = true;
   const gl = {
     setStyle: vi.fn(), resize: vi.fn(), dispose: vi.fn(),
-    render: vi.fn((u: GlUniforms) => { renders.push({ ...u }); }),
+    render: vi.fn((u: GlUniforms) => { renders.push({ ...u }); return draws; }),
   };
   let glAvailable = true;
   const createGl = vi.fn((_c: HTMLCanvasElement, h: GlHooks) => { hooks = h; return glAvailable ? gl : null; });
@@ -37,7 +38,7 @@ function makeEngine() {
   engine.onChange((s) => states.push(s));
   return {
     engine, gl, renders, run, canvas, states, createGl,
-    hooks: () => hooks!, setGlAvailable: (v: boolean) => { glAvailable = v; },
+    hooks: () => hooks!, setGlAvailable: (v: boolean) => { glAvailable = v; }, setDraws: (v: boolean) => { draws = v; },
     frames: () => engine.frames,
     time: () => renders.at(-1)?.time ?? 0,
   };
@@ -207,6 +208,27 @@ describe("BackdropEngine", () => {
     h.run(1000);
     expect(h.engine.state).toBe("gl-drift");
     expect(h.frames()).toBeGreaterThan(n + 25);
+  });
+
+  it("a program that fails to compile reports css (the wash shows), and undrawn frames are not counted", () => {
+    const h = makeEngine();
+    h.engine.setInput({ ...morph, status: "playing" });
+    h.engine.attach(h.canvas);
+    h.engine.setSwatches(pal("#ff0000"), 1);
+    h.run(500);
+    const n = h.frames();
+    expect(n).toBeGreaterThan(10);
+    // A style whose shader does not compile: gl.render draws nothing and the GL layer reports it.
+    h.setDraws(false);
+    h.engine.setInput({ style: "lava" });
+    h.run(100);
+    expect(h.frames()).toBe(n);
+    h.hooks().onFailed();
+    h.run(100);
+    expect(h.engine.state).toBe("css");
+    expect(h.states.at(-1)).toBe("css");
+    h.run(1000);
+    expect(h.frames()).toBe(n);
   });
 
   it("no WebGL at all is the css state; another mode is off; detaching stops everything", () => {

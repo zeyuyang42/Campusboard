@@ -44,6 +44,10 @@ html.is-tauri.is-fullscreen { --titlebar: 8px; }
 @media (prefers-reduced-motion: reduce) {
   :root { transition: none; }
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  /* Infinite alternating animations would flip every frame at 0.01ms: stop them outright. */
+  .eq, .eq::before, .eq::after,
+  :root:not([data-backdrop="conservative"]) .ambient .wash.drift::before,
+  :root:not([data-backdrop="conservative"]) .ambient .wash.drift::after { animation: none !important; }
 }
 
 * { box-sizing: border-box; }
