@@ -6,7 +6,7 @@ import {
   previewQueueTrack, type DiscoverItem, type DiscoverParams, type DiscoverSetup, type QueueTrack,
 } from "@bc/core";
 import { getCore } from "../api/core";
-import { markDiscoverInLibrary, useDiscover, useDiscoverLocations, useDiscoverTags, useImport, useInvalidateLibrary, useJob } from "../api/queries";
+import { markDiscoverInLibrary, useAddRelease, useDiscover, useDiscoverLocations, useDiscoverTags } from "../api/queries";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePlayer } from "../player/store";
 import { ArtImage } from "../components/ArtImage";
@@ -139,28 +139,16 @@ function DiscoverCard({ item }: { item: DiscoverItem }) {
   const trackId = item.featured?.track_id ?? null;
   const current = usePlayer((s) => trackId != null && s.queue[s.index]?.preview?.track_id === trackId);
   const playing = usePlayer((s) => current && (s.wantsPlay || s.status === "playing"));
-  const imp = useImport();
-  const [jobId, setJobId] = useState<number | null>(null);
-  const { data: job } = useJob(jobId);
-  const invalidate = useInvalidateLibrary();
   const qc = useQueryClient();
-  const finished = job?.status === "done" || job?.status === "failed";
-  const imported = job?.status === "done" ? job.items?.find((x) => x.album_id)?.album_id ?? null : null;
-  useEffect(() => {
-    if (!finished) return;
-    invalidate();
-    // The cached pages learn it too (no request), so coming back shows "In library".
-    if (imported) markDiscoverInLibrary(qc, item.url, imported);
-  }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
-  const albumId = item.album_id ?? imported;
-  const busy = imp.isPending || (!!job && !finished);
+  // The cached pages learn of the import too (no request), so coming back shows "In library".
+  const { add, job, busy, importedAlbumId } = useAddRelease(item.url, (_job, imported) => { if (imported) markDiscoverInLibrary(qc, item.url, imported); });
+  const albumId = item.album_id ?? importedAlbumId;
   const play = () => {
     const p = usePlayer.getState();
     if (current) { p.toggle(); return; }
     const t = previewQueueTrack(item);
     if (t) p.playTracks([t]);
   };
-  const add = async () => { const j = await imp.mutateAsync({ url: item.url }); setJobId(j.id); };
   const label = item.featured ? `${playing ? "Pause" : "Play"} “${item.featured.title}”` : "";
   return (
     <div className={`card discover-card ${current ? "current" : ""}`}>

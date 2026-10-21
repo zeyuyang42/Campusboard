@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { BrowseItem } from "@bc/core";
 import { getCore } from "../api/core";
-import { useImport, useJob, useInvalidateLibrary } from "../api/queries";
+import { useAddRelease } from "../api/queries";
 import { ArtImage } from "../components/ArtImage";
 import { ExternalLink } from "../components/ExternalLink";
 import { ExternalIcon } from "../components/Icons";
@@ -18,15 +18,10 @@ export function BrowsePage() {
   const url = params.get("url") ?? "";
   const nav = useNavigate();
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ["browse", url], queryFn: async () => (await getCore()).browse(url), enabled: !!url, staleTime: 5 * 60_000 });
-  const imp = useImport();
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [jobId, setJobId] = useState<number | null>(null);
-  const { data: job } = useJob(jobId);
-  const invalidate = useInvalidateLibrary();
   const [filter, setFilter] = useState("");
-
-  const jobDone = job?.status === "done" || job?.status === "failed";
-  useEffect(() => { if (jobDone) { invalidate(); void refetch(); setSelected(new Set()); } }, [jobDone]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Import all queues the page's URL; Import selected follows a selection job started below.
+  const { add: importAll, track, job, busy } = useAddRelease(url, () => { void refetch(); setSelected(new Set()); });
 
   const items = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -38,11 +33,7 @@ export function BrowsePage() {
 
   const importSelected = async () => {
     const j = await (await getCore()).importSelection({ urls: [...selected], label: url });
-    setJobId(j.id);
-  };
-  const importAll = async () => {
-    const j = await imp.mutateAsync({ url });
-    setJobId(j.id);
+    track(j.id);
   };
 
   if (!url) return <div className="empty">Open an artist from Search, or paste an artist URL on the Import page.</div>;
@@ -50,7 +41,6 @@ export function BrowsePage() {
   if (isLoading || !data) return <div className="empty">Loading releases from Bandcamp…</div>;
 
   const inLibrary = data.items.filter((i) => i.album_id).length;
-  const busy = imp.isPending || (!!job && !jobDone);
   return (
     <>
       <div className="page-title">

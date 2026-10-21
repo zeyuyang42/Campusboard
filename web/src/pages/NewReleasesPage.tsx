@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import type { NewRelease } from "@bc/core";
-import { useImport, useJob, useNewReleases, useReleaseCheckStatus, useReleaseMutations } from "../api/queries";
+import { useAddRelease, useNewReleases, useReleaseCheckStatus, useReleaseMutations } from "../api/queries";
 import { ArtImage } from "../components/ArtImage";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { ExternalLink } from "../components/ExternalLink";
@@ -42,15 +42,11 @@ export function NewReleasesPage() {
 }
 
 function ReleaseCard({ release, onDismiss }: { release: NewRelease; onDismiss: () => void }) {
-  const imp = useImport();
-  const [jobId, setJobId] = useState<number | null>(null);
-  const { data: job } = useJob(jobId);
+  const { add, busy: importing, failed } = useAddRelease(release.url);
   const [err, setErr] = useState<string | null>(null);
-  const importing = imp.isPending || (!!job && (job.status === "pending" || job.status === "queued" || job.status === "running"));
-  const failed = job?.status === "failed" ? (job.items?.[0]?.error ?? job.error ?? "Import failed") : null;
   const start = async () => {
     setErr(null);
-    try { setJobId((await imp.mutateAsync({ url: release.url })).id); } catch (e) { setErr(friendlyError(e)); }
+    try { await add(); } catch (e) { setErr(friendlyError(e)); }
   };
   return (
     <div className="card release-card">

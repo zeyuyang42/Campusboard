@@ -1,24 +1,16 @@
-import type { QueryClient } from "@tanstack/react-query";
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { createCore, type Core, type OfflineFiles } from "@bc/core";
 import { openDb } from "./tauriDb";
 import { memoryOfflineFiles, tauriOfflineFiles } from "./offlineFiles";
+import { invalidateGroup, invalidateQueries } from "./invalidate";
+
+// The query-client binding lives in invalidate.ts; re-exported here for the player store.
+export { bindQueryClient, invalidateQueries } from "./invalidate";
 
 const BROWSER_MODE = import.meta.env.VITE_BROWSER_MODE === "1";
 const SELFTEST = import.meta.env.VITE_SELFTEST === "1";
 
 let corePromise: Promise<Core> | null = null;
-let qc: QueryClient | null = null;
-
-/** Called once at boot so job updates can invalidate queries. */
-export function bindQueryClient(client: QueryClient) {
-  qc = client;
-}
-
-/** Refetch every query whose key starts with one of `prefixes` (for code outside React). */
-export function invalidateQueries(prefixes: string[]) {
-  for (const k of prefixes) void qc?.invalidateQueries({ queryKey: [k] });
-}
 
 /** The app's single data layer: one SQLite file plus rate-limited Bandcamp fetches. */
 export function getCore(): Promise<Core> {
@@ -43,21 +35,10 @@ export function getCore(): Promise<Core> {
         db,
         fetch: fetchImpl,
         files,
-        onJobsChange: () => {
-          void qc?.invalidateQueries({ queryKey: ["jobs"] });
-          void qc?.invalidateQueries({ queryKey: ["job"] });
-          // A collection sync updates the account summary and the Purchased/Wishlist flags.
-          void qc?.invalidateQueries({ queryKey: ["account"] });
-          // An import may take a release off the New releases list; a job also pauses the checker.
-          void qc?.invalidateQueries({ queryKey: ["releases"] });
-          // An imported library's playlists and history fill in as its albums arrive.
-          for (const k of ["playlists", "playlist", "history"]) void qc?.invalidateQueries({ queryKey: [k] });
-          // A download job (#2) marks tracks as saved one by one.
-          for (const k of ["album", "offline"]) void qc?.invalidateQueries({ queryKey: [k] });
-        },
-        onReleasesChange: () => { void qc?.invalidateQueries({ queryKey: ["releases"] }); },
+        onJobsChange: () => invalidateGroup("jobs"),
+        onReleasesChange: () => invalidateQueries(["releases"]),
         // A pre-order that came out: its tracks became playable.
-        onLibraryChange: () => { for (const k of ["albums", "album", "artist", "tracks", "playlist", "history"]) void qc?.invalidateQueries({ queryKey: [k] }); },
+        onLibraryChange: () => invalidateGroup("libraryTracks"),
       });
       // Background new-release checks and collection refresh: the first look a few minutes after
       // launch. The selftest runs its own single checks instead, so its requests stay predictable.

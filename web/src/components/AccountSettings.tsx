@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { CookieStatus } from "@bc/core";
-import { useAccount, useAccountMutations, useCollectionRefresh, useCollectionRefreshMutation, useJobs } from "../api/queries";
+import { isJobActive, useAccount, useAccountMutations, useCollectionRefresh, useCollectionRefreshMutation, useJobs } from "../api/queries";
 import { friendlyError } from "../lib/errors";
 import { formatDateTime, plural } from "../lib/format";
 import { ConfirmButton } from "./ConfirmButton";
@@ -25,7 +25,7 @@ export function AccountSettings() {
   useEffect(() => { setUsernameText(account?.username ?? ""); }, [account?.username]);
 
   const job = jobs?.find((j) => j.kind === "collection");
-  const busy = setUsername.isPending || setCookie.isPending || sync.isPending || (!!job && (job.status === "pending" || job.status === "queued" || job.status === "running"));
+  const busy = setUsername.isPending || setCookie.isPending || sync.isPending || isJobActive(job);
 
   const syncNow = async () => {
     setError(null);

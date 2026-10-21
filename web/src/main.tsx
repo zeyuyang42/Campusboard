@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./App";
 import { initPlayer } from "./player/init";
-import { bindQueryClient } from "./api/core";
+import { bindQueryClient } from "./api/invalidate";
 import { initTheme } from "./theme/store";
 import { initPalette } from "./theme/usePalette";
 import { isTauri } from "./lib/env";
