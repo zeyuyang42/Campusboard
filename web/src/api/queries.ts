@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCore } from "./core";
-import { repos, type HistoryCursor, type Job, type PlayState, type StatsPeriod } from "@bc/core";
+import { repos, type DiscoverPage, type DiscoverParams, type HistoryCursor, type Job, type PlayState, type StatsPeriod } from "@bc/core";
 
 export const keys = {
   albums: (sort: string, filter = "all", q = "", tag = "") => ["albums", sort, filter, q, tag] as const,
@@ -37,6 +37,11 @@ export const keys = {
   // Under "albums" so an import refreshes which featured releases are in the library.
   radioShow: (id: number) => ["albums", "radio-show", id] as const,
   offline: ["offline"] as const,
+  // Not under "albums": an import must not refetch every loaded page (one POST each). A card
+  // marks its own album from its import job instead.
+  discover: (p: DiscoverParams) => ["discover", p.tags.join(","), p.slice, p.time, p.location] as const,
+  discoverTags: (prefix: string) => ["discover", "tags", prefix] as const,
+  discoverLocations: (q: string) => ["discover", "locations", q] as const,
 };
 
 const core = getCore;
@@ -272,3 +277,32 @@ export const useRadioShow = (id: number | null, load = true) =>
 
 /** Playlist entries, plays and preferences from an imported library still waiting for their albums. */
 export const usePendingImports = () => useQuery({ queryKey: keys.pendingImports, queryFn: async () => (await core()).pendingImports() });
+
+/**
+ * Bandcamp discover (#104), 60 releases a page; the next page only on fetchNextPage ("Show
+ * more"). Never stale, so it is never refetched on its own (a remount would refetch every
+ * loaded page); it is dropped gcTime (5 min) after the page leaves the screen.
+ */
+export const useDiscover = (p: DiscoverParams) =>
+  useInfiniteQuery({
+    queryKey: keys.discover(p),
+    queryFn: async ({ pageParam }) => (await core()).discover(p, pageParam),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.cursor,
+    staleTime: Infinity,
+    refetchOnReconnect: false,
+    retry: false,
+  });
+/** Mark `url` as library album `albumId` in every cached discover page (after its import). No request. */
+export function markDiscoverInLibrary(qc: ReturnType<typeof useQueryClient>, url: string, albumId: number) {
+  qc.setQueriesData<{ pages: DiscoverPage[]; pageParams: unknown[] }>({ queryKey: ["discover"] }, (d) =>
+    d && Array.isArray(d.pages)
+      ? { ...d, pages: d.pages.map((p) => (p.items.some((i) => i.url === url) ? { ...p, items: p.items.map((i) => (i.url === url ? { ...i, album_id: albumId } : i)) } : p)) }
+      : d);
+}
+/** Bandcamp's tag autocomplete for a (debounced) prefix of 2+ characters. */
+export const useDiscoverTags = (prefix: string) =>
+  useQuery({ queryKey: keys.discoverTags(prefix), queryFn: async () => (await core()).discoverTags(prefix), enabled: prefix.length >= 2, staleTime: 60 * 60_000, retry: false });
+/** Bandcamp's place search for a (debounced) query of 3+ characters. */
+export const useDiscoverLocations = (q: string) =>
+  useQuery({ queryKey: keys.discoverLocations(q), queryFn: async () => (await core()).discoverLocations(q), enabled: q.length >= 3, staleTime: 60 * 60_000, retry: false });

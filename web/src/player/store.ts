@@ -2,7 +2,7 @@ import { create } from "zustand";
 import {
   audioEventPatch, PlayCounter, swappingAfter, positionToGain, stepVolume, toggleAction, toggleMute,
   crossfadeGains, elementRole, fadeProgress, fadeSeconds, gaplessDelayMs, parsePlaybackSettings, preloadDue, preloadStale, routeElementEvent,
-  standbyUsable, transitionAfter, isQueueRadio, transitionKind, transitionPoint, upcomingIndex,
+  standbyUsable, transitionAfter, isQueueRadio, isQueuePreview, transitionKind, transitionPoint, upcomingIndex,
   sleepGain, sleepScale, sleepSecondsLeft, sleepStopsAtEnd, sleepTimerFor, type SleepChoice, type SleepTimer,
   resumeEligible, resumeLookupWanted, resumePoint,
   CROSSFADE_MIN_SEC, DEFAULT_PLAYBACK, GAPLESS_ARM_SEC, GAPLESS_START_LEAD_MS, PLAYBACK_SETTING_KEY, STANDBY_PRIME_MS, TRANSITION_IDLE,
@@ -163,7 +163,7 @@ function startPlayback(track: QueueTrack) {
 /** Seconds listened in the current playback (read by the selftest). */
 export const listenedSeconds = () => plays.listenedSeconds;
 function recordPlay(p: CountedPlay) {
-  // A radio episode (negative id) is not a library track: history stays about the library.
+  // A radio episode or a Discover preview (negative id) is not a library track: history stays about the library.
   if (p.trackId <= 0) return;
   void getCore()
     .then((c) => c.recordPlay(p.trackId, p.seconds))
@@ -242,12 +242,14 @@ const isNetworkError = (e: unknown) => (e as { code?: unknown; detail?: { networ
 /**
  * What the element plays for a queue entry: a library track's offline copy when it has one
  * (#2; no request at all), else a fresh stream URL; a radio episode always streams (#44, no
- * offline copies of radio). `force` (the retry after a media error) skips the copy, so a
- * damaged file falls back to the stream.
+ * offline copies of radio), and so does a Discover preview (#104). `force` (the retry after a
+ * media error) skips the copy, so a damaged file falls back to the stream, and gets a preview
+ * a new URL.
  */
 async function streamUrlFor(track: QueueTrack, force = false): Promise<{ url: string; expires_at: number }> {
   const core = await getCore();
   if (track.radio) return core.radioStreamUrl(track.radio.show_id, force);
+  if (track.preview) return core.previewStreamUrl(track.preview, force);
   if (!force) {
     const local = await core.localTrackUrl(track.id).catch(() => null);
     if (local) return { url: local, expires_at: Number.MAX_SAFE_INTEGER };
@@ -988,16 +990,19 @@ export const usePlayer = create<PlayerState>((set, get) => ({
     // Ignore anything that isn't a full queue entry (e.g. state written by older versions or tools).
     const curId = s.queue[s.index]?.id;
     // Older versions persisted lyrics and had no cap.
-    // A radio episode's `radio` field must have the shape radioQueueTrack gives it (#44).
-    const queue = s.queue.filter((t) => t && typeof t.id === "number" && typeof t.title === "string" && typeof t.album_id === "number" && (t.radio === undefined || isQueueRadio(t.radio))).slice(0, MAX_QUEUE).map(toQueueTrack);
+    // A radio episode's `radio` field must have the shape radioQueueTrack gives it (#44), and a
+    // Discover preview's `preview` the shape previewQueueTrack gives it (#104).
+    const queue = s.queue.filter((t) => t && typeof t.id === "number" && typeof t.title === "string" && typeof t.album_id === "number"
+      && (t.radio === undefined || isQueueRadio(t.radio)) && (t.preview === undefined || (isQueuePreview(t.preview) && t.id < 0))).slice(0, MAX_QUEUE).map(toQueueTrack);
     const index = Math.max(0, queue.findIndex((t) => t.id === curId));
     set({ queue, index, volume: s.volume, shuffle: s.shuffle, repeat: s.repeat, position: queue.length ? s.position : 0, status: queue.length ? "paused" : "idle", wantsPlay: false });
     const cur = queue[index];
     if (cur) {
       pendingSeek = { trackId: cur.id, sec: s.position };
-      // An episode's URL costs a Bandcamp request: it is resolved on the first Play (play()
-      // loads a track without a source), not at launch.
-      if (cur.radio) usePlayer.setState({ duration: cur.duration ?? 0 });
+      // An episode's URL costs a Bandcamp request, and so may a preview's (once its saved URL
+      // is near expiry): it is resolved on the first Play (play() loads a track without a
+      // source), not at launch.
+      if (cur.radio || cur.preview) usePlayer.setState({ duration: cur.duration ?? 0 });
       else load(cur);
     }
   },

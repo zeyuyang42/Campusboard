@@ -102,11 +102,19 @@ describe("routeDroppedUrl", () => {
   });
 
   it("rejects non-Bandcamp links and missing URLs without touching the job runner", async () => {
-    for (const u of ["https://bandcamp.com/discover", "https://example.com/some/page", "http://localhost:5173/album/1", null]) {
+    for (const u of ["https://bandcamp.com/radio", "https://example.com/some/page", "http://localhost:5173/album/1", null]) {
       expect(await routeDroppedUrl(u)).toEqual({ kind: "rejected", message: "Not a Bandcamp link" });
     }
     expect(core.import).not.toHaveBeenCalled();
     expect(nav).not.toHaveBeenCalled();
+  });
+
+  it("opens a bandcamp.com/discover link in Discover with the same setup (#104), never an import", async () => {
+    const r = await routeDroppedUrl("https://bandcamp.com/discover/electronic+breaks+glitch?s=new");
+    expect(r).toEqual({ kind: "discover", url: "/discover?tags=electronic%2Cbreaks%2Cglitch&s=new" });
+    expect(nav).toHaveBeenCalledWith("/discover?tags=electronic%2Cbreaks%2Cglitch&s=new");
+    expect(await routeDroppedUrl("https://bandcamp.com/discover")).toEqual({ kind: "discover", url: "/discover?s=top" });
+    expect(core.import).not.toHaveBeenCalled();
   });
 
   it("reports a failed enqueue as a note and stays put", async () => {

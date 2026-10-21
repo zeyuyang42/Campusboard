@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { normalizeBandcampUrl } from "@bc/core";
+import { discoverQuery, normalizeBandcampUrl, parseDiscoverUrl } from "@bc/core";
 import { useImport, useJobs, useInvalidateLibrary } from "../api/queries";
 import { JobProgress } from "../components/JobProgress";
 import { ChallengeNotice } from "../components/ChallengeNotice";
@@ -27,6 +27,9 @@ export function ImportPage() {
     try {
       // A single artist URL opens the browse page so you can pick releases; everything else imports directly.
       if (urls.length === 1) {
+        // A bandcamp.com/discover link opens the same setup in Discover (#104), never an import.
+        const d = parseDiscoverUrl(urls[0]);
+        if (d) { setUrl(""); nav(`/discover?${discoverQuery(d)}`); return; }
         try { if (normalizeBandcampUrl(urls[0]).kind === "artist") { nav(`/browse?url=${encodeURIComponent(urls[0])}`); return; } } catch { /* fall through to the import error */ }
       }
       for (const u of urls) await imp.mutateAsync({ url: u });
@@ -45,7 +48,7 @@ export function ImportPage() {
       </form>
       {err && <div className="notice error" style={{ marginBottom: 16 }}>{err}</div>}
       <p className="muted" style={{ marginTop: -8, marginBottom: 24 }}>
-        Album and track pages import immediately. An artist or label URL opens their releases so you can choose what to import. Paste several album URLs separated by spaces or newlines to queue them all.
+        Album and track pages import immediately. An artist or label URL opens their releases so you can choose what to import, and a Bandcamp discover link opens it in Discover. Paste several album URLs separated by spaces or newlines to queue them all.
       </p>
       {jobs && jobs.length === 0 && <div className="empty">No imports yet.</div>}
       {activeCount > 0 && <ChallengeNotice />}

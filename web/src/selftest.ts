@@ -17,7 +17,7 @@ import { storeBackgroundImage } from "./lib/files";
 import { backupLibraryDatabase, exportLibraryFile } from "./lib/libraryFile";
 import { miniBridgeInfo } from "./player/miniBridge";
 import { usePalette } from "./ui/palette";
-import { DEFAULT_THEME, MINI_EVENTS, positionToGain, RESUME_MAX_ROWS, toggleAction, type Track } from "@bc/core";
+import { DEFAULT_THEME, MINI_EVENTS, positionToGain, previewQueueTrack, RESUME_MAX_ROWS, toggleAction, type Track } from "@bc/core";
 import { FAN_ITEMS_ENDPOINT, fanPageUrl, parseFanItemsResponse, parseFanPage, repos, type FanItem } from "@bc/core";
 
 /**
@@ -972,6 +972,37 @@ async function offlineCheck(core: Core, album: AlbumDetail, s: Step) {
   return out;
 }
 
+/**
+ * Discover (#104): one discover_web POST and one tag search through the http scope, then the
+ * first featured track played (muted) as a preview: the element must be on the bcbits CDN and
+ * advance. Two Bandcamp requests plus the stream itself.
+ */
+async function discoverCheck(core: Core, s: Step) {
+  s("discover_web");
+  const page = await core.discover({ tags: ["electronic"], slice: "top", time: null, location: null });
+  s("tag search");
+  const tags = await core.discoverTags("glit");
+  const item = page.items.find((i) => i.featured);
+  const t = item ? previewQueueTrack(item) : null;
+  let play: { host: string | null; currentTime: number; paused: boolean; muted: boolean; error: number | null; storeError: string | null } | null = null;
+  if (t) {
+    s("play a preview");
+    usePlayer.getState().playTracks([t]);
+    for (let i = 0; i < 60 && activeAudio().currentTime < 1; i++) await sleep(250);
+    const el = activeAudio();
+    let host: string | null = null;
+    try { host = new URL(el.src).hostname; } catch { /* no source */ }
+    play = { host, currentTime: el.currentTime, paused: el.paused, muted: el.muted, error: el.error?.code ?? null, storeError: usePlayer.getState().error };
+    usePlayer.getState().clearQueue();
+  }
+  const ok = page.items.length > 0 && page.total > 0 && !!page.cursor && tags.some((x) => x.norm_name === "glitch")
+    && !!play && /(^|\.)bcbits\.com$/.test(play.host ?? "") && play.currentTime > 0 && play.error == null;
+  return {
+    ok, count: page.items.length, total: page.total, cursor: !!page.cursor, withFeatured: page.items.filter((i) => i.featured).length,
+    inLibrary: page.items.filter((i) => i.album_id).length, tags: tags.slice(0, 3).map((x) => x.norm_name), play,
+  };
+}
+
 const TIMEOUT = Symbol("timeout");
 
 /** `p`, or TIMEOUT after `ms` (timed in Rust too, see sleep). */
@@ -1135,6 +1166,7 @@ export async function runSelfTest() {
         location === first.url;
       return { ok, count: shows.length, cachedBefore: before?.n ?? 0, location, first: first ? { id: first.id, title: first.title, program: first.program, date: first.date, image: !!first.image_id, url: first.url } : null };
     }, 30_000);
+    out.discover = await block("discover", (s) => discoverCheck(core, s), 45_000);
     out.newReleases = await block("newReleases", () => newReleasesCheck(core, album));
     out.preorder = await block("preorder", () => preorderCheck(core, album));
     // Custom artist domain: the http scope must allow the custom host (it 303s to name.bandcamp.com),

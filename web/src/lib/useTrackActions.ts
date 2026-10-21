@@ -1,5 +1,7 @@
 import { useNavigate } from "react-router-dom";
-import { isRadioTrack, type Track } from "@bc/core";
+import { isPreviewTrack, isRadioTrack, type QueuePreview, type Track } from "@bc/core";
+import { getCore } from "../api/core";
+import { navigateTo } from "./navigation";
 import { usePlayer } from "../player/store";
 import { useMenu, type MenuContent, type MenuItem } from "../ui/menu";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -18,8 +20,10 @@ export function useTrackActions() {
   return (tracks: Track[], opts: TrackActionOptions = {}): MenuContent => {
     const playable = tracks.filter((t) => t.streamable);
     const one = tracks.length === 1 ? tracks[0] : null;
-    // A radio episode (in the queue) is not a library track: no playlist, its album is the Radio page.
-    const library = tracks.filter((t) => !isRadioTrack(t));
+    // A radio episode or a Discover preview (in the queue) is not a library track: no playlist;
+    // an episode's album is the Radio page, a preview's is on Bandcamp (Add brings it in).
+    const library = tracks.filter((t) => !isRadioTrack(t) && !isPreviewTrack(t));
+    const preview = one ? (one as Track & { preview?: QueuePreview }).preview ?? null : null;
     // Tracks that can't be streamed (not out yet, or never) get no play actions at all.
     const items: MenuItem[] = playable.length ? [
       { label: "Play", onSelect: () => player.getState().playTracks(playable) },
@@ -32,10 +36,19 @@ export function useTrackActions() {
           setTimeout(() => m.show({ x: m.x, y: m.y }, { playlistPicker: { trackIds: library.map((t) => t.id) } }), 0);
         } },
     );
-    if (one && isRadioTrack(one)) items.push({ kind: "separator" }, { label: "Go to Radio", onSelect: () => nav("/radio") });
+    if (preview) items.push({ kind: "separator" }, { label: "Add album to library", onSelect: () => void addPreviewAlbum(preview.item_url) }, { label: "Go to Discover", onSelect: () => nav("/discover") });
+    else if (one && isRadioTrack(one)) items.push({ kind: "separator" }, { label: "Go to Radio", onSelect: () => nav("/radio") });
     else if (one && !opts.onAlbumPage) items.push({ kind: "separator" }, { label: "Go to album", onSelect: () => nav(`/album/${one.album_id}`) });
     if (one?.album_url) items.push({ label: "Open on Bandcamp", onSelect: () => void openUrl(one.album_url!).catch(() => window.open(one.album_url!, "_blank")) });
     if (opts.remove) items.push({ kind: "separator" }, { label: opts.remove.label, onSelect: opts.remove.onSelect, danger: true });
     return { items };
   };
+}
+
+/** Import a previewed release; its progress shows on the Import page, as for a dropped link. */
+async function addPreviewAlbum(url: string) {
+  try {
+    await (await getCore()).import({ url });
+    navigateTo("/import");
+  } catch { /* the Import page lists failed jobs; nothing was queued otherwise */ }
 }

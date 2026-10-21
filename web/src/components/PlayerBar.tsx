@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { formatResumeAt, formatSleepLeft, sleepChoiceOf, toggleAction, type SleepChoice } from "@bc/core";
 import { usePlayer } from "../player/store";
+import { ExternalLink } from "./ExternalLink";
 import { ArtImage } from "./ArtImage";
 import { NextIcon, PauseIcon, PlayIcon, PrevIcon, QueueIcon, RepeatIcon, RepeatOneIcon, ShuffleIcon, VolumeIcon } from "./Icons";
 import { SeekBar } from "./SeekBar";
@@ -88,7 +89,9 @@ export function PlayerBar() {
               {cur.radio ? (
                 <div className="sub"><Link to="/radio">{cur.radio.program}</Link>{entry && <span title={`${entry.artist}, ${entry.title}`}>{entry.artist}, “{entry.title}”</span>}</div>
               ) : (
-                <div className="sub"><span>{cur.track_artist ?? cur.artist_name}</span><Link to={`/album/${cur.album_id}`}>{cur.album_title}</Link></div>
+                <div className="sub"><span>{cur.track_artist ?? cur.artist_name}</span>{cur.preview
+                  ? <ExternalLink href={cur.preview.item_url} title="Open on Bandcamp">{cur.album_title}</ExternalLink>
+                  : <Link to={`/album/${cur.album_id}`}>{cur.album_title}</Link>}</div>
               )}
             </div>
           </>

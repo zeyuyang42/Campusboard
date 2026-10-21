@@ -526,3 +526,30 @@ details.about-wrap summary { cursor: pointer; color: var(--text-muted); margin-t
 .palette-detail { color: var(--text-muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .palette-empty { padding: 14px 16px; color: var(--text-muted); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- discover (#104) ---------- */
+.discover-filters { margin-bottom: 8px; max-width: 960px; }
+.discover-filters .toolbar { margin-bottom: 18px; }
+.discover-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 5px 6px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-raised); }
+.discover-tags:focus-within { border-color: var(--accent); }
+.discover-tags .suggest-wrap { flex: 1; min-width: 180px; }
+.discover-tags input { width: 100%; border: 0; background: transparent; padding: 4px 6px; }
+.tag-chip { padding: 2px 2px 2px 10px; gap: 2px; font-size: 13px; background: var(--surface-hover); }
+.tag-chip .icon-btn { width: 22px; height: 22px; }
+.location-chip { background: var(--surface-raised); padding: 4px 2px 4px 10px; }
+.location-input { width: 200px; }
+.suggest-wrap { position: relative; }
+.suggest { position: absolute; left: 0; top: calc(100% + 4px); z-index: 30; min-width: 240px; max-width: 360px; list-style: none; margin: 0; padding: 4px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--radius-sm); box-shadow: 0 8px 24px rgba(0,0,0,.28); }
+.suggest li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 8px; border-radius: 4px; font-size: 13.5px; }
+.suggest li.on { background: var(--surface-hover); }
+.suggest li .muted { font-variant-numeric: tabular-nums; font-size: 12px; }
+.suggest-note { position: absolute; left: 6px; top: calc(100% + 6px); font-size: 12px; }
+.discover-hint { font-size: 13px; }
+.discover-card .art.playable { cursor: pointer; }
+html.is-tauri .discover-card .art.playable { cursor: default; }
+.discover-card .play.shown { opacity: 1; }
+.discover-card .title { display: block; color: inherit; }
+.discover-card .title:hover, .discover-card .sub a:hover { text-decoration: underline; }
+.discover-card.current .title { color: var(--accent); }
+.discover-card .sub a { color: inherit; }
+.discover-more { display: flex; justify-content: center; margin: 28px 0 8px; }

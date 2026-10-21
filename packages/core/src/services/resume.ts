@@ -10,7 +10,7 @@ export const RESUME_EDGE_SEC = 30;
 /** The table keeps the most recently saved this many points. */
 export const RESUME_MAX_ROWS = 200;
 
-interface Entry { id: number; radio?: unknown; duration?: number | null }
+interface Entry { id: number; radio?: unknown; preview?: unknown; duration?: number | null }
 
 const longer = (d: number | null | undefined) => d != null && Number.isFinite(d) && d > RESUME_MIN_TRACK_SEC;
 const known = (d: number | null | undefined) => d != null && Number.isFinite(d) && d > 0;
@@ -18,9 +18,11 @@ const known = (d: number | null | undefined) => d != null && Number.isFinite(d) 
 /**
  * The one rule for reading and saving a point: a Radio episode always, a library track when
  * either its queue entry's duration or the element's (when known) is over RESUME_MIN_TRACK_SEC.
+ * Never a Discover preview (#104): it isn't in the library, and its points would take rows of
+ * the RESUME_MAX_ROWS cap from library tracks and episodes.
  */
 export function resumeEligible(t: Entry | null | undefined, duration?: number | null): boolean {
-  if (!t) return false;
+  if (!t || t.preview) return false;
   return isRadioTrack(t) || longer(t.duration) || longer(duration);
 }
 
@@ -29,7 +31,7 @@ export function resumeEligible(t: Entry | null | undefined, duration?: number | 
  * is known yet (a null queue duration may still be a long track whose point was saved).
  */
 export function resumeLookupWanted(t: Entry | null | undefined, duration?: number | null): boolean {
-  if (!t) return false;
+  if (!t || t.preview) return false;
   return resumeEligible(t, duration) || (!known(t.duration) && !known(duration));
 }
 

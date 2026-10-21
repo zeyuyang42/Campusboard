@@ -22,6 +22,8 @@ import { parseMusicPage } from "./scrape/parseMusic.js";
 import { normalizeBandcampUrl } from "./scrape/url.js";
 import { getFreshStreamUrl, refreshAlbum } from "./services/streamService.js";
 import { RadioService } from "./services/radio.js";
+import { PreviewService } from "./services/discover.js";
+import { discoverBatch, locationSuggestions, tagSuggestions } from "./scrape/discover.js";
 import { OfflineService, type OfflineFiles } from "./services/offline.js";
 import { vacuumOrphans } from "./services/importService.js";
 import { prunePageCache } from "./services/pageCache.js";
@@ -37,7 +39,7 @@ import {
   backupDatabase, exportLibrary, importLibrary, parseLibraryExport, previewLibraryImport,
   type LibraryExport, type LibraryImportOptions,
 } from "./services/libraryTransfer.js";
-import type { BrowseResult, HistoryCursor, PlayState, SearchResult, StatsPeriod } from "./types.js";
+import type { BrowseResult, DiscoverLocation, DiscoverPage, DiscoverParams, DiscoverTag, HistoryCursor, PlayState, QueuePreview, SearchResult, StatsPeriod } from "./types.js";
 
 export interface CoreDeps {
   db: Db;
@@ -72,6 +74,7 @@ export function createCore(deps: CoreDeps) {
     ...deps.releaseCheck, onChange: () => deps.onReleasesChange?.(), onAlbumRefreshed: () => deps.onLibraryChange?.(),
   });
   const radio = new RadioService(db, queue);
+  const previews = new PreviewService(db, queue);
   const refresher = new CollectionRefresher(db, gate, runner, { ...deps.collectionRefresh, onChange: () => deps.onJobsChange?.() });
   /** The full delete: queued downloads cancelled, rows (notes, plays, resume points with them), then offline files. */
   const deleteAlbumNow = async (id: number) => {
@@ -159,6 +162,31 @@ export function createCore(deps: CoreDeps) {
       // Report the canonical address (custom domain if any), not whichever one was typed.
       return { url: `${parsed.origin}/music`, band: parsed.band, items: parsed.items.map((i) => ({ ...i, album_id: byUrl.get(i.url) ?? null })) };
     },
+    /**
+     * One page of Bandcamp discover (#104) with library status: one POST through the queue,
+     * no page cache (the body is the key and stream URLs expire; the UI's query cache keeps it).
+     */
+    discover: async (params: DiscoverParams, cursor: string | null = null): Promise<DiscoverPage> => {
+      const page = await discoverBatch(queue, params, cursor);
+      const urls = [...new Set(page.items.map((i) => i.url))];
+      const rows = urls.length
+        ? await db.select<{ id: number; url: string }>(`SELECT al.id, al.url FROM albums al WHERE al.url IN (${urls.map(() => "?").join(", ")}) AND ${albumRemoval.NOT_REMOVING}`, urls)
+        : [];
+      const byUrl = new Map(rows.map((r) => [r.url, r.id]));
+      return { ...page, items: page.items.map((i) => ({ ...i, album_id: byUrl.get(i.url) ?? null })) };
+    },
+    /** Bandcamp's tag autocomplete (2+ characters). */
+    discoverTags: async (prefix: string): Promise<DiscoverTag[]> => {
+      const p = prefix.trim();
+      return p.length < 2 ? [] : tagSuggestions(queue, p);
+    },
+    /** Bandcamp's place search for the location filter (3+ characters). */
+    discoverLocations: async (q: string): Promise<DiscoverLocation[]> => {
+      const t = q.trim();
+      return t.length < 3 ? [] : locationSuggestions(queue, t);
+    },
+    /** A Discover preview's audio URL; `force` gets a new one (after a media error). */
+    previewStreamUrl: (preview: QueuePreview, force = false) => previews.streamUrl(preview, force),
     /** Sync the purchased collection and wishlist of the Bandcamp account in Settings. */
     syncCollection: () => runner.enqueueSync(),
     /** Start the background collection refresh (first look a few minutes later). Not started by createCore. */
