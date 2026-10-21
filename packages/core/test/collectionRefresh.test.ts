@@ -1,10 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { NodeDb } from "./helpers/nodeDb.js";
-import { fixture } from "./helpers.js";
-import { decodeEntities } from "../src/scrape/html.js";
+import { fanPage, fixture, jsonFixture as json, loggedInAsFan } from "./helpers.js";
 import { FetchQueue } from "../src/scrape/http.js";
 import { ChallengeGate } from "../src/scrape/challenge.js";
 import { JobRunner } from "../src/services/jobRunner.js";
@@ -19,9 +15,6 @@ import {
 } from "../src/config.js";
 import type { SyncSummary } from "../src/types.js";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const json = (name: string) => readFileSync(path.join(here, "fixtures", `${name}.json`), "utf8");
-
 const FAN = "https://bandcamp.com/examplefan";
 const COLLECTION_API = "https://bandcamp.com/api/fancollection/1/collection_items";
 const WISHLIST_API = "https://bandcamp.com/api/fancollection/1/wishlist_items";
@@ -31,17 +24,6 @@ const CUSTOM_ALBUM_SUB = "https://zoekeating.bandcamp.com/album/snowmelt-ep";
 const COOKIE = "7%09abcDEF%3D%3D%09%7B%22id%22%3A1%7D";
 const HOUR = 60 * 60 * 1000;
 const T0 = new Date("2026-10-19T08:00:00Z").getTime();
-
-type Blob = Record<string, any>;
-function fanPage(edit: (b: Blob) => void = () => {}): string {
-  const html = fixture("fan");
-  const m = html.match(/data-blob="([^"]*)"/)!;
-  const b = JSON.parse(decodeEntities(m[1])) as Blob;
-  edit(b);
-  const attr = JSON.stringify(b).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return html.replace(m[0], `data-blob="${attr}"`);
-}
-const loggedInAsFan = (b: Blob) => { b.identities.fan = { id: b.fan_data.fan_id, username: b.fan_data.username }; b.fan_data.is_own_page = true; };
 
 interface Call { url: string; at: number; cookie: string | null }
 
