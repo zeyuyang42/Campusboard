@@ -15,7 +15,7 @@ import { isTauri } from "../lib/env";
 import { setNavigator } from "../lib/navigation";
 import { useNavigate } from "react-router-dom";
 
-/** How long after the last resize event the full-screen state is read. */
+/** How long after the last resize event the full-screen state is read again. */
 const FULLSCREEN_SYNC_MS = 150;
 
 export function AppShell() {
@@ -44,7 +44,11 @@ export function AppShell() {
       const sync = async () => document.documentElement.classList.toggle("is-fullscreen", await win.isFullscreen().catch(() => false));
       await sync();
       // A live resize fires many events a second; one isFullscreen() round trip once it settles is enough.
-      const u = await win.onResized(() => { window.clearTimeout(timer); timer = window.setTimeout(() => { timer = undefined; void sync(); }, FULLSCREEN_SYNC_MS); });
+      const u = await win.onResized(() => {
+        if (timer === undefined) void sync(); // the first event of a transition is read at once
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => { timer = undefined; void sync(); }, FULLSCREEN_SYNC_MS);
+      });
       if (cancelled) u(); else unlisten = u;
     });
     return () => { cancelled = true; unlisten?.(); window.clearTimeout(timer); };

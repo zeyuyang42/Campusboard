@@ -6,7 +6,8 @@ import { useMenu } from "../ui/menu";
 import { friendlyError } from "../lib/errors";
 import { ConfirmButton } from "./ConfirmButton";
 import { PlayIcon, ShuffleIcon } from "./Icons";
-import { cappedNote, countStreamable, playAllTracks, plural, shuffleAllTracks } from "../lib/bulkPlay";
+import { cappedNote, countStreamable, playAllTracks, shuffleAllTracks } from "../lib/bulkPlay";
+import { plural } from "../lib/format";
 
 /** Above this many tracks, a bulk action asks first (inline, with ConfirmButton). */
 export const BULK_CONFIRM_TRACKS = 500;

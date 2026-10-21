@@ -1,12 +1,12 @@
 // Play or shuffle a whole set of tracks (the Library's bulk bar, smart playlists #84) through
 // the player store's actions. The queue stops at MAX_QUEUE; each function returns a sentence
 // to show when the cap cut the set short, else null.
+import { plural } from "./format";
 import type { repos, Track } from "@bc/core";
 import { MAX_QUEUE, usePlayer } from "../player/store";
 
 export const countStreamable = (t: Track[]) => t.reduce((n, x) => n + (x.streamable ? 1 : 0), 0);
 
-export const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
 
 /** Labels for the Library's Show filter and sorts, in ALBUM_SORTS order (a new sort in core needs one). */
 export const SHOW_LABELS: Record<repos.AlbumFilter, string> = { all: "All", purchased: "Purchased", wishlist: "Wishlist", downloaded: "Downloaded", rated: "Rated" };

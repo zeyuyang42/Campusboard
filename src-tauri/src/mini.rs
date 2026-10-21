@@ -77,10 +77,11 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>, focus_first: bool) -> tauri::Resul
             Ok(())
         }
         (Toggle::Show, Some(w)) => {
-            crate::reveal(&w)?;
-            // Restart the state stream without waiting for WebKit's visibilitychange.
+            let shown = crate::reveal(&w);
+            // Restart the state stream without waiting for WebKit's visibilitychange, even when
+            // focusing failed: the window is visible either way.
             tell_main(app, "hello");
-            Ok(())
+            shown
         }
         _ => {
             // Built hidden, so it is moved to its saved place before it shows.

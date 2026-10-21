@@ -5,7 +5,6 @@ import { memoryOfflineFiles, tauriOfflineFiles } from "./offlineFiles";
 import { invalidateGroup, invalidateQueries } from "./invalidate";
 
 // The query-client binding lives in invalidate.ts; re-exported here for the player store.
-export { bindQueryClient, invalidateQueries } from "./invalidate";
 
 const BROWSER_MODE = import.meta.env.VITE_BROWSER_MODE === "1";
 const SELFTEST = import.meta.env.VITE_SELFTEST === "1";

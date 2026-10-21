@@ -1,6 +1,7 @@
 // Removals that offer Undo (#93). Each one shows the single Undo note; its callbacks run
 // after the page that started it may be gone, so they talk to core and the query cache directly.
-import { getCore, invalidateQueries } from "../api/core";
+import { getCore } from "../api/core";
+import { invalidateQueries } from "../api/invalidate";
 import { offerUndo } from "../ui/undo";
 
 const LIBRARY = ["albums", "album", "artists", "artist", "tracks", "search", "playlists", "playlist", "history", "releases"];

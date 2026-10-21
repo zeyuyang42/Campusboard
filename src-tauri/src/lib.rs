@@ -21,7 +21,7 @@ pub fn main_window<R: tauri::Runtime, M: Manager<R>>(m: &M) -> Option<tauri::Web
 /// Bring a window to the front: unminimized if it was minimized, shown, focused.
 pub fn reveal<R: tauri::Runtime>(w: &tauri::WebviewWindow<R>) -> tauri::Result<()> {
     if w.is_minimized().unwrap_or(false) {
-        w.unminimize()?;
+        let _ = w.unminimize(); // best effort: a window that will not unminimize can still show
     }
     w.show()?;
     w.set_focus()

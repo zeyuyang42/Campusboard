@@ -32,7 +32,7 @@ export function yearOf(d: string | null | undefined): string {
   return Number.isNaN(t) ? "" : String(new Date(t).getUTCFullYear());
 }
 /** "1 track", "3 tracks"; `many` for an irregular plural ("1 wishlist item", "2 wishlist items"). */
-export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+export const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 /** "1 play", "3 plays". */
 export const formatPlays = (n: number) => plural(n, "play");
 /** A local timestamp (ISO string or epoch ms) for "Last synced …" lines: medium date, short time. */

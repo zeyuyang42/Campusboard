@@ -21,6 +21,11 @@ export function listArtists(db: Db): Promise<Artist[]> {
   );
 }
 
+/** The artist row alone (the release checker needs no albums). */
+export function artistRow(db: Db, id: number): Promise<Artist | null> {
+  return db.get<Artist>("SELECT * FROM artists WHERE id = ?", [id]).then((r) => r ?? null);
+}
+
 export async function getArtist(db: Db, id: number): Promise<(Artist & { albums: Album[] }) | null> {
   const ar = await db.get<Artist>("SELECT * FROM artists WHERE id = ?", [id]);
   if (!ar) return null;

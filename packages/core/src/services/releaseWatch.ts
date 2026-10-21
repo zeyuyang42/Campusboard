@@ -5,7 +5,7 @@ import { parseMusicPage } from "../scrape/parseMusic.js";
 import { ScrapeError, describeError } from "../scrape/errors.js";
 import { cachedFetchText } from "./pageCache.js";
 import { albumUrlsInLibrary, getAlbum, nextDuePreorder, type PreorderAlbum } from "../db/repos/albums.js";
-import { getArtist } from "../db/repos/artists.js";
+import { artistRow } from "../db/repos/artists.js";
 import { refreshAlbum } from "./streamService.js";
 import { idleBlock } from "./idle.js";
 import { getSetting, setSetting } from "../db/repos/settings.js";
@@ -181,7 +181,7 @@ export class ReleaseChecker {
     const skipped = (error: string): ArtistCheckResult => ({ artist_id: artistId, status: "skipped", releases: 0, inserted_ids: [], found: 0, error });
     if (!this.claim()) return skipped("busy");
     try {
-      const artist = await getArtist(this.db, artistId);
+      const artist = await artistRow(this.db, artistId);
       if (!artist) return skipped("no such artist");
       return await this.check(artist);
     } finally {

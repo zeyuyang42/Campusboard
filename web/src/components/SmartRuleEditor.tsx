@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { normalizePlaylistName, PLAYLIST_NAME_MAX, repos } from "@bc/core";
 import { useSmartCount, useTags } from "../api/queries";
-import { plural, SHOW_LABELS, SORT_LABELS } from "../lib/bulkPlay";
+import { SHOW_LABELS, SORT_LABELS } from "../lib/bulkPlay";
+import { plural } from "../lib/format";
 import { friendlyError } from "../lib/errors";
 import { useDebounced } from "../lib/useDebounced";
 

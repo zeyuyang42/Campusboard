@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCore } from "./core";
 import { invalidateGroup } from "./invalidate";
-import { repos, type DiscoverPage, type DiscoverParams, type HistoryCursor, type Job, type PlayState, type StatsPeriod } from "@bc/core";
+import { repos, type DiscoverPage, type DiscoverParams, type HistoryCursor, type Job, type PlayState, type StatsPeriod, isActiveJob } from "@bc/core";
 
 /** Named groups of the prefixes below, for invalidation; `invalidateGroup` works outside React too. */
 export { KEY_GROUPS, invalidateGroup, type KeyGroup } from "./invalidate";
@@ -127,7 +127,7 @@ export const usePlaylist = (id: number) => useQuery({ queryKey: keys.playlist(id
 export const useSearch = (q: string) => useQuery({ queryKey: keys.search(q), queryFn: async () => (await core()).search(q), enabled: q.trim().length >= 2, staleTime: 60_000 });
 
 /** A job that is not over yet: pending (items still being written), queued or running. */
-export const isJobActive = (j?: Job | null) => !!j && (j.status === "pending" || j.status === "queued" || j.status === "running");
+export const isJobActive = (j?: Job | null) => !!j && isActiveJob(j);
 export const useJobs = () =>
   useQuery({ queryKey: keys.jobs, queryFn: async () => (await core()).jobs(), refetchInterval: (q) => (q.state.data?.some(isJobActive) ? 1000 : false) });
 /** One job, polled every second while it runs; nothing is fetched while `id` is null. */
@@ -150,9 +150,9 @@ const jobFailure = (job: Job | null | undefined) => (job?.status === "failed" ? 
  * One card's import of a release (Search, Discover, New releases, Radio tracklist, Browse):
  * `add()` queues the import of `url` and follows its job (polled only while one is live);
  * `track(id)` follows a job started elsewhere. When the job reaches done or failed the library
- * is invalidated once and `onDone` runs with the job and the album id it produced, if any.
+ * is invalidated once and `onSettled` runs (on failure too) with the job and the album id it produced, if any.
  */
-export function useAddRelease(url: string, onDone?: (job: Job, importedAlbumId: number | null) => void) {
+export function useAddRelease(url: string, onSettled?: (job: Job, importedAlbumId: number | null) => void) {
   const imp = useImport();
   const [jobId, setJobId] = useState<number | null>(null);
   const { data: job } = useJob(jobId);
@@ -162,7 +162,7 @@ export function useAddRelease(url: string, onDone?: (job: Job, importedAlbumId: 
   useEffect(() => {
     if (!finished) return;
     invalidate();
-    onDone?.(job!, importedAlbumId);
+    onSettled?.(job!, importedAlbumId);
   }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
   const add = async () => { const j = await imp.mutateAsync({ url }); setJobId(j.id); return j; };
   return {
