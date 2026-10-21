@@ -1,6 +1,7 @@
 import type { Job } from "@bc/core";
 import { useQueryClient } from "@tanstack/react-query";
-import { keys, cancelJob, useChallengeUntil } from "../api/queries";
+import { getCore } from "../api/core";
+import { keys, useChallengeUntil } from "../api/queries";
 import { friendlyError } from "../lib/errors";
 import { ChallengeNotice } from "./ChallengeNotice";
 
@@ -10,7 +11,7 @@ export function JobProgress({ job, compact = false }: { job: Job; compact?: bool
   const { data: challengeUntil } = useChallengeUntil();
   const paused = active && !!challengeUntil;
   const pct = job.total ? Math.round(((job.done + job.failed) / job.total) * 100) : active ? 0 : 100;
-  const cancel = async () => { await cancelJob(job.id); void qc.invalidateQueries({ queryKey: keys.jobs }); void qc.invalidateQueries({ queryKey: keys.job(job.id) }); };
+  const cancel = async () => { await (await getCore()).cancelJob(job.id); void qc.invalidateQueries({ queryKey: keys.jobs }); void qc.invalidateQueries({ queryKey: keys.job(job.id) }); };
   const failedItems = job.items?.filter((i) => i.status === "failed") ?? [];
   return (
     <div className="job">

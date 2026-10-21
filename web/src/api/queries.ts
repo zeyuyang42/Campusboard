@@ -261,7 +261,6 @@ export function useOfflineMutations() {
   };
 }
 
-export async function cancelJob(id: number) { return (await core()).cancelJob(id); }
 export async function loadPlayState() { return (await core()).playState(); }
 export async function savePlayState(s: PlayState) { return (await core()).savePlayState(s); }
 export async function savePlayPosition(trackId: number | null, positionSec: number, index: number) { return (await core()).savePlayPosition(trackId, positionSec, index); }
