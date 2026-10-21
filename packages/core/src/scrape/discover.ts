@@ -38,7 +38,18 @@ export const DISCOVER_TIMES: readonly { id: number; slug: string; label: string 
   { id: 6, slug: "5w", label: "5 weeks ago" },
   { id: 7, slug: "6w", label: "6 weeks ago" },
 ];
-export const DEFAULT_DISCOVER: DiscoverParams = { tags: [], slice: "top", time: null, location: null };
+/**
+ * The page's `categories` without t-shirts (no audio): `id` is discover_web's `category_id`,
+ * `slug` the 2nd path segment of Bandcamp's links (/discover/<tags>/<slug>).
+ */
+export const DISCOVER_CATEGORIES: readonly { id: number; slug: string; label: string }[] = [
+  { id: 0, slug: "all", label: "all categories" },
+  { id: 1, slug: "digital", label: "digital" },
+  { id: 2, slug: "vinyl", label: "vinyl" },
+  { id: 3, slug: "cd", label: "compact discs" },
+  { id: 4, slug: "cassette", label: "cassettes" },
+];
+export const DEFAULT_DISCOVER: DiscoverParams = { tags: [], slice: "top", time: null, location: null, category: 0 };
 /** Bandcamp's tag input takes up to this many tags. */
 export const DISCOVER_MAX_TAGS = 10;
 /** Longer tags (from a link or the query) are dropped. */
@@ -169,7 +180,7 @@ export function parseDiscoverResponse(raw: unknown): DiscoverPage {
 /** The request body Bandcamp's own page sends for these filters. */
 export function discoverBody(p: DiscoverParams, cursor: string | null) {
   return {
-    category_id: 0,
+    category_id: p.category,
     tag_norm_names: p.tags,
     geoname_id: p.location ?? 0,
     slice: p.slice,
@@ -226,11 +237,19 @@ function timeOf(v: string | null): number | null {
   return t && t.id >= 0 ? t.id : null;
 }
 
+/** A category slug or id as a category id; 0 (all) for anything unknown. */
+function categoryOf(v: string | null | undefined): number {
+  if (!v) return 0;
+  const c = DISCOVER_CATEGORIES.find((x) => x.slug === v) ?? (/^\d+$/.test(v) ? DISCOVER_CATEGORIES.find((x) => x.id === Number(v)) : undefined);
+  return c?.id ?? 0;
+}
+
 /**
  * Filters from query parameters: `tags=a,b`, `s=<slice>`, `t=<time id or slug>`, `loc=<geoname id>`
- * (the same names Bandcamp's links use). `extraTags` come first (a discover link's path).
+ * (the same names Bandcamp's links use) and `cat=<category slug or id>` (Bandcamp has it in the
+ * path). `extraTags` come first and `pathCategory` wins over `cat` (a discover link's path).
  */
-export function discoverParamsFromQuery(q: URLSearchParams, extraTags: string[] = []): DiscoverParams {
+export function discoverParamsFromQuery(q: URLSearchParams, extraTags: string[] = [], pathCategory?: string): DiscoverParams {
   const tags: string[] = [];
   for (const t of [...extraTags, ...(q.get("tags") ?? "").split(",")]) {
     const n = normTag(t);
@@ -243,6 +262,7 @@ export function discoverParamsFromQuery(q: URLSearchParams, extraTags: string[] 
     slice: SLICE_SLUGS.has(s) ? (s as DiscoverSlice) : "top",
     time: timeOf(q.get("t")),
     location: Number.isInteger(loc) && loc > 0 ? loc : null,
+    category: categoryOf(pathCategory) || categoryOf(q.get("cat")),
   };
 }
 
@@ -253,12 +273,15 @@ export function discoverQuery(p: DiscoverParams): string {
   q.set("s", p.slice);
   if (p.time != null) q.set("t", String(p.time));
   if (p.location) q.set("loc", String(p.location));
+  const c = DISCOVER_CATEGORIES.find((x) => x.id === p.category);
+  if (c && c.id) q.set("cat", c.slug);
   return q.toString();
 }
 
 /**
  * A bandcamp.com/discover link's filters, or null if it isn't one. The path is
- * /discover/<tag+tag…>[/<category>]; the category (vinyl, cassette…) is not a filter here.
+ * /discover/<tag+tag…|all>[/<category>]: digital, vinyl, cd and cassette are honoured,
+ * anything else there (tshirt…) means all categories.
  */
 export function parseDiscoverUrl(input: string): DiscoverParams | null {
   let u: URL;
@@ -275,12 +298,14 @@ export function parseDiscoverUrl(input: string): DiscoverParams | null {
   if (parts[0] !== "discover") return null;
   const first = parts[1] && parts[1] !== "all" ? parts[1] : "";
   const pathTags = first.split(/[+\s]+/).map((t) => { try { return decodeURIComponent(t); } catch { return t; } });
-  return discoverParamsFromQuery(u.searchParams, pathTags);
+  return discoverParamsFromQuery(u.searchParams, pathTags, parts[2]?.toLowerCase());
 }
 
 /** The same filters on bandcamp.com (Open on Bandcamp). */
 export function discoverWebUrl(p: DiscoverParams): string {
-  const u = new URL(`https://bandcamp.com/discover${p.tags.length ? `/${p.tags.map(encodeURIComponent).join("+")}` : ""}`);
+  const c = DISCOVER_CATEGORIES.find((x) => x.id === p.category && x.id !== 0);
+  const tags = p.tags.length ? `/${p.tags.map(encodeURIComponent).join("+")}` : c ? "/all" : "";
+  const u = new URL(`https://bandcamp.com/discover${tags}${c ? `/${c.slug}` : ""}`);
   if (p.slice !== "top") u.searchParams.set("s", p.slice);
   const t = DISCOVER_TIMES.find((x) => x.id === p.time);
   if (t && t.id >= 0) u.searchParams.set("t", t.slug);

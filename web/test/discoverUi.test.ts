@@ -44,7 +44,7 @@ describe("the track menu on a Discover preview (#104)", () => {
 describe("markDiscoverInLibrary", () => {
   it("patches every cached discover page holding the release, and nothing else", () => {
     const qc = new QueryClient();
-    const params = { tags: ["x"], slice: "top" as const, time: null, location: null };
+    const params = { tags: ["x"], slice: "top" as const, time: null, location: null, category: 0 };
     const page: DiscoverPage = { items: [ITEM, { ...ITEM, url: "https://b.bandcamp.com/album/y" }], total: 2, cursor: null };
     qc.setQueryData(keys.discover(params), { pages: [page], pageParams: [null] });
     const tags = [{ norm_name: "glitch", display_name: "glitch", count: 1 }];

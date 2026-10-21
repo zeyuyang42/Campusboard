@@ -388,6 +388,8 @@ export interface DiscoverParams {
   time: number | null;
   /** A geonames id, null for anywhere. */
   location: number | null;
+  /** discover_web's category_id: 0 all, 1 digital, 2 vinyl, 3 cd, 4 cassette (DISCOVER_CATEGORIES). */
+  category: number;
 }
 
 /** One release in Bandcamp discover's results. */

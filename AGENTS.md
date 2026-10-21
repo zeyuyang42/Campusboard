@@ -32,7 +32,7 @@ npm run smoke:live               # re-parse one known live page
 ```
 packages/core/src/
   types.ts                 DTOs shared by core and web (import "@bc/core")
-  scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, fan (collection/wishlist), radio (Bandcamp Radio list + episode), discover (results, tag/place search, discover links), schemas
+  scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, fan (collection/wishlist), radio (Bandcamp Radio list + episode), discover (results, tag/place search, discover links), discoverGenres (genre/subgenre chips), schemas
   db/Db.ts                 async Db interface {select,get,run}; SQL uses "?" and toDollar() rewrites to $n for the Tauri plugin
   db/repos/                one module per table; booleans stored 0/1, converted at the repo boundary
   services/                importService (upsertTralbum, vacuumOrphans), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping), miniPlayer (mini window state/command protocol, throttle), transition (gapless/crossfade scheduling, fade curve, state machine), libraryTransfer (library export/import file, VACUUM INTO backup), radio (episodes, tracklists, stream URLs), discover (preview queue entries + their stream URLs), offline (offline copies: download, local URL, sweep)
@@ -434,8 +434,16 @@ src-tauri/
   `t4.bcbits.com/stream/.../mp3-128/<id>?...&ts=` URL (~24 h). Times: default -1
   ("fresh", sent as `time_facet_id: null`), 0 today, 1 this week, 2-7 = 1-6 weeks
   ago; Bandcamp's links write `t=<slug>` but its parser reads `t` as a number, so
-  `parseDiscoverUrl` takes both. Links: `/discover/<tag+tag>[/<category>]?s=&t=&loc=&tags=a,b`
-  (the category is ignored here). Tag autocomplete:
+  `parseDiscoverUrl` takes both. Links: `/discover/<tag+tag|all>[/<category>]?s=&t=&loc=&tags=a,b`;
+  the category slugs `digital`, `vinyl`, `cd`, `cassette` are `category_id` 1-4 (0 all; `tshirt`
+  = 5 is left out: no audio), kept in the app's query as `cat=<slug>`. Genres (2026-10-21):
+  `initialState.genres` (27, `{id,label,slug}`) and `.subgenres` (237, plus `parentSlug`; none
+  for podcasts and audiobooks) are copied into `scrape/discoverGenres.ts`, not fetched. A slug
+  is the tag norm name `tag_norm_names` takes, even where the label differs (`hip-hop/rap` ->
+  `hip-hop-rap`, `drum & bass` -> `drum-bass`, `méxico d.f.` -> `méxico-d.f.`): checked with
+  `["hip-hop-rap"]` (511,635 results), `["latin","méxico-d.f."]` (15: tags are ANDed) and an
+  unknown tag (0). Genre and subgenres are plain tags: the first genre tag is the selected
+  genre (Bandcamp's links put it first), picking another replaces it and its subgenres. Tag autocomplete:
   `POST api/bcsearch_public_api/1/tag_search {prefix}` -> `[{norm_name, display_name, count}]`;
   places: `POST api/location/1/geoname_search {q, n: 5, geocoder_fallback: false}` ->
   `{ok, results: [{id: "<string>", name, fullname}]}`. `GET api/stream/1/refresh?url=<stream_url>`
