@@ -6,6 +6,7 @@ import { applyTheme, extrapolatePosition, MINI_EVENTS, parseMiniState, parseThem
 import { createBus, type MiniBus } from "./bus";
 import { hideMini, initMiniWindow, savedOnTop, setOnTop, setTall, TALL_MIN_HEIGHT } from "./window";
 import { ArtImage } from "../components/ArtImage";
+import { Seek } from "../components/Seek";
 import { CloseIcon, ExpandIcon, NextIcon, PauseIcon, PinIcon, PlayIcon, PrevIcon, SquareIcon, StripIcon } from "../components/Icons";
 import { formatDuration } from "../lib/format";
 
@@ -84,28 +85,15 @@ function useTicker(on: boolean) {
   }, [on]);
 }
 
-function Seek({ position, duration }: { position: number; duration: number }) {
-  const bar = useRef<HTMLDivElement>(null);
-  const [scrub, setScrub] = useState<number | null>(null);
-  const shown = scrub ?? position;
-  const pct = duration ? Math.min(100, (shown / duration) * 100) : 0;
-  const at = (e: React.PointerEvent) => {
-    const r = bar.current!.getBoundingClientRect();
-    return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * duration;
-  };
+/** The shared seek control, sending the main window a seek command on release. */
+function MiniSeek({ position, duration }: { position: number; duration: number }) {
   return (
-    <div className="mini-seek">
-      <span>{formatDuration(shown)}</span>
-      <div
-        className="bar" ref={bar} data-testid="mini-seek"
-        onPointerDown={(e) => { if (!duration) return; (e.target as HTMLElement).setPointerCapture(e.pointerId); setScrub(at(e)); }}
-        onPointerMove={(e) => { if (scrub !== null) setScrub(at(e)); }}
-        onPointerUp={(e) => { if (scrub !== null) { send({ type: "seek", sec: at(e) }); setScrub(null); } }}
-      >
-        <div className="track"><div className="fill" style={{ width: `${pct}%` }} /></div>
-      </div>
-      <span>{duration ? formatDuration(duration) : "–:––"}</span>
-    </div>
+    <Seek
+      className="mini-seek" testId="mini-seek"
+      position={position} duration={duration}
+      totalLabel={duration ? formatDuration(duration) : "–:––"}
+      onSeek={(sec) => send({ type: "seek", sec })}
+    />
   );
 }
 
@@ -157,7 +145,7 @@ export function MiniPlayer() {
             <button className="mini-btn small" title="Close mini player" onClick={() => { send({ type: "bye" }); void hideMini(); }}><CloseIcon size={15} /></button>
           </div>
         </div>
-        <Seek position={position} duration={s?.duration ?? 0} />
+        <MiniSeek position={position} duration={s?.duration ?? 0} />
       </div>
     </div>
   );

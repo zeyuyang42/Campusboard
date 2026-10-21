@@ -14,9 +14,13 @@
 
 Bandcamp has no public API, so the app reads the JSON that Bandcamp embeds in
 its own album pages (the same data the official player uses) and streams audio
-straight from Bandcamp's CDN at 128 kbps. Nothing is downloaded or re-hosted.
-Every album page keeps a **Buy on Bandcamp** link. Bandcamp's terms allow
-personal, non-commercial use. Please buy what you keep coming back to.
+straight from Bandcamp's CDN at 128 kbps. Nothing is re-hosted; the optional
+offline copies stay on your Mac, for listening in the app. Every album page
+keeps a **Buy on Bandcamp** link. Bandcamp's terms allow personal,
+non-commercial use. Please buy what you keep coming back to. The app is not
+affiliated with Bandcamp, needs no account, and sends nothing anywhere but
+bandcamp.com and its CDN: no telemetry, no updater (the app tells you when a
+newer release exists and links to it).
 
 ## Install (macOS, Apple Silicon)
 
@@ -26,7 +30,9 @@ personal, non-commercial use. Please buy what you keep coming back to.
    If that option is missing, go to System Settings → Privacy & Security and
    click **Open Anyway**. You only need to do this once.
 
-Requires macOS 13.3 or later. Your library lives in
+Requires macOS 13.3 or later on Apple Silicon (an Intel Mac can build it from
+source, see Development). To update, quit the app and replace it in
+Applications; the library and settings are kept. Your library lives in
 `~/Library/Application Support/com.bandcampplayer.app/library.db` (the bundle
 identifier is kept from the app's earlier name, Bandcamp Player, so an update
 keeps the same library, downloads and settings).
@@ -92,10 +98,20 @@ delete **Bandcamp Player.app** (and re-pin Campusboard in the Dock if you kept t
   or playlist in your library, or runs an action: play/pause, next, import,
   Search Bandcamp, a Settings section, the mini player, light or dark, the sleep
   timer. ↑/↓ and Enter choose, Esc closes.
-- **Now playing**: press `N` or click the artwork in the dock for a full view
-  with queue and lyrics.
+- **Album pages**: tracks, tags, the Bandcamp description and lyrics, a 1-5
+  star rating and a note of your own, and the artist's name opens their page
+  with every release of theirs in the library and Browse releases for the rest.
+  Removing an album, a playlist or a playlist entry shows an Undo note for a
+  few seconds instead of asking first.
+- **Drop a link**: a Bandcamp album, track, artist or discover link dragged
+  from a browser onto the window opens where a pasted one would.
+- **Now playing**: press `N` or click the artwork in the player bar for a full
+  view with queue and lyrics. Tracks over 20 minutes and Radio episodes resume
+  where you left them.
+- **Sleep timer**: Playback → Sleep Timer (or `⌘K`) stops after 15 to 60
+  minutes, at the end of the track or at the end of the album, fading out.
 - **Mini player**: Window → Mini Player (`⌘⇧M`) or the mini player button in
-  the dock opens a small window that stays on top of other apps (the pin
+  the player bar opens a small window that stays on top of other apps (the pin
   button turns that off), with the artwork, the track, a seek bar and the
   transport controls. The square button switches to a large-artwork layout.
   It keeps working with the main window closed.
@@ -151,7 +167,8 @@ Shortcuts: `Space` play/pause, `←`/`→` seek 5 s, `Shift+←`/`→` previous/
 `↑`/`↓` volume, `S` shuffle, `R` repeat, `Q` queue, `N` now playing,
 `/` search, `Esc` close. The menu bar adds `⌘1`–`⌘4` for the main pages,
 `⌘F` find, `⌘I` import, `⌘N` new playlist, `⌘,` settings and `⌘`-based
-playback controls; the full list is in Settings → Keyboard shortcuts.
+playback controls; the full list is in Settings → Keyboard shortcuts (Help →
+Keyboard Shortcuts).
 
 ## Theme files
 
@@ -171,7 +188,7 @@ theme can't break the app. Example:
   "fonts": { "display": "Bricolage Grotesque Variable", "ui": "Instrument Sans Variable" },
   "ambient": 0.6,
   "background": { "source": "none", "value": "", "blur": 12, "dim": 0.5 },
-  "backdrop": { "mode": "morph", "style": "ink", "intensity": 0.7, "motion": "drift" }
+  "backdrop": { "mode": "morph", "style": "ink", "intensity": 1, "motion": "drift" }
 }
 ```
 
@@ -193,7 +210,8 @@ there, since unknown keys are dropped.
 
 ## Development
 
-Requires Node 22.5+, Rust 1.90+ and Xcode command line tools.
+Requires Node 22.5+, Rust 1.90+ and Xcode command line tools. `npm run dev`
+and the tests use a separate `library-dev.db`, never the installed app's library.
 
 ```bash
 npm install
@@ -228,8 +246,16 @@ src-tauri/       Rust shell: plugins, migrations, capabilities, bundle config
   `parse_failed`; fix the parser, re-save fixtures with `npm run fixtures:save`,
   re-run tests.
 
+## Bandcamp etiquette
+
+The app asks Bandcamp for one page per second, caches pages for ten minutes
+and never scrapes more than you ask it to. When Bandcamp answers with its bot
+check, the app backs off (a notice in the window says for how long) rather
+than pushing through. Please don't point it at whole labels you won't listen
+to, and buy what you keep coming back to.
+
 ## Not yet
 
-Syncing purchased items with your Bandcamp login (higher-quality streams),
-Windows/Linux builds,
-custom artist domains. Tracked as issues labelled `feature`.
+Windows and Linux builds, and a signed build. Planned work is tracked as
+issues labelled `feature`; a Bandcamp page the app can no longer read shows
+up as a `parse_failed` import, which is worth an issue too.

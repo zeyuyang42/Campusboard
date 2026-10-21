@@ -207,7 +207,7 @@ pub fn on_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
 /// event: the mini window may listen to and emit any event name (event permissions have
 /// no scope), so it must not be able to read or forge menu actions that way.
 fn dispatch<R: Runtime>(app: &AppHandle<R>, id: &str) {
-    if let (Some(w), Ok(arg)) = (app.get_webview_window("main"), serde_json::to_string(id)) {
+    if let (Some(w), Ok(arg)) = (crate::main_window(app), serde_json::to_string(id)) {
         let _ = w.eval(format!("window.__bcMenu && window.__bcMenu({arg})"));
     }
 }
@@ -250,7 +250,7 @@ pub fn close_window<R: Runtime>(app: &AppHandle<R>, focused: Option<&str>) {
             }
         }
         CloseTarget::Main => {
-            if let Some(w) = app.get_webview_window("main") {
+            if let Some(w) = crate::main_window(app) {
                 if w.is_visible().unwrap_or(false) {
                     let _ = w.close();
                 }
@@ -278,12 +278,8 @@ pub fn selftest_menu(app: AppHandle, id: String, focused: Option<String>) -> Res
 
 /// Show and focus the main window; used by menu items and Dock reopen.
 pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(w) = app.get_webview_window("main") {
-        if w.is_minimized().unwrap_or(false) {
-            let _ = w.unminimize();
-        }
-        let _ = w.show();
-        let _ = w.set_focus();
+    if let Some(w) = crate::main_window(app) {
+        let _ = crate::reveal(&w);
     }
 }
 

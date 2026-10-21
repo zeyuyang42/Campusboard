@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import type { CookieStatus } from "@bc/core";
-import { useAccount, useAccountMutations, useCollectionRefresh, useCollectionRefreshMutation, useJobs } from "../api/queries";
+import { isJobActive, useAccount, useAccountMutations, useCollectionRefresh, useCollectionRefreshMutation, useJobs } from "../api/queries";
 import { friendlyError } from "../lib/errors";
+import { formatDateTime, plural } from "../lib/format";
 import { ConfirmButton } from "./ConfirmButton";
 import { JobProgress } from "./JobProgress";
 
@@ -12,8 +13,6 @@ const COOKIE_LINES: Record<CookieStatus, { text: string; error?: boolean } | nul
   rejected: { text: "Bandcamp didn't accept the cookie on the last sync. It has probably expired: paste a fresh one.", error: true },
   other_account: { text: "The cookie belongs to a different Bandcamp account than this username, so it isn't used.", error: true },
 };
-
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /** Settings → Bandcamp account: username, optional identity cookie, sync. */
 export function AccountSettings() {
@@ -26,7 +25,7 @@ export function AccountSettings() {
   useEffect(() => { setUsernameText(account?.username ?? ""); }, [account?.username]);
 
   const job = jobs?.find((j) => j.kind === "collection");
-  const busy = setUsername.isPending || setCookie.isPending || sync.isPending || (!!job && (job.status === "pending" || job.status === "queued" || job.status === "running"));
+  const busy = setUsername.isPending || setCookie.isPending || sync.isPending || isJobActive(job);
 
   const syncNow = async () => {
     setError(null);
@@ -73,7 +72,7 @@ export function AccountSettings() {
       {error && <div className="notice error" style={{ marginTop: 12 }}>{error}</div>}
       {last && (
         <p className="muted">
-          Last synced {new Date(last.at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}:{" "}
+          Last synced {formatDateTime(last.at)}:{" "}
           {plural(last.collection, "purchase", "purchases")} and {plural(last.wishlist, "wishlist item", "wishlist items")}.
           {!last.complete && (last.authenticated && last.cookie === "none"
             ? " Signed out: items no longer listed weren't removed. Add your cookie and sync to update."
@@ -94,7 +93,7 @@ function AutoRefresh() {
   const { data: status } = useCollectionRefresh();
   const setEnabled = useCollectionRefreshMutation();
   const on = setEnabled.isPending ? setEnabled.variables : (status?.enabled ?? true);
-  const last = status?.last_auto_at ? new Date(status.last_auto_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : null;
+  const last = status?.last_auto_at ? formatDateTime(status.last_auto_at) : null;
   return (
     <>
       <label className="check-row">

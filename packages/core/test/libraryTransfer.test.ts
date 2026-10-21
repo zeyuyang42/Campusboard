@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { NodeDb } from "./helpers/nodeDb.js";
-import { fixture } from "./helpers.js";
+import { fixture, waitJob } from "./helpers.js";
 import { parseTralbumPage } from "../src/scrape/parseTralbum.js";
 import { upsertTralbum, vacuumOrphans } from "../src/services/importService.js";
 import { FetchQueue } from "../src/scrape/http.js";
@@ -23,7 +23,6 @@ import {
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { Job } from "../src/types.js";
 
 const ALBUM = "https://illuminatihotties.bandcamp.com/album/let-me-do-one-more";
 const CUSTOM_ALBUM = "https://music.zoekeating.com/album/snowmelt-ep";
@@ -45,15 +44,6 @@ function fakeBandcamp(gate?: { url: string; open: Promise<void> }, missing: stri
 
 function runnerFor(db: NodeDb, f = fakeBandcamp()) {
   return new JobRunner(db, new FetchQueue(f.fetch, 0));
-}
-
-async function waitJob(db: NodeDb, id: number): Promise<Job> {
-  for (let i = 0; i < 400; i++) {
-    const j = (await jobs.getJob(db, id))!;
-    if (j.status !== "queued" && j.status !== "running") return j;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  throw new Error("job did not finish");
 }
 
 const tracksOf = async (db: NodeDb, url: string) =>

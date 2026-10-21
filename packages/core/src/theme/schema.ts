@@ -26,7 +26,7 @@ export const BackdropSchema = z.object({
   motion: z.enum(["drift", "still"]),
 });
 export type Backdrop = z.infer<typeof BackdropSchema>;
-export const DEFAULT_BACKDROP: Backdrop = { mode: "morph", style: "ink", intensity: 0.7, motion: "drift" };
+export const DEFAULT_BACKDROP: Backdrop = { mode: "morph", style: "ink", intensity: 1, motion: "drift" };
 
 export const ThemeSchema = z.object({
   version: z.literal(1),

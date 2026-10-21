@@ -2,15 +2,16 @@
 // (compiled on first use), uniforms set each frame. Context loss is handled here: the engine
 // only hears onLost / onRestored and falls back to the CSS wash in between.
 import type { Backdrop } from "@bc/core";
-import { FRAGMENT, SWATCH_SLOTS, VERTEX } from "./shaders";
+import { FRAGMENT, VERTEX } from "./shaders";
 
 export interface GlUniforms {
   time: number;
   mix: number;
   intensity: number;
   surface: readonly [number, number, number];
-  /** RGB triples in 0..1, SWATCH_SLOTS of them. */
+  /** RGB triples in 0..1, exactly SWATCH_SLOTS of them (paletteSlots pads); passed to the uniform as is. */
   colA: Float32Array;
+  /** Exactly SWATCH_SLOTS weights. */
   wA: Float32Array;
   colB: Float32Array;
   wB: Float32Array;
@@ -164,10 +165,10 @@ export const createGl: GlFactory = (canvas, hooks) => {
       ctx.uniform1f(p.loc.u_intensity, u.intensity);
       ctx.uniform1f(p.loc.u_mix, u.mix);
       ctx.uniform3f(p.loc.u_surface, u.surface[0], u.surface[1], u.surface[2]);
-      ctx.uniform3fv(p.loc.u_colA, u.colA.subarray(0, SWATCH_SLOTS * 3));
-      ctx.uniform1fv(p.loc.u_wA, u.wA.subarray(0, SWATCH_SLOTS));
-      ctx.uniform3fv(p.loc.u_colB, u.colB.subarray(0, SWATCH_SLOTS * 3));
-      ctx.uniform1fv(p.loc.u_wB, u.wB.subarray(0, SWATCH_SLOTS));
+      ctx.uniform3fv(p.loc.u_colA, u.colA);
+      ctx.uniform1fv(p.loc.u_wA, u.wA);
+      ctx.uniform3fv(p.loc.u_colB, u.colB);
+      ctx.uniform1fv(p.loc.u_wB, u.wB);
       ctx.uniform1f(p.loc.u_seed, u.seed);
       ctx.uniform1f(p.loc.u_dark, u.dark ? 1 : 0);
       ctx.uniform1f(p.loc.u_still, u.still ? 1 : 0);

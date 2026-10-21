@@ -1,0 +1,28 @@
+/* Tokens both windows share. applyTheme() writes them onto :root (the mini window gets them with
+   the main window's state); these are the fallbacks before it runs. Each sheet (styles.css,
+   mini/mini.css) adds its own tokens after this one. */
+:root {
+  --surface: #23262D;
+  --surface-raised: #2C3038;
+  --surface-hover: #353942;
+  --line: rgba(255, 255, 255, 0.08);
+  --text: #F1EEE9;
+  --text-muted: #9A9AA6;
+  --accent-fallback: #5BB6D1;
+  --accent: var(--accent-fallback);
+  --ambient-1: transparent;
+  --ambient-2: transparent;
+  --ambient-strength: 0.6;
+  --radius-sm: 6px;
+  --font-display: "Bricolage Grotesque Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-ui: "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  color-scheme: dark;
+}
+:root[data-theme="light"] { color-scheme: light; }
+
+/* Register art-driven colors so they can transition. */
+@property --accent { syntax: "<color>"; inherits: true; initial-value: #5BB6D1; }
+@property --ambient-1 { syntax: "<color>"; inherits: true; initial-value: transparent; }
+@property --ambient-2 { syntax: "<color>"; inherits: true; initial-value: transparent; }
+:root { transition: --accent 0.6s ease, --ambient-1 0.6s ease, --ambient-2 0.6s ease; }
+@media (prefers-reduced-motion: reduce) { :root { transition: none; } }

@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { ListeningStats, StatsPeriod } from "@bc/core";
 import { HistoryTab } from "../src/components/ListeningStats";
+import { flushAct as flush } from "./harness";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -46,9 +47,6 @@ const render = (url: string) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   act(() => root.render(h(QueryClientProvider, { client: qc }, h(MemoryRouter, { initialEntries: [url] }, h(HistoryTab)))));
 };
-async function flush() {
-  for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
-}
 const button = (label: string) => [...host.querySelectorAll("button")].find((b) => b.textContent === label)!;
 const select = () => host.querySelector<HTMLSelectElement>("select[aria-label=Period]");
 const choose = (value: string) => act(() => {

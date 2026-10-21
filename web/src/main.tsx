@@ -4,12 +4,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./App";
 import { initPlayer } from "./player/init";
-import { bindQueryClient } from "./api/core";
+import { bindQueryClient } from "./api/invalidate";
 import { initTheme } from "./theme/store";
 import { initPalette } from "./theme/usePalette";
 import { isTauri } from "./lib/env";
 import "@fontsource-variable/bricolage-grotesque";
 import "@fontsource-variable/instrument-sans";
+import "./theme/tokens.css";
 import "./styles.css";
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 10_000, retry: 1, refetchOnWindowFocus: false } } });

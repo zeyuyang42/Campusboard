@@ -32,16 +32,37 @@ export function toDollar(sql: string): string {
 }
 
 /**
- * Current time in UTC as `YYYY-MM-DD HH:MM:SS`: the same format and zone as SQLite's
+ * A moment in UTC as `YYYY-MM-DD HH:MM:SS`: the same format and zone as SQLite's
  * `datetime('now')` (also UTC), so values written from JS and by SQL column defaults
  * compare and sort together. Convert to local time only for display.
  */
-export const now = () => new Date().toISOString().replace("T", " ").slice(0, 19);
+export const sqlTime = (d: Date) => d.toISOString().replace("T", " ").slice(0, 19);
+
+/** The current time in the library's format (see sqlTime). */
+export const now = () => sqlTime(new Date());
+
+/** A stored `YYYY-MM-DD HH:MM:SS` as an ISO 8601 UTC string `Date.parse` reads unambiguously. */
+export const sqlTimeIso = (s: string) => `${s.replace(" ", "T")}Z`;
+
+/** `?,?,?` for an IN list or a VALUES row of `n` parameters. */
+export function placeholders(n: number): string {
+  return Array(n).fill("?").join(",");
+}
 
 /** Build `(?,?,..),(?,?,..)` for a multi-row insert. */
 export function valuesList(rows: number, cols: number): string {
-  const row = `(${Array(cols).fill("?").join(",")})`;
+  const row = `(${placeholders(cols)})`;
   return Array(rows).fill(row).join(",");
+}
+
+/**
+ * `xs` in slices of at most `size`, in order (none for an empty list): one statement per
+ * slice keeps a multi-row INSERT or an IN list under SQLite's bound-parameter limit.
+ */
+export function chunks<T>(xs: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < xs.length; i += size) out.push(xs.slice(i, i + size));
+  return out;
 }
 
 /**

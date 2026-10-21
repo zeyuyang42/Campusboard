@@ -1,14 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { NodeDb } from "./helpers/nodeDb.js";
-import { fixture } from "./helpers.js";
+import { fanPage, fixture, jsonFixture as json, loggedInAsFan } from "./helpers.js";
 import {
   fanItemFetchUrl, fetchFanList, mayCarryIdentity, normalizeFanUsername, parseFanItemsResponse, parseFanPage, FAN_MAX_PAGES,
 } from "../src/scrape/fan.js";
 import { parseTralbumPage } from "../src/scrape/parseTralbum.js";
-import { decodeEntities } from "../src/scrape/html.js";
 import { FetchQueue } from "../src/scrape/http.js";
 import { JobRunner } from "../src/services/jobRunner.js";
 import { clearAccount, getAccount, identityHeaders, normalizeIdentityCookie, setIdentityCookie, setUsername, IDENTITY_KEY } from "../src/services/account.js";
@@ -20,9 +16,6 @@ import type { Db } from "../src/db/Db.js";
 import { createCore } from "../src/core.js";
 import type { Job } from "../src/types.js";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const json = (name: string) => readFileSync(path.join(here, "fixtures", `${name}.json`), "utf8");
-
 const FAN = "https://bandcamp.com/examplefan";
 const COLLECTION_API = "https://bandcamp.com/api/fancollection/1/collection_items";
 const WISHLIST_API = "https://bandcamp.com/api/fancollection/1/wishlist_items";
@@ -32,17 +25,6 @@ const CUSTOM_ALBUM = "https://music.zoekeating.com/album/snowmelt-ep";
 const CUSTOM_ALBUM_SUB = "https://zoekeating.bandcamp.com/album/snowmelt-ep";
 const COOKIE = "7%09abcDEF%3D%3D%09%7B%22id%22%3A1%7D";
 
-type Blob = Record<string, any>;
-/** The fan page fixture with its data-blob edited. */
-function fanPage(edit: (b: Blob) => void = () => {}): string {
-  const html = fixture("fan");
-  const m = html.match(/data-blob="([^"]*)"/)!;
-  const b = JSON.parse(decodeEntities(m[1])) as Blob;
-  edit(b);
-  const attr = JSON.stringify(b).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return html.replace(m[0], `data-blob="${attr}"`);
-}
-const loggedInAsFan = (b: Blob) => { b.identities.fan = { id: b.fan_data.fan_id, username: b.fan_data.username }; b.fan_data.is_own_page = true; };
 /** An album page whose tracks also offer mp3-v0, as logged-in pages for owned items do. */
 const withV0 = (html: string) => html.replace(/&quot;file&quot;:\{&quot;mp3-128&quot;:&quot;(https:\/\/t4\.bcbits\.com\/stream\/[^/]+)\/mp3-128\/(\d+)\?p=0&amp;ts=(\d+)/g,
   (whole, base, id, ts) => `&quot;file&quot;:{&quot;mp3-v0&quot;:&quot;${base}/mp3-v0/${id}?p=0&amp;ts=${ts}&amp;t=v0&quot;,&quot;mp3-128&quot;:&quot;${base}/mp3-128/${id}?p=0&amp;ts=${ts}`);
@@ -118,7 +100,7 @@ describe("fan page and list parsing", () => {
       ["track", "https://whiteward.bandcamp.com/track/when-gift-becomes-damnation-3"],
       ["album", "https://mypetflamingo.bandcamp.com/album/after-hours"],
     ]);
-    expect(page.next).toBe("1720541470:658791445:a::");
+    expect(page.next).toBe("1700000002:658791445:a::");
   });
 
   it("pages on from the last item's token, not last_token, and reports errors", () => {

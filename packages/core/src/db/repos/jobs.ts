@@ -1,6 +1,11 @@
 import type { Db } from "../Db.js";
-import { now } from "../Db.js";
-import type { Job, JobItem, JobKind, JobStatus } from "../../types.js";
+import { chunks, now, placeholders } from "../Db.js";
+import { ACTIVE_JOB_STATUSES, type Job, type JobItem, type JobKind, type JobStatus } from "../../types.js";
+
+/** SQL: `col` holds an active status (pending, queued or running; see ACTIVE_JOB_STATUSES). */
+export const activeSql = (col = "status") => `${col} IN (${ACTIVE_JOB_STATUSES.map((s) => `'${s}'`).join(",")})`;
+/** The same for the jobs table's own `status` column. */
+export const ACTIVE_SQL = activeSql();
 
 /**
  * Create a job with its items. The job is inserted as "pending", which the runner never
@@ -16,8 +21,7 @@ export async function createJob(db: Db, kind: JobKind, inputUrl: string, itemUrl
 }
 
 export async function addJobItems(db: Db, jobId: number, urls: string[]): Promise<void> {
-  for (let i = 0; i < urls.length; i += 200) {
-    const chunk = urls.slice(i, i + 200);
+  for (const chunk of chunks(urls, 200)) {
     await db.run(`INSERT INTO job_items (job_id, url) VALUES ${chunk.map(() => "(?, ?)").join(",")}`, chunk.flatMap((u) => [jobId, u]));
   }
   await db.run("UPDATE jobs SET total = (SELECT COUNT(*) FROM job_items WHERE job_id = ?), updated_at = ? WHERE id = ?", [jobId, now(), jobId]);
@@ -39,8 +43,13 @@ export function nextQueuedJob(db: Db): Promise<Job | null> {
   return db.get<Job>("SELECT * FROM jobs WHERE status = 'queued' ORDER BY id LIMIT 1");
 }
 
-export async function setJobStatus(db: Db, id: number, status: JobStatus, error: string | null = null): Promise<void> {
-  await db.run("UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE id = ?", [status, error, now(), id]);
+/** The oldest active job of `kind` (for `inputUrl`, when given), with its items, or null. */
+export async function activeJob(db: Db, kind: JobKind, inputUrl?: string): Promise<Job | null> {
+  const r = await db.get<{ id: number }>(
+    `SELECT id FROM jobs WHERE kind = ? ${inputUrl === undefined ? "" : "AND input_url = ? "}AND ${ACTIVE_SQL} ORDER BY id LIMIT 1`,
+    inputUrl === undefined ? [kind] : [kind, inputUrl],
+  );
+  return r ? getJob(db, r.id) : null;
 }
 
 /**
@@ -49,7 +58,7 @@ export async function setJobStatus(db: Db, id: number, status: JobStatus, error:
  */
 export async function transitionJob(db: Db, id: number, from: JobStatus[], to: JobStatus, error: string | null = null): Promise<boolean> {
   const r = await db.get<{ id: number }>(
-    `UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE id = ? AND status IN (${from.map(() => "?").join(",")}) RETURNING id`,
+    `UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE id = ? AND status IN (${placeholders(from.length)}) RETURNING id`,
     [to, error, now(), id, ...from],
   );
   return !!r;
@@ -91,7 +100,7 @@ export async function setItemResult(db: Db, itemId: number, jobId: number, ok: b
 
 /** Cancel every pending, queued or running job of one kind, in one statement. True if any was. */
 export async function cancelJobsOfKind(db: Db, kind: JobKind): Promise<boolean> {
-  const r = await db.run("UPDATE jobs SET status = 'cancelled', updated_at = ? WHERE kind = ? AND status IN ('pending','queued','running')", [now(), kind]);
+  const r = await db.run(`UPDATE jobs SET status = 'cancelled', updated_at = ? WHERE kind = ? AND ${ACTIVE_SQL}`, [now(), kind]);
   return r.changes > 0;
 }
 

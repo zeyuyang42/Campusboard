@@ -1,24 +1,22 @@
 // Listening stats (#94): top artists, albums and tags for a period, from the plays table.
 // Read-only and built on the existing indexes; albums waiting out their Undo (#93) don't count.
 import type { Db } from "../Db.js";
+import { sqlTime } from "../Db.js";
 import { NOT_REMOVING } from "./albumRemoval.js";
 import type { ListeningStats, StatsAlbum, StatsArtist, StatsCounts, StatsPeriod, StatsTag } from "../../types.js";
 
 export const STATS_PERIODS: readonly StatsPeriod[] = ["month", "year", "all"];
 export const STATS_LIMIT = 10;
 
-/** A moment in the stored played_at format (UTC `YYYY-MM-DD HH:MM:SS`). */
-const stored = (d: Date) => d.toISOString().replace("T", " ").slice(0, 19);
-
 /**
- * The period's [from, to) bounds as stored played_at text: this month or this year in local
- * time (a play at 23:30 on the 31st belongs to the month it was on the user's clock), or null
- * for all time.
+ * The period's [from, to) bounds as stored played_at text (UTC `YYYY-MM-DD HH:MM:SS`): this
+ * month or this year in local time (a play at 23:30 on the 31st belongs to the month it was
+ * on the user's clock), or null for all time.
  */
 export function periodBounds(period: StatsPeriod, now = new Date()): { from: string; to: string } | null {
   const y = now.getFullYear(), m = now.getMonth();
-  if (period === "month") return { from: stored(new Date(y, m, 1)), to: stored(new Date(y, m + 1, 1)) };
-  if (period === "year") return { from: stored(new Date(y, 0, 1)), to: stored(new Date(y + 1, 0, 1)) };
+  if (period === "month") return { from: sqlTime(new Date(y, m, 1)), to: sqlTime(new Date(y, m + 1, 1)) };
+  if (period === "year") return { from: sqlTime(new Date(y, 0, 1)), to: sqlTime(new Date(y + 1, 0, 1)) };
   return null;
 }
 

@@ -26,6 +26,7 @@ export {
 } from "./services/miniPlayer.js";
 export { getFreshStreamUrl, refreshAlbum } from "./services/streamService.js";
 export { resumeEligible, resumeLookupWanted, resumePoint, formatResumeAt, RESUME_MIN_TRACK_SEC, RESUME_EDGE_SEC, RESUME_MAX_ROWS } from "./services/resume.js";
+export { clock } from "./services/time.js";
 export { RadioService, radioQueueTrack, isRadioTrack, isQueueRadio, RADIO_LIST_CACHE_MS } from "./services/radio.js";
 export { PreviewService, previewQueueTrack, previewReleaseTracks, previewQueueId, isPreviewTrack, isQueuePreview, PREVIEW_ID_BASE } from "./services/discover.js";
 export { OfflineService, offlineFileName, isOfflineFileName, downloadItemUrl, downloadItemTrack, type OfflineFiles, type OfflineSettings } from "./services/offline.js";

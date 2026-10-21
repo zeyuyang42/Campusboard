@@ -1,7 +1,6 @@
-import { VOLUME_STEP } from "@bc/core";
 import { usePlayer } from "./store";
 import { useUi } from "../ui/store";
-import { focusFind } from "../lib/navigation";
+import { runMenuAction } from "../lib/appMenu";
 import { isTauri } from "../lib/env";
 import { openPalette } from "../ui/palette";
 
@@ -16,18 +15,19 @@ export function initShortcuts() {
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+    // Plain keys run the same actions as the menu bar's items (appMenu.ts); seeking and Escape are web-only.
     const p = usePlayer.getState();
     switch (e.key) {
-      case " ": e.preventDefault(); p.toggle(); break;
-      case "ArrowRight": e.preventDefault(); e.shiftKey ? p.next() : p.seekBy(5); break;
-      case "ArrowLeft": e.preventDefault(); e.shiftKey ? p.prev() : p.seekBy(-5); break;
-      case "ArrowUp": e.preventDefault(); p.stepVolume(VOLUME_STEP); break;
-      case "ArrowDown": e.preventDefault(); p.stepVolume(-VOLUME_STEP); break;
-      case "s": case "S": p.toggleShuffle(); break;
-      case "r": case "R": p.cycleRepeat(); break;
-      case "q": case "Q": p.setQueueOpen(!p.queueOpen); break;
-      case "n": case "N": if (p.current()) useUi.getState().setNowPlayingOpen(!useUi.getState().nowPlayingOpen); break;
-      case "/": e.preventDefault(); focusFind(); break;
+      case " ": e.preventDefault(); runMenuAction("play-pause"); break;
+      case "ArrowRight": e.preventDefault(); e.shiftKey ? runMenuAction("next") : p.seekBy(5); break;
+      case "ArrowLeft": e.preventDefault(); e.shiftKey ? runMenuAction("previous") : p.seekBy(-5); break;
+      case "ArrowUp": e.preventDefault(); runMenuAction("volume-up"); break;
+      case "ArrowDown": e.preventDefault(); runMenuAction("volume-down"); break;
+      case "s": case "S": runMenuAction("shuffle"); break;
+      case "r": case "R": runMenuAction("repeat"); break;
+      case "q": case "Q": runMenuAction("queue"); break;
+      case "n": case "N": runMenuAction("now-playing"); break;
+      case "/": e.preventDefault(); runMenuAction("find"); break;
       case "Escape": if (useUi.getState().nowPlayingOpen) useUi.getState().setNowPlayingOpen(false); else p.setQueueOpen(false); break;
     }
   });

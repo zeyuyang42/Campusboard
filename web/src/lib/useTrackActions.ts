@@ -4,7 +4,7 @@ import { getCore } from "../api/core";
 import { navigateTo } from "./navigation";
 import { usePlayer } from "../player/store";
 import { useMenu, type MenuContent, type MenuItem } from "../ui/menu";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openExternal } from "./openExternal";
 
 export interface TrackActionOptions {
   /** Shown as a danger item at the bottom, e.g. "Remove from playlist". */
@@ -39,7 +39,7 @@ export function useTrackActions() {
     if (preview) items.push({ kind: "separator" }, { label: "Add album to library", onSelect: () => void addPreviewAlbum(preview.item_url) }, { label: "Go to Discover", onSelect: () => nav("/discover") });
     else if (one && isRadioTrack(one)) items.push({ kind: "separator" }, { label: "Go to Radio", onSelect: () => nav("/radio") });
     else if (one && !opts.onAlbumPage) items.push({ kind: "separator" }, { label: "Go to album", onSelect: () => nav(`/album/${one.album_id}`) });
-    if (one?.album_url) items.push({ label: "Open on Bandcamp", onSelect: () => void openUrl(one.album_url!).catch(() => window.open(one.album_url!, "_blank")) });
+    if (one?.album_url) items.push({ label: "Open on Bandcamp", onSelect: () => openExternal(one.album_url!) });
     if (opts.remove) items.push({ kind: "separator" }, { label: opts.remove.label, onSelect: opts.remove.onSelect, danger: true });
     return { items };
   };

@@ -1,7 +1,8 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
-import type { AlbumWithTracks, Job } from "@bc/core";
+import type { AlbumWithTracks } from "@bc/core";
 import { removeAlbumWithUndo } from "../lib/removals";
-import { cancelJob, useAlbum, useAlbumMutations, useJobs, useOfflineMutations, useOfflineStats } from "../api/queries";
+import { getCore } from "../api/core";
+import { isJobActive, useAlbum, useAlbumMutations, useJobs, useOfflineMutations, useOfflineStats } from "../api/queries";
 import { ArtImage } from "../components/ArtImage";
 import { TrackList, PlayPauseAll } from "../components/TrackList";
 import { ExternalIcon, MoreIcon } from "../components/Icons";
@@ -12,8 +13,6 @@ import { formatReleaseDate, formatTotal } from "../lib/format";
 import { friendlyError } from "../lib/errors";
 import { useTrackActions } from "../lib/useTrackActions";
 import { openMenuFromEvent } from "../ui/menu";
-
-const activeJob = (j: Job) => j.status === "pending" || j.status === "queued" || j.status === "running";
 
 function offlineCounts(album: AlbumWithTracks) {
   return { saved: album.tracks.filter((t) => t.downloaded).length, streamable: album.tracks.filter((t) => t.streamable).length };
@@ -35,14 +34,14 @@ function OfflineAction({ album }: { album: AlbumWithTracks }) {
   const { data: jobs } = useJobs();
   const { downloadAlbum, removeAlbum } = useOfflineMutations();
   const mine = jobs?.filter((j) => j.kind === "download" && j.input_url === album.url) ?? [];
-  const job = mine.find(activeJob);
+  const job = mine.find(isJobActive);
   const { saved, streamable } = offlineCounts(album);
   if (!stats?.available || (!streamable && !saved)) return null;
   if (job) {
     return (
       <span className="offline-progress">
         <span className="muted">Downloading {Math.min(job.done + job.failed + 1, job.total)} of {job.total}…</span>
-        <button className="btn sm" onClick={() => { void cancelJob(job.id); }}>Stop</button>
+        <button className="btn sm" onClick={() => { void getCore().then((c) => c.cancelJob(job.id)); }}>Stop</button>
       </span>
     );
   }

@@ -7,6 +7,7 @@ import { parseRadioList, parseRadioShow, radioEntryAt, radioImageUrl, radioShowU
 import { readJsonAttr } from "../src/scrape/html.js";
 import { RadioService, radioQueueTrack, isRadioTrack, isQueueRadio, RADIO_LIST_CACHE_MS } from "../src/services/radio.js";
 import { upsertTralbum } from "../src/services/importService.js";
+import { markRemoving } from "../src/db/repos/albumRemoval.js";
 import { parseTralbumPage } from "../src/scrape/parseTralbum.js";
 import { nowPlayingMetadata } from "../src/services/nowPlaying.js";
 import { buildMiniState, parseMiniState } from "../src/services/miniPlayer.js";
@@ -201,6 +202,15 @@ describe("RadioService", () => {
     expect(urls()).toHaveLength(2);
   });
 
+  it("reads an album waiting out its Undo (#93) as not imported", async () => {
+    const { db, svc } = setup(pages);
+    const album = parseTralbumPage(fixture("album"), 0);
+    const id = await upsertTralbum(db, { ...album, url: "https://omasta.bandcamp.com/album/hits-different" });
+    expect((await svc.show(SHOW_ID)).tracks.filter((t) => t.album_id === id)).toHaveLength(4);
+    await markRemoving(db, id);
+    expect((await svc.show(SHOW_ID)).tracks.every((t) => t.album_id === null)).toBe(true);
+  });
+
   it("resolves the redirect to the CDN through the queue, with the CDN URL's own expiry", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-19T12:00:00Z") });
     try {
@@ -255,7 +265,7 @@ describe("RadioService", () => {
     const spy = vi.spyOn(db, "select");
     await svc.show(SHOW_ID);
     const [sql, params] = spy.mock.calls.find((c) => /FROM albums/.test(c[0]))!;
-    expect(sql).toMatch(/WHERE url IN \(/);
+    expect(sql).toMatch(/WHERE al\.url IN \(/);
     expect((params as string[]).length).toBe(new Set(parseRadioShow(fixture("radio-show")).tracks.map((t) => t.url)).size);
   });
 });

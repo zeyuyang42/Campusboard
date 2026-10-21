@@ -1,5 +1,5 @@
 import type { Db } from "../Db.js";
-import { likeContains } from "../Db.js";
+import { chunks, likeContains, placeholders } from "../Db.js";
 import type { Track } from "../../types.js";
 import { NOT_REMOVING } from "./albumRemoval.js";
 
@@ -51,7 +51,21 @@ export async function searchTracks(db: Db, q: string, limit = 500): Promise<Trac
 
 export async function getTracksByIds(db: Db, ids: number[]): Promise<Track[]> {
   if (ids.length === 0) return [];
-  const rows = await db.select<TrackRow>(`${TRACK_SELECT} WHERE t.id IN (${ids.map(() => "?").join(",")})`, ids);
+  const rows = await db.select<TrackRow>(`${TRACK_SELECT} WHERE t.id IN (${placeholders(ids.length)})`, ids);
   const byId = new Map(rows.map((r) => [r.id, rowToTrack(r)]));
   return ids.map((id) => byId.get(id)).filter((t): t is Track => !!t);
+}
+
+/** Which of these library tracks have an offline copy (#2), by the rows alone: no file checks. */
+export async function downloadedIds(db: Db, trackIds: readonly number[]): Promise<number[]> {
+  const out: number[] = [];
+  for (const chunk of chunks(trackIds, 500)) {
+    out.push(...(await db.select<{ id: number }>(`SELECT id FROM tracks WHERE local_path IS NOT NULL AND id IN (${placeholders(chunk.length)})`, chunk)).map((r) => r.id));
+  }
+  return out;
+}
+
+/** A library track by its Bandcamp track id: the row id and the album it is in, or null. */
+export function byBandcampId(db: Db, bandcampTrackId: number): Promise<{ id: number; album_id: number } | null> {
+  return db.get<{ id: number; album_id: number }>("SELECT id, album_id FROM tracks WHERE track_id = ?", [bandcampTrackId]);
 }

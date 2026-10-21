@@ -1,18 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { useImport, useJob, useSearch, useInvalidateLibrary } from "../api/queries";
-import type { SearchResult } from "@bc/core";
+import { useAddRelease, useSearch } from "../api/queries";
+import { artUrl, type SearchResult } from "@bc/core";
 import { JobProgress } from "../components/JobProgress";
-import { artUrl } from "../lib/art";
 import { friendlyError } from "../lib/errors";
+import { useDebounced } from "../lib/useDebounced";
 import { ExternalLink } from "../components/ExternalLink";
 import { ReleasePlayButton, useReleasePreview } from "../components/ReleasePlayButton";
-
-function useDebounced<T>(v: T, ms: number): T {
-  const [d, setD] = useState(v);
-  useEffect(() => { const t = setTimeout(() => setD(v), ms); return () => clearTimeout(t); }, [v, ms]);
-  return d;
-}
 
 export function SearchPage() {
   // ?q= (Search Bandcamp… in the command palette) starts the search with that text.
@@ -53,15 +47,10 @@ export function SearchPage() {
 }
 
 function Result({ r }: { r: SearchResult }) {
-  const imp = useImport();
-  const [jobId, setJobId] = useState<number | null>(null);
-  const { data: job } = useJob(jobId);
-  const invalidate = useInvalidateLibrary();
-  useEffect(() => { if (job && (job.status === "done" || job.status === "failed")) invalidate(); }, [job?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { add, job, busy } = useAddRelease(r.url);
   // Album/track results carry an `img` without the "a" prefix that real art URLs need; derive from art_id instead.
   const nav = useNavigate();
   const img = r.type === "band" ? r.img : artUrl(r.art_id, 7) ?? r.img;
-  const add = async () => { const j = await imp.mutateAsync({ url: r.url }); setJobId(j.id); };
   const label = "Add";
   const preview = useReleasePreview(r.url, null, r.in_library);
   return (
@@ -86,7 +75,7 @@ function Result({ r }: { r: SearchResult }) {
             {r.in_library ? (
               <Link className="btn sm" to="/library">In library</Link>
             ) : (
-              <button className="btn sm primary" onClick={add} disabled={imp.isPending || (!!job && (job.status === "pending" || job.status === "queued" || job.status === "running"))}>{label}</button>
+              <button className="btn sm primary" onClick={add} disabled={busy}>{label}</button>
             )}
           </span>
         )}

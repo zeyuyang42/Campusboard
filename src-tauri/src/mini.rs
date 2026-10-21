@@ -50,7 +50,13 @@ pub fn hide<R: Runtime>(app: &AppHandle<R>, w: &tauri::WebviewWindow<R>) {
         geo.save();
     }
     let _ = w.hide();
-    let _ = app.emit_to("main", "mini:command", serde_json::json!({ "type": "bye" }));
+    tell_main(app, "bye");
+}
+
+/// Tell the main window's mini bridge about this window: `hello` starts the state stream,
+/// `bye` stops it (web/src/player/miniBridge.ts validates the payload).
+pub fn tell_main<R: Runtime>(app: &AppHandle<R>, kind: &str) {
+    let _ = app.emit_to(crate::MAIN_LABEL, "mini:command", serde_json::json!({ "type": kind }));
 }
 
 pub fn toggle<R: Runtime>(app: &AppHandle<R>, focus_first: bool) -> tauri::Result<()> {
@@ -71,13 +77,11 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>, focus_first: bool) -> tauri::Resul
             Ok(())
         }
         (Toggle::Show, Some(w)) => {
-            if w.is_minimized().unwrap_or(false) {
-                w.unminimize()?;
-            }
-            w.show()?;
-            // Restart the state stream without waiting for WebKit's visibilitychange.
-            let _ = app.emit_to("main", "mini:command", serde_json::json!({ "type": "hello" }));
-            w.set_focus()
+            let shown = crate::reveal(&w);
+            // Restart the state stream without waiting for WebKit's visibilitychange, even when
+            // focusing failed: the window is visible either way.
+            tell_main(app, "hello");
+            shown
         }
         _ => {
             // Built hidden, so it is moved to its saved place before it shows.

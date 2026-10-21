@@ -1,5 +1,4 @@
-import { radioImageUrl } from "@bc/core";
-import { artUrl, type ArtSize } from "../lib/art";
+import { artUrl, radioImageUrl, type ArtSize } from "@bc/core";
 
 /** Album art by `artId`; `imageId` (a radio episode's image, no "a" prefix) is the fallback. */
 export function ArtImage({ artId, imageId, size = 16, alt = "", className }: { artId: number | null | undefined; imageId?: number | null; size?: ArtSize; alt?: string; className?: string }) {

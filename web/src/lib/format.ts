@@ -31,8 +31,12 @@ export function yearOf(d: string | null | undefined): string {
   const t = Date.parse(d);
   return Number.isNaN(t) ? "" : String(new Date(t).getUTCFullYear());
 }
+/** "1 track", "3 tracks"; `many` for an irregular plural ("1 wishlist item", "2 wishlist items"). */
+export const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 /** "1 play", "3 plays". */
-export const formatPlays = (n: number) => `${n} play${n === 1 ? "" : "s"}`;
+export const formatPlays = (n: number) => plural(n, "play");
+/** A local timestamp (ISO string or epoch ms) for "Last synced …" lines: medium date, short time. */
+export const formatDateTime = (at: string | number) => new Date(at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 /** Decimal units, as Finder shows sizes: 1 MB = 1,000,000 bytes. */
 export function formatBytes(n: number): string {
   // At most three significant digits, no trailing zeros: 193 KB, 4.5 MB, 1 GB, 1.25 GB.

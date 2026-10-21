@@ -5,6 +5,7 @@ import { useArtists, usePlaylists } from "../api/queries";
 import { usePalette } from "../ui/palette";
 import { navigateTo } from "../lib/navigation";
 import { filterActions, matches, PALETTE_ACTIONS } from "../lib/paletteActions";
+import { useDebounced } from "../lib/useDebounced";
 
 /** Library results per group; the palette is for jumping, not browsing. */
 export const PALETTE_GROUP_MAX = 6;
@@ -22,15 +23,6 @@ interface Item {
 
 /** A DOM id for a result row (keys hold ":" and ids of any kind). */
 const optionId = (key: string) => `palette-option-${key.replace(/[^A-Za-z0-9_-]/g, "_")}`;
-
-function useDebounced<T>(value: T, ms: number): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(id);
-  }, [value, ms]);
-  return v;
-}
 
 /** ⌘K (View → Command Palette): one input that jumps to an album, artist or playlist, or runs an action. */
 export function CommandPalette() {

@@ -10,82 +10,51 @@ use tauri::Manager;
 
 use tauri_plugin_sql::{Migration, MigrationKind};
 
+/// The main window's label (tauri.conf.json); the mini window is `mini::LABEL`.
+pub const MAIN_LABEL: &str = "main";
+
+/// The main window, from anything that manages windows (the app, a handle, a window).
+pub fn main_window<R: tauri::Runtime, M: Manager<R>>(m: &M) -> Option<tauri::WebviewWindow<R>> {
+    m.get_webview_window(MAIN_LABEL)
+}
+
+/// Bring a window to the front: unminimized if it was minimized, shown, focused.
+pub fn reveal<R: tauri::Runtime>(w: &tauri::WebviewWindow<R>) -> tauri::Result<()> {
+    if w.is_minimized().unwrap_or(false) {
+        let _ = w.unminimize(); // best effort: a window that will not unminimize can still show
+    }
+    w.show()?;
+    w.set_focus()
+}
+
+/// One migration: `migration!(version, "description", "NNNN_name.sql")` (a file under migrations/).
+macro_rules! migration {
+    ($version:expr, $description:expr, $file:literal) => {
+        Migration {
+            version: $version,
+            description: $description,
+            sql: include_str!(concat!("../migrations/", $file)),
+            kind: MigrationKind::Up,
+        }
+    };
+}
+
 /// Database migrations. Each file must be safe to re-run (IF NOT EXISTS) so a
 /// library copied from the old server build can be adopted as-is.
 fn migrations() -> Vec<Migration> {
     vec![
-        Migration {
-            version: 1,
-            description: "init",
-            sql: include_str!("../migrations/0001_init.sql"),
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 2,
-            description: "settings and art palettes",
-            sql: include_str!("../migrations/0002_settings.sql"),
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 3,
-            description: "fan collection and wishlist",
-            sql: include_str!("../migrations/0003_fan_items.sql"),
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 4,
-            description: "releases removed from the library that a sync must not re-import",
-            sql: include_str!("../migrations/0004_fan_dismissed.sql"),
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 5,
-            description: "listening history",
-            sql: include_str!("../migrations/0005_plays.sql"),
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 6,
-            description: "new releases from library artists",
-            sql: include_str!("../migrations/0006_new_releases.sql"),
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 7,
-            description: "library import bookkeeping",
-            sql: include_str!("../migrations/0007_library_import.sql"),
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 8,
-            description: "offline copies of tracks",
-            sql: include_str!("../migrations/0008_offline.sql"),
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 9,
-            description: "album notes and ratings",
-            sql: include_str!("../migrations/0009_album_notes.sql"),
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 10,
-            description: "resume points for long tracks and radio episodes",
-            sql: include_str!("../migrations/0010_resume_positions.sql"),
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 11,
-            description: "smart playlists",
-            sql: include_str!("../migrations/0011_smart_playlists.sql"),
-            kind: MigrationKind::Up,
-        },
-        Migration {
-            version: 12,
-            description: "raw art swatches for the vivid backdrop",
-            sql: include_str!("../migrations/0012_art_swatches.sql"),
-            kind: MigrationKind::Up,
-        },
+        migration!(1, "init", "0001_init.sql"),
+        migration!(2, "settings and art palettes", "0002_settings.sql"),
+        migration!(3, "fan collection and wishlist", "0003_fan_items.sql"),
+        migration!(4, "releases removed from the library that a sync must not re-import", "0004_fan_dismissed.sql"),
+        migration!(5, "listening history", "0005_plays.sql"),
+        migration!(6, "new releases from library artists", "0006_new_releases.sql"),
+        migration!(7, "library import bookkeeping", "0007_library_import.sql"),
+        migration!(8, "offline copies of tracks", "0008_offline.sql"),
+        migration!(9, "album notes and ratings", "0009_album_notes.sql"),
+        migration!(10, "resume points for long tracks and radio episodes", "0010_resume_positions.sql"),
+        migration!(11, "smart playlists", "0011_smart_playlists.sql"),
+        migration!(12, "raw art swatches for the vivid backdrop", "0012_art_swatches.sql"),
     ]
 }
 
@@ -290,11 +259,11 @@ async fn selftest_window(app: tauri::AppHandle, action: String, ms: Option<u64>)
     }
     if action == "drag-drop" {
         // The effective config of the main window: false hands drags to WebKit (#92).
-        let main = app.config().app.windows.iter().find(|w| w.label == "main").ok_or("no main window config")?;
+        let main = app.config().app.windows.iter().find(|w| w.label == MAIN_LABEL).ok_or("no main window config")?;
         return Ok(serde_json::json!({ "dragDropEnabled": main.drag_drop_enabled }));
     }
     let generation = GUARD_GEN.fetch_add(1, Ordering::SeqCst) + 1;
-    let win = app.get_webview_window("main").ok_or("no main window")?;
+    let win = main_window(&app).ok_or("no main window")?;
     let mut awake = serde_json::Value::Null;
     match action.as_str() {
         "keep-awake" => awake = keep_awake(&win),
@@ -485,7 +454,7 @@ fn is_app_url(url: &tauri::Url, dev_url: Option<&tauri::Url>) -> bool {
 fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("navigation-guard")
         .on_navigation(|webview, url| {
-            if webview.label() != "main" {
+            if webview.label() != MAIN_LABEL {
                 return true;
             }
             let dev = if cfg!(debug_assertions) { webview.config().build.dev_url.clone() } else { None };
@@ -549,10 +518,9 @@ pub fn run() {
             // The main window is created hidden (tauri.conf.json) so it is sized and placed
             // before anyone sees it.
             let geo = geometry::Geometry::load(app);
-            if let Some(main) = app.get_webview_window("main") {
+            if let Some(main) = main_window(app.handle()) {
                 geo.restore(&main, &geometry::MAIN);
-                let _ = main.show();
-                let _ = main.set_focus();
+                let _ = reveal(&main);
             }
             app.manage(geo);
             Ok(())
@@ -606,7 +574,8 @@ mod tests {
             assert_eq!(m.version, i as i64 + 1);
             assert!(f.starts_with(&format!("{:04}_", i + 1)), "{f}");
         }
-        assert!(ms.last().unwrap().sql.contains("smart_playlists"));
+        // The newest file's own table: update this with the next migration.
+        assert!(ms.last().unwrap().sql.contains("art_swatches"));
     }
 
     /// The native file-drop handler swallows every drag before WebKit sees it, link text

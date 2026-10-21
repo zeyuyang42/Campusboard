@@ -1,9 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { NodeDb } from "./helpers/nodeDb.js";
-import { fixture } from "./helpers.js";
+import { fixture, jsonFixture as json } from "./helpers.js";
 import { FetchQueue } from "../src/scrape/http.js";
 import {
   DEFAULT_DISCOVER, DISCOVER_ENDPOINT, LOCATION_SEARCH_ENDPOINT, STREAM_REFRESH_ENDPOINT, TAG_SEARCH_ENDPOINT,
@@ -16,8 +13,6 @@ import { upsertTralbum } from "../src/services/importService.js";
 import { parseTralbumPage } from "../src/scrape/parseTralbum.js";
 import { createCore } from "../src/core.js";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const json = (name: string) => readFileSync(path.join(here, "fixtures", `${name}.json`), "utf8");
 const raw = () => JSON.parse(json("discover"));
 
 describe("parseDiscoverResponse (discover_web)", () => {

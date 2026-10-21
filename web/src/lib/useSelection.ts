@@ -7,10 +7,12 @@ export function useSelection(ids: number[]) {
   const idsRef = useRef(ids);
   idsRef.current = ids;
 
-  // Drop ids that no longer exist.
+  // Drop ids that no longer exist (`ids` should be memoised by the caller, so this runs on real changes).
   useEffect(() => {
     setSelected((prev) => {
-      const next = new Set([...prev].filter((id) => ids.includes(id)));
+      if (!prev.size) return prev;
+      const live = new Set(ids);
+      const next = new Set([...prev].filter((id) => live.has(id)));
       return next.size === prev.size ? prev : next;
     });
   }, [ids]);

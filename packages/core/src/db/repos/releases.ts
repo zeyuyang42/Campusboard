@@ -1,5 +1,5 @@
 import type { Db } from "../Db.js";
-import { valuesList } from "../Db.js";
+import { chunks, placeholders, valuesList } from "../Db.js";
 import type { ItemType, NewRelease } from "../../types.js";
 
 /** A release URL as a check stores it. */
@@ -59,8 +59,7 @@ export function getWatch(db: Db, artistId: number): Promise<WatchRow | null> {
 export async function insertReleases(db: Db, artistId: number, rows: ReleaseRow[]): Promise<{ id: number; status: ReleaseRow["status"] }[]> {
   const ids: { id: number; status: ReleaseRow["status"] }[] = [];
   const COLS = 7;
-  for (let i = 0; i < rows.length; i += 100) {
-    const chunk = rows.slice(i, i + 100);
+  for (const chunk of chunks(rows, 100)) {
     const got = await db.select<{ id: number; status: ReleaseRow["status"] }>(
       `INSERT INTO artist_releases (artist_id, url, item_type, title, art_id, artist_override, status)
        VALUES ${valuesList(chunk.length, COLS)} ON CONFLICT(url) DO NOTHING RETURNING id, status`,
@@ -172,9 +171,8 @@ export async function settleRelease(db: Db, url: string, albumId: number): Promi
 export async function dismissReleases(db: Db, ids: number[]): Promise<number> {
   let n = 0;
   const clean = [...new Set(ids.filter((i) => Number.isInteger(i)))];
-  for (let i = 0; i < clean.length; i += 100) {
-    const chunk = clean.slice(i, i + 100);
-    n += (await db.run(`UPDATE artist_releases SET status = 'dismissed' WHERE status = 'new' AND id IN (${chunk.map(() => "?").join(",")})`, chunk)).changes;
+  for (const chunk of chunks(clean, 100)) {
+    n += (await db.run(`UPDATE artist_releases SET status = 'dismissed' WHERE status = 'new' AND id IN (${placeholders(chunk.length)})`, chunk)).changes;
   }
   return n;
 }

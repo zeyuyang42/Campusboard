@@ -1,6 +1,11 @@
+import { useEffect, useState } from "react";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCore } from "./core";
-import { repos, type DiscoverPage, type DiscoverParams, type HistoryCursor, type Job, type PlayState, type StatsPeriod } from "@bc/core";
+import { invalidateGroup } from "./invalidate";
+import { repos, type DiscoverPage, type DiscoverParams, type HistoryCursor, type Job, type PlayState, type StatsPeriod, isActiveJob } from "@bc/core";
+
+/** Named groups of the prefixes below, for invalidation; `invalidateGroup` works outside React too. */
+export { KEY_GROUPS, invalidateGroup, type KeyGroup } from "./invalidate";
 
 export const keys = {
   albums: (sort: string, filter = "all", q = "", tag = "") => ["albums", sort, filter, q, tag] as const,
@@ -108,7 +113,7 @@ export function useClearHistory() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => (await core()).clearHistory(),
-    onSuccess: () => { for (const k of ["history", "albums", "album", "tracks", "playlist"]) void qc.invalidateQueries({ queryKey: [k] }); },
+    onSuccess: () => invalidateGroup("history", qc),
   });
 }
 export const useAlbum = (id: number) => useQuery({ queryKey: keys.album(id), queryFn: async () => (await core()).album(id), enabled: id > 0 });
@@ -121,11 +126,13 @@ export const usePlaylistSummaries = () => useQuery({ queryKey: [...keys.playlist
 export const usePlaylist = (id: number) => useQuery({ queryKey: keys.playlist(id), queryFn: async () => (await core()).playlist(id), enabled: id > 0 });
 export const useSearch = (q: string) => useQuery({ queryKey: keys.search(q), queryFn: async () => (await core()).search(q), enabled: q.trim().length >= 2, staleTime: 60_000 });
 
-const isActive = (j?: Job | null) => !!j && (j.status === "pending" || j.status === "queued" || j.status === "running");
+/** A job that is not over yet: pending (items still being written), queued or running. */
+export const isJobActive = (j?: Job | null) => !!j && isActiveJob(j);
 export const useJobs = () =>
-  useQuery({ queryKey: keys.jobs, queryFn: async () => (await core()).jobs(), refetchInterval: (q) => (q.state.data?.some(isActive) ? 1000 : false) });
+  useQuery({ queryKey: keys.jobs, queryFn: async () => (await core()).jobs(), refetchInterval: (q) => (q.state.data?.some(isJobActive) ? 1000 : false) });
+/** One job, polled every second while it runs; nothing is fetched while `id` is null. */
 export const useJob = (id: number | null) =>
-  useQuery({ queryKey: keys.job(id ?? 0), queryFn: async () => (await core()).job(id!), enabled: !!id, refetchInterval: (q) => (isActive(q.state.data) ? 1000 : false) });
+  useQuery({ queryKey: keys.job(id ?? 0), queryFn: async () => (await core()).job(id!), enabled: !!id, refetchInterval: (q) => (isJobActive(q.state.data) ? 1000 : false) });
 /** When Bandcamp requests resume after a bot challenge, or null. Keyed under "jobs" so job updates refresh it. */
 export const useChallengeUntil = () =>
   useQuery({ queryKey: keys.challenge, queryFn: async () => (await core()).challengeUntil(), refetchInterval: (q) => (q.state.data ? 5000 : false) });
@@ -133,8 +140,39 @@ export const useChallengeUntil = () =>
 /** Invalidate everything that an import or edit may have changed. */
 export function useInvalidateLibrary() {
   const qc = useQueryClient();
-  return () => {
-    for (const k of ["albums", "album", "artists", "artist", "tracks", "search", "playlists", "playlist", "history", "releases"]) void qc.invalidateQueries({ queryKey: [k] });
+  return () => invalidateGroup("library", qc);
+}
+
+/** Why a job failed, for a card's error line. */
+const jobFailure = (job: Job | null | undefined) => (job?.status === "failed" ? (job.items?.[0]?.error ?? job.error ?? "Import failed") : null);
+
+/**
+ * One card's import of a release (Search, Discover, New releases, Radio tracklist, Browse):
+ * `add()` queues the import of `url` and follows its job (polled only while one is live);
+ * `track(id)` follows a job started elsewhere. When the job reaches done or failed the library
+ * is invalidated once and `onSettled` runs (on failure too) with the job and the album id it produced, if any.
+ */
+export function useAddRelease(url: string, onSettled?: (job: Job, importedAlbumId: number | null) => void) {
+  const imp = useImport();
+  const [jobId, setJobId] = useState<number | null>(null);
+  const { data: job } = useJob(jobId);
+  const invalidate = useInvalidateLibrary();
+  const finished = job?.status === "done" || job?.status === "failed";
+  const importedAlbumId = job?.status === "done" ? job.items?.find((x) => x.album_id)?.album_id ?? null : null;
+  useEffect(() => {
+    if (!finished) return;
+    invalidate();
+    onSettled?.(job!, importedAlbumId);
+  }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
+  const add = async () => { const j = await imp.mutateAsync({ url }); setJobId(j.id); return j; };
+  return {
+    add,
+    track: setJobId,
+    job,
+    /** The import is being queued or its job is still live. */
+    busy: imp.isPending || isJobActive(job),
+    failed: jobFailure(job),
+    importedAlbumId,
   };
 }
 
@@ -250,9 +288,7 @@ export const useOfflineStats = () => useQuery({ queryKey: keys.offline, queryFn:
 
 export function useOfflineMutations() {
   const qc = useQueryClient();
-  const inv = () => {
-    for (const k of ["offline", "albums", "album", "tracks", "playlist", "jobs"]) void qc.invalidateQueries({ queryKey: [k] });
-  };
+  const inv = () => invalidateGroup("offline", qc);
   return {
     downloadAlbum: useMutation({ mutationFn: async (id: number) => (await core()).downloadAlbum(id), onSuccess: inv }),
     removeAlbum: useMutation({ mutationFn: async (id: number) => (await core()).removeAlbumDownloads(id), onSuccess: inv }),
@@ -261,7 +297,6 @@ export function useOfflineMutations() {
   };
 }
 
-export async function cancelJob(id: number) { return (await core()).cancelJob(id); }
 export async function loadPlayState() { return (await core()).playState(); }
 export async function savePlayState(s: PlayState) { return (await core()).savePlayState(s); }
 export async function savePlayPosition(trackId: number | null, positionSec: number, index: number) { return (await core()).savePlayPosition(trackId, positionSec, index); }

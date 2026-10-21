@@ -1,4 +1,4 @@
-import { artUrl } from "../lib/art";
+import { artUrl } from "@bc/core";
 
 /** 2x2 mosaic of a playlist's first distinct album arts. */
 export function PlaylistCover({ artIds, size = "md" }: { artIds: number[]; size?: "sm" | "md" }) {

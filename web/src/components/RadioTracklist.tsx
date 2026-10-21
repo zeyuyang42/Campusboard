@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { QueueTrack, RadioEntry } from "@bc/core";
-import { useImport, useInvalidateLibrary, useJob } from "../api/queries";
+import { useAddRelease } from "../api/queries";
 import { usePlayer } from "../player/store";
 import { useRadioNow } from "../player/radio";
 import { ArtImage } from "./ArtImage";
@@ -35,19 +35,13 @@ export function RadioTracklist({ cur, onOpenAlbum }: { cur: QueueTrack; onOpenAl
 }
 
 function RadioEntryRow({ entry, current, onSeek, onOpenAlbum }: { entry: RadioEntry; current: boolean; onSeek: () => void; onOpenAlbum?: () => void }) {
-  const imp = useImport();
-  const invalidate = useInvalidateLibrary();
-  const [jobId, setJobId] = useState<number | null>(null);
-  const { data: job } = useJob(jobId);
+  // Done: the library is refreshed (and this tracklist with it, which then offers Open album).
+  const { add, busy: importing, failed } = useAddRelease(entry.url ?? "");
   const [err, setErr] = useState<string | null>(null);
-  const importing = imp.isPending || (!!job && (job.status === "pending" || job.status === "queued" || job.status === "running"));
-  const failed = job?.status === "failed" ? (job.items?.[0]?.error ?? job.error ?? "Import failed") : null;
-  // Done: refresh the library (and this tracklist, which then offers Open album).
-  useEffect(() => { if (job?.status === "done") invalidate(); }, [job?.status]); // eslint-disable-line react-hooks/exhaustive-deps
   const start = async () => {
     if (!entry.url) return;
     setErr(null);
-    try { setJobId((await imp.mutateAsync({ url: entry.url })).id); } catch (e) { setErr(friendlyError(e)); }
+    try { await add(); } catch (e) { setErr(friendlyError(e)); }
   };
   return (
     <li className={`radio-entry ${current ? "current" : ""}`} aria-current={current ? "true" : undefined}>

@@ -10,7 +10,8 @@ import {
   type TransitionEvent, type TransitionKind, type TransitionState,
 } from "@bc/core";
 import { audioEls } from "./audio";
-import { getCore, invalidateQueries } from "../api/core";
+import { getCore } from "../api/core";
+import { invalidateQueries } from "../api/invalidate";
 import { friendlyError } from "../lib/errors";
 
 export type Status = "idle" | "loading" | "playing" | "paused";

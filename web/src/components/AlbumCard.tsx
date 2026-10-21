@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Link } from "react-router-dom";
 import type { Album } from "@bc/core";
 import { ArtImage } from "./ArtImage";
@@ -7,14 +8,19 @@ import { usePlayer } from "../player/store";
 import { formatReleaseDate, yearOf } from "../lib/format";
 import { useTrackActions } from "../lib/useTrackActions";
 import { useMenu } from "../ui/menu";
-import { useAlbumMutations } from "../api/queries";
+import { invalidateGroup } from "../api/queries";
 import { removeAlbumWithUndo } from "../lib/removals";
 
-/** `detail` replaces the release year under the title (e.g. a play count); "" shows nothing there. */
-export function AlbumCard({ album, showArtist = true, detail }: { album: Album; showArtist?: boolean; detail?: string }) {
+/** Re-scrape one album, then refresh the library views (what useAlbumMutations().refresh does, without a mutation per card). */
+const refreshAlbum = (id: number) => void getCore().then((c) => c.refreshAlbum(id)).then(() => invalidateGroup("library")).catch(() => undefined);
+
+/**
+ * `detail` replaces the release year under the title (e.g. a play count); "" shows nothing there.
+ * Memoised: a grid that re-renders for its filter text or sort keeps the cards whose album is unchanged.
+ */
+export const AlbumCard = memo(function AlbumCard({ album, showArtist = true, detail }: { album: Album; showArtist?: boolean; detail?: string }) {
   const playTracks = usePlayer((s) => s.playTracks);
   const actions = useTrackActions();
-  const { refresh } = useAlbumMutations();
   const play = async (e: React.MouseEvent) => {
     e.preventDefault();
     const full = await (await getCore()).album(album.id);
@@ -27,7 +33,7 @@ export function AlbumCard({ album, showArtist = true, detail }: { album: Album; 
     const full = await (await getCore()).album(album.id);
     if (!full) return;
     const content = actions(full.tracks, { onAlbumPage: false, remove: { label: "Remove from library", onSelect: () => { void removeAlbumWithUndo(album); } } });
-    if ("items" in content) content.items.splice(content.items.length - 2, 0, { label: "Refresh from Bandcamp", onSelect: () => refresh.mutate(album.id) });
+    if ("items" in content) content.items.splice(content.items.length - 2, 0, { label: "Refresh from Bandcamp", onSelect: () => refreshAlbum(album.id) });
     useMenu.getState().show(at, content);
   };
   // A pre-order shows when it comes out in place of the year (a `detail` still wins).
@@ -46,4 +52,4 @@ export function AlbumCard({ album, showArtist = true, detail }: { album: Album; 
       <div className="sub meta">{showArtist && <span>{album.artist_name}</span>}{second && <span className={preorder ? "preorder" : undefined}>{second}</span>}</div>
     </Link>
   );
-}
+});

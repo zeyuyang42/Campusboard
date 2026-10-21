@@ -1,4 +1,4 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openExternal } from "../lib/openExternal";
 
 /** Opens the URL in the user's default browser (the app window never navigates away). */
 export function ExternalLink({ href, className, children, title }: { href: string; className?: string; children: React.ReactNode; title?: string }) {
@@ -10,7 +10,7 @@ export function ExternalLink({ href, className, children, title }: { href: strin
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        void openUrl(href).catch(() => window.open(href, "_blank", "noopener"));
+        openExternal(href);
       }}
     >
       {children}

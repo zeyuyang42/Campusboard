@@ -9,6 +9,7 @@ import { PlaylistPage } from "../src/pages/PlaylistPage";
 import { MenuHost } from "../src/components/MenuHost";
 import { useMenu } from "../src/ui/menu";
 import { MAX_QUEUE, usePlayer } from "../src/player/store";
+import { flushAct as flush } from "./harness";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -65,9 +66,6 @@ const render = (at: string) => {
     h(Route, { path: "/playlists", element: h(PlaylistsPage) }),
     h(Route, { path: "/playlists/:id", element: h(PlaylistPage) }))))));
 };
-async function flush() {
-  for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
-}
 const button = (text: string) => [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === text) as HTMLButtonElement;
 const click = async (el: HTMLElement) => { await act(async () => { el.click(); }); await flush(); };
 async function setValue(el: HTMLInputElement | HTMLSelectElement, v: string) {

@@ -11,8 +11,9 @@ const lastPrune = new WeakMap<Db, number>();
  */
 export async function cachedFetchText(db: Db, queue: FetchQueue, url: string, maxAge = PAGE_CACHE_MS, retries?: number): Promise<string> {
   if (maxAge > 0) {
-    const hit = await db.get<{ html: string; fetched_at: number }>("SELECT html, fetched_at FROM page_cache WHERE url = ?", [url]);
-    if (hit && Date.now() - hit.fetched_at < maxAge) return hit.html;
+    // The cutoff is in the query, so a stale row's HTML is never read out of the database.
+    const hit = await db.get<{ html: string }>("SELECT html FROM page_cache WHERE url = ? AND fetched_at > ?", [url, Date.now() - maxAge]);
+    if (hit) return hit.html;
   }
   const html = await queue.fetchText(url, {}, retries);
   await db.run("INSERT INTO page_cache (url, html, fetched_at) VALUES (?, ?, ?) ON CONFLICT(url) DO UPDATE SET html = excluded.html, fetched_at = excluded.fetched_at", [url, html, Date.now()]);
