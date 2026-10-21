@@ -116,6 +116,10 @@ export class BackdropEngine {
    */
   setSwatches(p: BoostedPalette | null, seed = 0) {
     const now = this.deps.now();
+    // The palette already on screen (or arriving): a remount re-publishes it, no fade then.
+    const shown = this.fadeStart !== null ? this.palB : this.palA;
+    const shownSeed = this.fadeStart !== null ? this.seedB : this.seedA;
+    if (p === shown && seed === shownSeed) return;
     if (this.palA === null && this.fadeStart === null) {
       this.palA = p; this.seedA = seed;
     } else {

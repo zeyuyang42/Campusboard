@@ -159,7 +159,9 @@ export const createGl: GlFactory = (canvas, hooks) => {
       for (const p of programs.values()) ctx.deleteProgram(p.program);
       programs.clear();
       if (buffer) ctx.deleteBuffer(buffer);
-      ctx.getExtension("WEBGL_lose_context")?.loseContext();
+      // Not WEBGL_lose_context.loseContext(): a canvas keeps its one context, and getContext()
+      // on the same element (React StrictMode mounts the effect twice in dev) would hand back
+      // the lost one for good. Releasing the programs and buffer is enough.
     },
   };
 };

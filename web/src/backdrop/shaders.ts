@@ -104,13 +104,15 @@ void main() {
     float fi = float(i);
     float base = 0.2 + 0.2 * fi;
     float y = base + 0.08 * sin(uv.x * 2.4 + s + fi * 1.7 + u_seed) + 0.07 * (noise(vec2(uv.x * 3.0 + fi * 7.0 + u_seed, s * 0.6)) - 0.5);
-    float width = 0.1 + 0.03 * sin(s * 0.5 + fi);
+    float width = 0.16 + 0.04 * sin(s * 0.5 + fi);
     float d = (uv.y - y) / width;
     float g = exp(-d * d);
     acc += pal((fi + 0.5) / 4.0) * g;
     wsum += g;
   }
-  vec3 col = mix(u_surface, acc / max(wsum, 1e-3), clamp(wsum, 0.0, 1.0));
+  // A dim fill of the middle swatch under the bands, so the gaps are not bare surface.
+  vec3 fill = mix(u_surface, pal(0.5), 0.3);
+  vec3 col = mix(fill, acc / max(wsum, 1e-3), clamp(wsum * 1.5, 0.0, 1.0));
   gl_FragColor = vec4(finish(col), 1.0);
 }
 `;
@@ -127,12 +129,13 @@ void main() {
     float fi = float(i);
     vec2 c = vec2(0.5 + 0.38 * sin(s * (1.0 + 0.3 * fi) + fi * 1.3 + u_seed), 0.5 + 0.38 * sin(s * (1.3 + 0.2 * fi) + fi * 2.1 + u_seed * 0.7));
     vec2 d = (uv - c) * asp;
-    float g = exp(-dot(d, d) * 3.5);
+    float g = exp(-dot(d, d) * 7.0);
     acc += pal((fi + 0.5) / 5.0) * g;
     wsum += g;
   }
-  vec3 col = acc / max(wsum, 1e-4);
-  float grain = (hash(gl_FragCoord.xy + fract(u_time) * 100.0) - 0.5) * 0.06;
+  // Between the blobs the surface shows through a little, so the mesh keeps some structure.
+  vec3 col = mix(u_surface, acc / max(wsum, 1e-4), clamp(0.55 + wsum, 0.0, 1.0));
+  float grain = (hash(gl_FragCoord.xy + fract(u_time) * 100.0) - 0.5) * 0.08;
   col *= 1.0 + grain;
   gl_FragColor = vec4(finish(col), 1.0);
 }

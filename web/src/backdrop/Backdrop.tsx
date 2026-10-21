@@ -32,6 +32,8 @@ export function Backdrop() {
   const backdrop = useTheme((s) => s.resolved.backdrop);
   const status = usePlayer((s) => s.status);
   const paused = status !== "playing" || backdrop.motion === "still";
+  // The engine learns the mode here too, so it reports "off" (and does nothing) outside morph.
+  useEffect(() => { engine.setInput({ mode: backdrop.mode }); }, [backdrop.mode]);
   if (backdrop.mode === "conservative") {
     return (
       <div className="ambient" aria-hidden="true">
