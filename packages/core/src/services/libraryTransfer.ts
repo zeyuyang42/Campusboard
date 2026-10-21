@@ -8,14 +8,15 @@
 // resolves after every album it imports. See db/repos/importPending.ts.
 import { z } from "zod";
 import type { Db } from "../db/Db.js";
-import { now, valuesList } from "../db/Db.js";
+import { chunks, now, sqlTime as toSqlTime, valuesList } from "../db/Db.js";
+import { activeSql } from "../db/repos/jobs.js";
 import { getSetting, setSetting } from "../db/repos/settings.js";
 import { recomputeOwned } from "../db/repos/fanItems.js";
 import { addPending, resolvePending, type PendingRow } from "../db/repos/importPending.js";
 import { normalizePlaylistName } from "../db/repos/playlists.js";
 import { addPendingNotes, exportAlbumNotes, NOTE_MAX, RATING_MAX } from "../db/repos/albumNotes.js";
 import { parseRuleJson, parseSmartRule, SmartRuleSchema } from "../db/repos/smartPlaylists.js";
-import { isBandcampHost, normalizeBandcampUrl } from "../scrape/url.js";
+import { isBandcampHost, releaseUrlOrNull } from "../scrape/url.js";
 import { normalizeFanUsername } from "../scrape/fan.js";
 import { releasePath } from "../db/repos/releases.js";
 import { ACCOUNT_KEY, setUsername } from "./account.js";
@@ -286,7 +287,7 @@ async function libraryState(db: Db): Promise<LibraryState> {
   const tracks = await db.select<{ track_id: number }>("SELECT track_id FROM tracks");
   // URLs an unfinished job will fetch anyway (an earlier import of the same file, say).
   const queued = await db.select<{ url: string }>(
-    "SELECT ji.url FROM job_items ji JOIN jobs j ON j.id = ji.job_id WHERE j.status IN ('pending','queued','running') AND ji.status IN ('queued','running')",
+    `SELECT ji.url FROM job_items ji JOIN jobs j ON j.id = ji.job_id WHERE ${activeSql("j.status")} AND ji.status IN ('queued','running')`,
   );
   const playlists = await db.select<{ id: number; name: string; created_at: string }>("SELECT id, name, created_at FROM playlists");
   const names = new Map<string, number[]>();
@@ -313,15 +314,6 @@ function hasAlbum(s: LibraryState, a: LibraryExport["albums"][number]): boolean 
   return s.urls.has(a.url) || s.ids.has(`${a.item_type}:${a.bandcamp_id}`) || (a.item_type === "track" && s.trackIds.has(a.bandcamp_id));
 }
 
-function safeReleaseUrl(u: string): string | null {
-  try {
-    const n = normalizeBandcampUrl(u);
-    return n.kind === "artist" ? null : n.url;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * The fan_items addresses for a marked album, or null to drop the mark. Both go through
  * normalizeBandcampUrl; the fetch URL (the one the identity cookie and album refreshes use)
@@ -329,9 +321,9 @@ function safeReleaseUrl(u: string): string | null {
  * can't point a purchased album's refresh at some other page.
  */
 function fanAddresses(a: LibraryExport["albums"][number]): { url: string; fetch_url: string } | null {
-  const url = safeReleaseUrl(a.url);
+  const url = releaseUrlOrNull(a.url);
   if (!url) return null;
-  const fetch = a.fetch_url === null ? url : safeReleaseUrl(a.fetch_url);
+  const fetch = a.fetch_url === null ? url : releaseUrlOrNull(a.fetch_url);
   if (!fetch || !isBandcampHost(new URL(fetch).hostname) || releasePath(fetch) !== releasePath(url)) return null;
   return { url, fetch_url: fetch };
 }
@@ -422,7 +414,7 @@ export async function previewLibraryImport(db: Db, data: LibraryExport): Promise
   let present = 0, invalid = 0;
   for (const a of data.albums) {
     if (hasAlbum(s, a)) present++;
-    else if (!safeReleaseUrl(a.url)) invalid++;
+    else if (!releaseUrlOrNull(a.url)) invalid++;
   }
   const plans = await planPlaylists(db, data, s);
   const created = plans.filter((p): p is Extract<PlaylistPlan, { status: "new" }> => p.status === "new");
@@ -478,8 +470,7 @@ export async function importLibrary(db: Db, runner: JobRunner, data: LibraryExpo
       return [...(a.owned ? [["collection", a, at] as const] : []), ...(a.wishlisted ? [["wishlist", a, at] as const] : [])];
     });
     // sync_job 0: the next complete sync replaces these with what the account really holds.
-    for (let i = 0; i < flagged.length; i += BATCH) {
-      const chunk = flagged.slice(i, i + BATCH);
+    for (const chunk of chunks(flagged, BATCH)) {
       await db.run(
         `INSERT OR IGNORE INTO fan_items (list, item_type, bandcamp_id, url, fetch_url, title, artist, sync_job) VALUES ${valuesList(chunk.length, 8)}`,
         chunk.flatMap(([list, a, at]) => [list, a.item_type, a.bandcamp_id, at.url, at.fetch_url, a.title, a.artist, 0]),
@@ -535,7 +526,7 @@ export async function importLibrary(db: Db, runner: JobRunner, data: LibraryExpo
     ...data.new_releases.muted.map((m): PendingRow => ({ kind: "mute", band_id: m.band_id })),
     // Stored in artist_releases later, so only addresses normalizeBandcampUrl accepts.
     ...data.new_releases.dismissed.flatMap((d): PendingRow[] => {
-      const url = safeReleaseUrl(d.url);
+      const url = releaseUrlOrNull(d.url);
       return url ? [{ kind: "dismissed", band_id: d.band_id, release_url: url, item_type: d.item_type, title: d.title, art_id: d.art_id, artist_override: d.artist_override }] : [];
     }),
   ]);
@@ -547,13 +538,13 @@ export async function importLibrary(db: Db, runner: JobRunner, data: LibraryExpo
     // after the export or after now (a clock ahead, a hand-edited file) is capped, so it
     // can't win over every later local edit.
     const exported = new Date(data.exported_at);
-    const cap = [now(), ...(Number.isNaN(exported.getTime()) ? [] : [exported.toISOString().replace("T", " ").slice(0, 19)])].sort()[0];
-    await addPendingNotes(db, data.notes.filter((n) => safeReleaseUrl(n.album_url)).map((n) => (n.updated_at > cap ? { ...n, updated_at: cap } : n)));
+    const cap = [now(), ...(Number.isNaN(exported.getTime()) ? [] : [toSqlTime(exported)])].sort()[0];
+    await addPendingNotes(db, data.notes.filter((n) => releaseUrlOrNull(n.album_url)).map((n) => (n.updated_at > cap ? { ...n, updated_at: cap } : n)));
   }
 
   const resolved = await resolvePending(db);
 
-  const missing = [...new Set(data.albums.filter((a) => !hasAlbum(s, a)).map((a) => safeReleaseUrl(a.url)).filter((u): u is string => !!u && !s.queued.has(u)))];
+  const missing = [...new Set(data.albums.filter((a) => !hasAlbum(s, a)).map((a) => releaseUrlOrNull(a.url)).filter((u): u is string => !!u && !s.queued.has(u)))];
   const job = missing.length ? await runner.enqueueSelection({ urls: missing, label: opts.label ?? "Library file", kind: "library" }) : null;
   return { job, queued: missing.length, playlistsCreated, resolved };
 }

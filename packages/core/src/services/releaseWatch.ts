@@ -1,10 +1,11 @@
 import type { Db } from "../db/Db.js";
 import type { FetchQueue } from "../scrape/http.js";
-import { normalizeBandcampUrl } from "../scrape/url.js";
+import { normalizeBandcampUrl, releaseUrlOrNull } from "../scrape/url.js";
 import { parseMusicPage } from "../scrape/parseMusic.js";
-import { ScrapeError } from "../scrape/errors.js";
+import { ScrapeError, describeError } from "../scrape/errors.js";
 import { cachedFetchText } from "./pageCache.js";
 import { albumUrlsInLibrary, getAlbum, nextDuePreorder, type PreorderAlbum } from "../db/repos/albums.js";
+import { getArtist } from "../db/repos/artists.js";
 import { refreshAlbum } from "./streamService.js";
 import { idleBlock } from "./idle.js";
 import { getSetting, setSetting } from "../db/repos/settings.js";
@@ -37,16 +38,6 @@ export interface PreorderCheckResult {
 
 /** Why a tick did nothing. */
 export type SkipReason = "off" | "cooldown" | "job" | "busy" | "none_due";
-
-/** Album/track URL in canonical form, or null for anything normalizeBandcampUrl refuses. */
-function releaseUrl(u: string): string | null {
-  try {
-    const n = normalizeBandcampUrl(u);
-    return n.kind === "artist" ? null : n.url;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Finds releases that library artists published after their first check.
@@ -190,7 +181,7 @@ export class ReleaseChecker {
     const skipped = (error: string): ArtistCheckResult => ({ artist_id: artistId, status: "skipped", releases: 0, inserted_ids: [], found: 0, error });
     if (!this.claim()) return skipped("busy");
     try {
-      const artist = await this.db.get<releases.WatchedArtist>("SELECT id, url, name FROM artists WHERE id = ?", [artistId]);
+      const artist = await getArtist(this.db, artistId);
       if (!artist) return skipped("no such artist");
       return await this.check(artist);
     } finally {
@@ -213,7 +204,7 @@ export class ReleaseChecker {
       this.opts.onAlbumRefreshed?.(album.id);
       return { album_id: album.id, status: "preorder", released: !after?.is_preorder, streamable_before: before, streamable_after: await streamable() };
     } catch (e) {
-      const msg = e instanceof ScrapeError ? `[${e.code}] ${e.message}` : String(e);
+      const msg = describeError(e);
       // A challenge leaves it due (the cooldown keeps ticks quiet until then); anything else
       // waits a day so a missing page isn't fetched every tick.
       if (!(e instanceof ScrapeError && (e.code === "client_challenge" || e.code === "challenge_cooldown"))) this.preorderFailed.set(album.id, now);
@@ -234,7 +225,7 @@ export class ReleaseChecker {
       if (n.kind !== "artist") throw new ScrapeError("invalid_url", `Not an artist URL: ${artist.url}`);
       musicUrl = n.url;
     } catch (e) {
-      const msg = e instanceof ScrapeError ? `[${e.code}] ${e.message}` : String(e);
+      const msg = describeError(e);
       await releases.markChecked(this.db, artist.id, at, false, msg);
       return { ...base, error: msg };
     }
@@ -255,7 +246,7 @@ export class ReleaseChecker {
       for (const it of parsed.items) {
         // Links come from page markup a custom domain controls: anything that fails the
         // pasted-URL check (LAN hosts, odd paths) is dropped, never stored or shown.
-        const url = releaseUrl(it.url);
+        const url = releaseUrlOrNull(it.url);
         if (!url) continue;
         const path = releases.releasePath(url);
         if (onPage.has(path)) continue;
@@ -274,7 +265,7 @@ export class ReleaseChecker {
         inserted_ids: inserted.map((r) => r.id), found: inserted.filter((r) => r.status === "new").length,
       };
     } catch (e) {
-      const msg = e instanceof ScrapeError ? `[${e.code}] ${e.message}` : String(e);
+      const msg = describeError(e);
       // A challenge leaves the artist due: the cooldown already keeps every tick quiet, and
       // the check should happen once Bandcamp lets us back in. Anything else (404, a page
       // that doesn't parse, offline) counts as today's check so it isn't retried every tick.
