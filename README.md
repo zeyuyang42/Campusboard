@@ -4,9 +4,9 @@
 
 <h1 align="center">Campusboard</h1>
 
-<p align="center">A personal Mac app for listening to Bandcamp, named after the climbing training board. Paste a link, keep a library, make playlists, and play in a player that takes its colors from the album art.</p>
+<p align="center">A personal Mac app for listening to Bandcamp, named after the climbing training board. Paste a link, keep a library, make playlists, and play in a window that takes its colours from the album art.</p>
 
-<p align="center"><a href="https://github.com/zeyuyang42/campusboard/releases/latest"><b>Download the latest release</b></a> (macOS, Apple Silicon)</p>
+<p align="center"><a href="https://github.com/zeyuyang42/campusboard/releases/latest"><b>Download the latest release</b></a> (macOS 13.3+, Apple Silicon)</p>
 
 ![Library](docs/library.png)
 
@@ -14,169 +14,111 @@
 
 <p align="center"><a href="docs/screenshots.md">More screenshots</a>: Search, Radio and Now playing</p>
 
-Bandcamp has no public API, so the app reads the JSON that Bandcamp embeds in
-its own album pages (the same data the official player uses) and streams audio
-straight from Bandcamp's CDN at 128 kbps. Nothing is re-hosted; the optional
-offline copies stay on your Mac, for listening in the app. Every album page
-keeps a **Buy on Bandcamp** link. Bandcamp's terms allow personal,
-non-commercial use. Please buy what you keep coming back to. The app is not
-affiliated with Bandcamp, needs no account, and sends nothing anywhere but
-bandcamp.com and its CDN: no telemetry, no updater (the app tells you when a
-newer release exists and links to it).
+Bandcamp has no public API, so Campusboard reads the JSON Bandcamp embeds in its
+own pages (the data its player uses) and streams from Bandcamp's CDN at 128 kbps.
+It needs no account, re-hosts nothing, and talks only to bandcamp.com and its CDN:
+no telemetry, no updater (it tells you when a newer release exists). Every album
+page keeps a **Buy on Bandcamp** link; please buy what you keep coming back to.
+It is an unofficial client, not affiliated with Bandcamp; see
+[Bandcamp's rules](#bandcamps-rules) before you use it.
 
-## Install (macOS, Apple Silicon)
+## Install
 
 1. Download the `.dmg` from the [releases page](https://github.com/zeyuyang42/campusboard/releases/latest), open it, and drag **Campusboard** to Applications.
-2. The app is not signed with an Apple Developer ID, so the first time macOS
-   will refuse to open it. Right-click the app, choose **Open**, and confirm.
-   If that option is missing, go to System Settings → Privacy & Security and
-   click **Open Anyway**. You only need to do this once.
+2. The app isn't signed with an Apple Developer ID, so macOS refuses it the first
+   time. Right-click the app, choose **Open** and confirm (or System Settings →
+   Privacy & Security → **Open Anyway**). Once is enough.
 
-Requires macOS 13.3 or later on Apple Silicon (an Intel Mac can build it from
-source, see Development). To update, quit the app and replace it in
-Applications; the library and settings are kept. Your library lives in
-`~/Library/Application Support/com.bandcampplayer.app/library.db` (the bundle
-identifier is kept from the app's earlier name, Bandcamp Player, so an update
-keeps the same library, downloads and settings).
-
-Coming from Bandcamp Player (0.6.2 or earlier): the app is now called
-**Campusboard.app**. Quit the old app, drag the new one to Applications, then
-delete **Bandcamp Player.app** (and re-pin Campusboard in the Dock if you kept the old one there).
+To update, quit the app and replace it; the library and settings stay in
+`~/Library/Application Support/com.bandcampplayer.app/` (the identifier keeps the
+app's old name, Bandcamp Player, so updates find the same library). Coming from
+Bandcamp Player: delete **Bandcamp Player.app** once Campusboard is installed.
+Intel Macs can build from source (see [Development](#development)).
 
 ## Using it
 
-- **Import**: paste `https://artist.bandcamp.com/album/...` or `/track/...`.
-  An artist or label URL opens a browse page listing every release with
-  checkboxes, so you import only what you want (or everything). Imports run one
-  page per second and resume after a restart.
-- **Search**: searches Bandcamp directly; "Add" imports an album or track,
-  "Browse releases" opens an artist's or label's page. The play button next to
-  an album or track (and on each cover of a browse page) plays the whole release
-  from its featured track without importing it: one page read when you press it,
-  or the library copy if you already have it. Like Discover previews, these don't
-  count in listening history and can't go into playlists.
-- **Your collection**: Settings → Bandcamp account. Enter your username and press
-  **Sync now** to import what you've bought and your wishlist (public collections
-  need nothing else); the Library's **Show** menu filters to Purchased or Wishlist.
-  Optionally paste the `identity` cookie from a browser where you're logged in to
-  bandcamp.com to include a private collection and stream your purchases as MP3 V0.
-  The cookie stays in your local library database and is only sent to bandcamp.com.
-  While the app is open it also syncs on its own, at most once a day and only when
-  no import is running (turn this off in the same section). An automatic sync
-  doesn't re-send a cookie Bandcamp rejected; it reads the public lists instead.
-- **New releases**: while the app is open it looks at one library artist's
-  Bandcamp page every few minutes (each artist at most once a day) and lists
-  releases that appeared since its first look, to import or dismiss. Turn it off
-  or press **Check now** in Settings; mute an artist from their page.
-- **Radio**: the latest Bandcamp Radio episodes (Bandcamp Selects, The Metal
-  Show and the rest). An episode plays as one long track; Now playing shows its
-  tracklist with the release on air marked, and Import, Open album and Buy on
-  Bandcamp for each. Episodes don't count in listening history.
-- **Discover**: Bandcamp's discover inside the app. Pick tags (with Bandcamp's
-  suggestions), Best-selling / New arrivals / Surprise me, a time window and a
-  place; click a cover to hear the release's featured track without importing
-  it, and **Add** the ones you like. The last setup comes back next time, and a
-  pasted or dropped `bandcamp.com/discover/...` link opens there. Previews don't
-  count in listening history and can't go into playlists.
-- **Playlists**: right-click any track or album, or select several tracks
-  (click, Shift-click, Cmd-click) and use the bar that appears. Drag rows to
-  reorder. A smart playlist (Playlists → New smart playlist) is a saved rule
-  instead: Show, minimum rating, tag, filter text, played or not played in
-  the last N days, sort and an optional track limit. It is filled from the
-  library each time it opens or plays, so it stays current.
-- **Tags**: Library → Tags lists the Bandcamp tags of your albums with how
-  many carry each; a tag (there, or under an album's title) opens the album
-  grid narrowed to it, together with the filter field, Show and Sort.
-- **History**: Library → History lists what you played, newest first, under
-  Today, Yesterday and earlier dates. Click a row to play the track within its
-  album; right-click for the usual track menu. Radio episodes aren't recorded.
-  **Stats** there shows your top 10 artists, albums and tags for this month,
-  this year or all time, with plays and time listened (the full length of each
-  counted track).
-- **Filtered library**: when the filter field, a tag or the **Show** menu narrows the
-  Library, a bar above the grid plays, shuffles, queues or adds to a playlist
-  every matching album in the current sort order (it asks first above 500 tracks).
-- **Command palette**: `⌘K` (View → Command Palette) jumps to an album, artist
-  or playlist in your library, or runs an action: play/pause, next, import,
-  Search Bandcamp, a Settings section, the mini player, light or dark, the sleep
-  timer. ↑/↓ and Enter choose, Esc closes.
-- **Album pages**: tracks, tags, the Bandcamp description and lyrics, a 1-5
-  star rating and a note of your own, and the artist's name opens their page
-  with every release of theirs in the library and Browse releases for the rest.
-  Removing an album, a playlist or a playlist entry shows an Undo note for a
-  few seconds instead of asking first.
-- **Drop a link**: a Bandcamp album, track, artist or discover link dragged
-  from a browser onto the window opens where a pasted one would.
-- **Now playing**: press `N` or click the artwork in the player bar for a full
-  view with queue and lyrics. Tracks over 20 minutes and Radio episodes resume
-  where you left them.
-- **Sleep timer**: Playback → Sleep Timer (or `⌘K`) stops after 15 to 60
-  minutes, at the end of the track or at the end of the album, fading out.
-- **Mini player**: Window → Mini Player (`⌘⇧M`) or the mini player button in
-  the player bar opens a small window that stays on top of other apps (the pin
-  button turns that off), with the artwork, the track, a seek bar and the
-  transport controls. The square button switches to a large-artwork layout.
-  It keeps working with the main window closed.
-- **Menu bar icon**: Settings → When the window is closed (off by default)
-  adds an icon to the menu bar with the current track, Play/Pause, Next,
-  Previous, Show Window and Quit.
-- **Track notifications**: Settings → When the window is closed (off by
-  default) shows a notification with the track, artist and album when the
-  track changes while the window is closed or in the background.
-- **Gapless and crossfade**: Settings → Playback. The next track loads in the
-  background and starts as the current one ends (on by default). Crossfade
-  (off by default, up to 10 s) blends tracks from different albums; tracks of
-  the same album always play back to back as recorded.
-- **AirPlay**: when an AirPlay speaker or Apple TV is nearby, an AirPlay
-  button appears in the player bar; pick a speaker and the bar says "Playing on
-  AirPlay". Tracks then play back to back without gapless or crossfade (WebKit
-  sends one audio element to the speaker). Control Center → Sound routes the
-  whole Mac instead and keeps gapless.
-- **Offline listening**: on an album page, **Make available offline** saves the
-  album's streams (the same 128 kbps the player uses) one track at a time at
-  the usual polite pace; downloaded tracks play without a connection, and
-  others are skipped while you're offline. **Remove download** frees the space;
-  Settings → Storage shows the total, sets an optional size limit and removes
-  everything. Library → Show → Downloaded lists what's saved. These copies are
-  for listening in the app, not purchases: buy on Bandcamp to own a release.
-  Radio episodes always stream.
-- **Themes**: Settings → pick a preset (including High contrast), follow the
-  system appearance or pin dark or light, adjust colors, fonts, corner radius,
-  density, the backdrop and an optional background image. Export writes a
-  `.theme.json` you can send to a friend; Import loads one.
-- **Backdrop**: the playing album's colours fill the window behind frosted
-  panels. Settings → Backdrop picks the mode: Generative (a slow, animated
-  picture in one of four styles: fluid ink, aurora curtains, glitch, lava
-  blobs), Ambient wash (two drifting colour washes), or Conservative (the
-  earlier look: a faint wash and solid panels). Intensity sets how much colour
-  shows; Motion → Still keeps the picture fixed. The picture pauses with the
-  music, stops while the window is hidden, and follows the Mac's Reduce motion
-  setting; a Mac without WebGL gets the wash instead.
-- **Moving to another Mac**: Settings → Library. Export library writes a JSON
-  file with your albums (by Bandcamp address), playlists (smart ones as their
-  rules), listening history, theme and settings, never your identity cookie. Import library on the other
-  Mac shows what's new, then fetches the missing albums from Bandcamp at the
-  usual pace and fills the playlists in as they arrive. Back up library
-  database saves a complete copy of the library file at any time.
+### Finding music
+- **Import**: paste an album or track link. An artist or label link lists every
+  release with checkboxes, so you import only what you want. Imports run at one
+  page per second and resume after a restart. A link dragged from a browser onto
+  the window works the same way.
+- **Search** searches Bandcamp: **Add** imports, **Browse releases** opens an
+  artist or label, and the play button plays a release without importing it.
+- **Discover** is Bandcamp's discover in the app: genres and tags, format, time
+  window, place, Best-selling / New arrivals / Surprise me. Click a cover to hear
+  its featured track; **Add** the ones you like.
+- **Radio** plays Bandcamp Radio episodes as one long track. Now playing shows
+  the tracklist with the release on air, ready to import or buy.
+- **New releases**: while the app is open it checks one library artist every few
+  minutes (each at most once a day) and lists what's new, to import or dismiss.
+- **Your collection**: Settings → Bandcamp account. Enter your username and
+  **Sync now** imports your purchases and wishlist (then filter with Library →
+  Show). Optionally paste the `identity` cookie from a logged-in browser for a
+  private collection and MP3 V0 streams of your purchases; it stays in the local
+  database and goes only to bandcamp.com. Syncs repeat at most once a day.
 
-Closing the window keeps the music playing; click the Dock icon to bring it
-back, and press `⌘Q` to quit. The current track shows in Control Center's Now
-Playing, and the keyboard's media keys and AirPods control playback, with the
-window open or closed. The menu-bar Now Playing item appears when the window is
-hidden or in the background (macOS hides it while the app is in front). The window remembers its size and position.
+Previews (Search, Browse, Discover) and Radio episodes don't count in listening
+history and can't go into playlists.
 
-Shortcuts: `Space` play/pause, `←`/`→` seek 5 s, `Shift+←`/`→` previous/next,
-`↑`/`↓` volume, `S` shuffle, `R` repeat, `Q` queue, `N` now playing,
-`/` search, `Esc` close. The menu bar adds `⌘1`–`⌘4` for the main pages,
-`⌘F` find, `⌘I` import, `⌘N` new playlist, `⌘,` settings and `⌘`-based
-playback controls; the full list is in Settings → Keyboard shortcuts (Help →
-Keyboard Shortcuts).
+### Your library
+- **Album pages**: tracks, tags, description and lyrics, a 1-5 star rating and a
+  note of your own. The artist's name opens everything of theirs you have.
+- **Library tabs**: Albums (filter, Show, Sort, and a bar to play, shuffle, queue
+  or add everything that matches), Artists, Tracks, Tags, and History, which lists
+  what you played by day and has **Stats** for your top artists, albums and tags.
+- **Playlists**: right-click a track or album, or select several (Shift/Cmd-click)
+  and use the bar. Drag to reorder. A **smart playlist** is a saved rule (rating,
+  tag, text, played recently or not, sort, limit) refilled each time it opens.
+- **Offline listening**: **Make available offline** on an album page saves its
+  streams one track at a time; saved tracks play without a connection. Settings →
+  Storage shows the total, sets a limit and removes everything. These copies are
+  for listening in the app, not purchases.
+- Removing an album, playlist or playlist entry shows a few seconds of **Undo**
+  instead of asking first.
+
+### Playing
+- **Now playing**: `N` or click the artwork for a full view with queue and
+  lyrics. Tracks over 20 minutes and Radio episodes resume where you left them.
+- **Gapless and crossfade** (Settings → Playback): the next track starts as the
+  current one ends; crossfade (up to 10 s) blends tracks from different albums.
+- **Sleep timer**: Playback → Sleep Timer, 15-60 minutes or the end of the track
+  or album, fading out.
+- **Mini player**: Window → Mini Player (`⌘⇧M`), a small always-on-top window
+  with a large-artwork layout.
+- **AirPlay**: the AirPlay button appears in the player bar when a speaker is
+  nearby (tracks then play back to back without gapless; Control Center → Sound
+  routes the whole Mac and keeps it).
+- **When the window is closed** the music keeps playing; the Dock icon brings it
+  back and `⌘Q` quits. Control Center's Now Playing, the media keys and AirPods
+  work throughout. Settings can add a menu-bar icon and track-change
+  notifications.
+
+### Look
+- **Backdrop**: the playing album's colours fill the window behind frosted panels.
+  Settings → Backdrop: Generative (fluid ink, aurora, glitch or lava blobs),
+  Ambient wash, or Conservative (a faint wash and solid panels), plus Intensity
+  and Motion. It pauses with the music, stops while the window is hidden and
+  follows Reduce motion.
+- **Themes**: presets (including High contrast), system, dark or light, colours,
+  fonts, corners, density and a background image. Themes export and import as
+  [files](#theme-files).
+
+### Keyboard
+`⌘K` opens the command palette (albums, artists, playlists, actions). `Space`
+play/pause, `←`/`→` seek 5 s, `Shift+←`/`→` previous/next, `↑`/`↓` volume, `S`
+shuffle, `R` repeat, `Q` queue, `N` now playing, `/` search, `Esc` close. Help →
+Keyboard Shortcuts lists the rest.
+
+### Moving to another Mac
+Settings → Library → **Export library** writes your albums, playlists, history,
+theme and settings to a JSON file (never your cookie); **Import library** on the
+other Mac fetches the albums again at the usual pace. **Back up library database**
+saves a complete copy of the library file.
 
 ## Theme files
 
-A theme is a JSON file validated on import. Only colors, fonts, numbers and an
-https image URL are accepted; a theme cannot contain CSS or scripts, so a shared
-theme can't break the app. Example:
+A theme is a JSON file validated on import: colours, fonts, numbers and an https
+image URL only, never CSS or scripts, so a shared theme can't break the app.
 
 ```json
 {
@@ -194,87 +136,57 @@ theme can't break the app. Example:
 }
 ```
 
-`accent` is only used when nothing is playing; while a track plays, the accent
-and the backdrop come from its artwork, clamped so text stays readable.
-`backdrop.mode` is `"conservative"`, `"wash"` or `"morph"`; `style` (for morph)
-is `"ink"`, `"aurora"`, `"glitch"` or `"lava"` (`"grain"`, the 0.9.0 name of
-glitch, still loads); `intensity` is 0 to 1 and `motion` is `"drift"` or
-`"still"`. A theme file without `backdrop` loads with the default (morph, ink).
-
-`mode` is `"dark"`, `"light"` or `"system"`. A system theme follows the Mac's
-appearance as it changes and needs both sides as `paletteDark` and
-`paletteLight` (same keys as `palette`); every preset carries the pair, so
-choosing Settings → Base → Match system keeps the preset's colors. New
-libraries start on Dusk following the system. `"contrast": "high"` (the High
-contrast preset) holds the art-derived accent to WCAG AAA (7:1) on every surface. Version 0.4
-and earlier refuse a `"system"` file; dark and light files with a pair import
-there, since unknown keys are dropped.
+- `mode`: `"dark"`, `"light"` or `"system"`. A system theme gives both sides as
+  `paletteDark` and `paletteLight` (same keys as `palette`).
+- `accent` applies only when nothing plays; otherwise the accent comes from the
+  artwork, clamped so text stays readable. `"contrast": "high"` holds it to 7:1.
+- `backdrop.mode`: `"conservative"`, `"wash"` or `"morph"`; `style`: `"ink"`,
+  `"aurora"`, `"glitch"` or `"lava"`; `intensity` 0-1; `motion` `"drift"` or
+  `"still"`. Without `backdrop` a theme gets the default shown above.
 
 ## Development
 
-Requires Node 22.5+, Rust 1.90+ and Xcode command line tools. `npm run dev`
-and the tests use a separate `library-dev.db`, never the installed app's library.
+Requires Node 22.5+, Rust 1.90+ and the Xcode command line tools. Dev runs and
+tests use a separate `library-dev.db`, never the installed app's library.
 
 ```bash
 npm install
 npm run dev          # Tauri window with hot reload (Vite on :5173)
 npm run build        # .app and .dmg in src-tauri/target/release/bundle/
-npm test             # core (parser, data layer, theme, palette) and web player tests (offline)
+npm test             # core and web tests, offline
 npm run typecheck
-```
-
-Browser-only mode for UI work and screenshots (same code, SQLite in WebAssembly,
-Bandcamp pages fetched through a Vite middleware):
-
-```bash
-VITE_BROWSER_MODE=1 npm run web:dev   # http://localhost:5173
+VITE_BROWSER_MODE=1 npm run web:dev   # the UI in a browser, SQLite in WebAssembly
+npm run scrape -- <url>               # what the parser sees on a Bandcamp page
 ```
 
 ```
-packages/core/   parsers, async Db interface, repos, services, theme + palette engines
-web/             React UI (Vite); binds core to Tauri's SQLite + HTTP plugins
+packages/core/   Bandcamp parsing, data layer, services, theme and palette
+web/             React UI (Vite), bound to Tauri's SQLite and HTTP plugins
 src-tauri/       Rust shell: plugins, migrations, capabilities, bundle config
 ```
 
-- `packages/core/src/scrape/` parses Bandcamp pages. `parseTralbum.ts` reads the
-  `data-tralbum` attribute on album/track pages; `parseMusic.ts` reads an
-  artist's `/music` page; `search.ts` wraps Bandcamp's autocomplete endpoint.
-  All HTTP goes through `FetchQueue`, serial at one request per second with a
-  normal browser User-Agent.
-- Stream URLs expire about 24 hours after a page is fetched; the player asks
-  core for a fresh URL before each play and retries once on a media error.
-- `npm run scrape -- <url>` prints what the parser sees; `npm run smoke:live`
-  re-parses a known page. If Bandcamp changes its markup, imports fail with
-  `parse_failed`; fix the parser, re-save fixtures with `npm run fixtures:save`,
-  re-run tests.
+[AGENTS.md](AGENTS.md) explains how the app works and how to change it safely.
+If Bandcamp changes its markup, imports fail with `parse_failed`: fix the parser
+in `packages/core/src/scrape/`, re-save fixtures (`npm run fixtures:save`) and
+re-run the tests. Such a failure is worth an issue; planned work is tracked as
+issues labelled `feature`. Windows, Linux and signed builds don't exist yet.
 
-## Bandcamp etiquette
+## Bandcamp's rules
 
-The app asks Bandcamp for one page per second, caches pages for ten minutes
-and never scrapes more than you ask it to. When Bandcamp answers with its bot
-check, the app backs off (a notice in the window says for how long) rather
-than pushing through. Please don't point it at whole labels you won't listen
-to, and buy what you keep coming back to.
+Campusboard asks Bandcamp for one page per second, caches pages for ten minutes,
+fetches only what you ask for, and backs off when Bandcamp shows its bot check.
+Please don't point it at whole labels you won't listen to.
 
-Bandcamp has no public API, and its
+Still, Bandcamp's
 [Acceptable Use Policy](https://get.bandcamp.help/articles/15263124-bandcamp-s-acceptable-use-and-moderation-policy)
-forbids scraping content "through the use of scripts, robots, bots, spiders,
-scrapers, crawlers, or other automated means". Campusboard reads the same pages
-a browser does, on your request, but it is still an unofficial client: using it
-is your call and your risk, and Bandcamp may block it at any time. Its
-[Terms of Use](https://bandcamp.com/terms_of_use) also limit streamed and
-downloaded music to personal, non-commercial use; that applies to offline
-copies too. Campusboard is not affiliated with or endorsed by Bandcamp.
+forbids scraping "through the use of scripts, robots, bots, spiders, scrapers,
+crawlers, or other automated means", so using an unofficial client is your call
+and your risk, and Bandcamp may block it at any time. Its
+[Terms of Use](https://bandcamp.com/terms_of_use) allow streamed and downloaded
+music, offline copies included, for personal, non-commercial use only.
 
 ## Licence
 
-[PolyForm Noncommercial 1.0.0](LICENSE): you may use, copy, change and share
-the code for any non-commercial purpose (personal use, study, research,
-hobby projects, charities, schools). Commercial use needs separate permission.
-Keep the licence and its `Required Notice:` line with any copy you share.
-
-## Not yet
-
-Windows and Linux builds, and a signed build. Planned work is tracked as
-issues labelled `feature`; a Bandcamp page the app can no longer read shows
-up as a `parse_failed` import, which is worth an issue too.
+[PolyForm Noncommercial 1.0.0](LICENSE): use, copy, change and share the code for
+any non-commercial purpose. Commercial use needs separate permission. Keep the
+licence and its `Required Notice:` line with any copy you share.
