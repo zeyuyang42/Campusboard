@@ -653,7 +653,11 @@ src-tauri/
   the same library's own crate, then a crate of the same name) and `archived` arrays
   (version still 1); both wait by album URL in `crate_albums_pending` /
   `album_archive_pending` and merge in `resolvePending` after each imported album. A file
-  only ever marks: it never unarchives or takes an album out of a crate.
+  only ever marks: it never unarchives or takes an album out of a crate. A smart playlist
+  rule with `show: archived|unplayed` is exported as is, so a 0.9/0.10 build refuses the
+  whole file as "made by a newer version" (accepted; `parseRuleJson` is not loosened).
+  The artist page's album rows (`artists.getArtist`) carry `archived` too, so a card's menu
+  there says Unarchive when it should.
 - Jobs that are pending, queued or running are "active": `repos/jobs.ts` exports
   `ACTIVE_SQL`/`activeSql(col)` and `activeJob(db, kind, inputUrl?)` (`core.downloadJobFor`
   wraps it) and `types.ts` exports `isActiveJob`, so no query or component spells the three

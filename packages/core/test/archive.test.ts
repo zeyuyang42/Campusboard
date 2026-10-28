@@ -7,7 +7,7 @@ import { FetchQueue } from "../src/scrape/http.js";
 import { JobRunner } from "../src/services/jobRunner.js";
 import { albumIdsByUrl, deleteAlbum, listAlbums, listAlbumTracks, listTags } from "../src/db/repos/albums.js";
 import { setArchived, setArchivedMany, isArchived, addPendingArchive, mergePendingArchive } from "../src/db/repos/albumArchive.js";
-import { listArtists } from "../src/db/repos/artists.js";
+import { getArtist, listArtists } from "../src/db/repos/artists.js";
 import { searchTracks } from "../src/db/repos/tracks.js";
 import { listeningStats } from "../src/db/repos/stats.js";
 import { recentlyPlayedAlbums } from "../src/db/repos/plays.js";
@@ -62,6 +62,11 @@ describe("archive (#126)", () => {
     expect(ids(await core.albums("title", "all", "", "", { archived: "any" }))).toEqual([a, c]);
     // Artists, Tracks, Tags, Stats, smart playlists, the album page and by-URL lookups.
     expect((await listArtists(db)).reduce((n, ar) => n + (ar.album_count ?? 0), 0)).toBe(2);
+    // The artist page's cards know, so their menu offers Unarchive rather than a no-op Archive.
+    const artistId = (await core.album(a))!.artist_id;
+    const onArtistPage = (await getArtist(db, artistId))!.albums;
+    expect(onArtistPage.find((x) => x.id === a)!.archived).toBe(true);
+    expect(onArtistPage.every((x) => x.id === a || !x.archived)).toBe(true);
     expect((await searchTracks(db, "")).some((t) => t.album_id === a)).toBe(true);
     const aTags = (await core.album(a))!.tags;
     expect(aTags.length).toBeGreaterThan(0);

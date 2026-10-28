@@ -76,7 +76,12 @@ const PlaylistSchema = z.object({
   tracks: z.array(TrackRefSchema).max(MAX_ITEMS),
 });
 
-/** A smart playlist (#84): its rule, never its tracks. Older builds drop the whole field. */
+/**
+ * A smart playlist (#84): its rule, never its tracks. Builds before 0.9 drop the whole field.
+ * A rule whose `show` is `archived` or `unplayed` (#126) is exported as is: a 0.9 or 0.10 build
+ * refuses such a file ("made by a newer version"), which is the accepted trade-off rather than
+ * exporting the rule with another meaning.
+ */
 const SmartPlaylistSchema = z.object({
   key: str(200),
   name: str(1000),

@@ -60,14 +60,14 @@ export function BulkBar({ albums, sort, filter, q, tag = "", crate = 0 }: { albu
     const at = anchor.current?.querySelector<HTMLElement>("[data-bulk-crate]");
     if (at && albums.length) useMenu.getState().show(at, { cratePicker: { albumIds: albums.map((a) => a.id) } });
   };
-  // Under Show → Archived every album shown is archived, so the action is the way back.
+  // Under Show → Archived every album shown is archived, so the action is the way back. No
+  // note on success: the albums leave the grid, and the bar with them.
   const unarchive = filter === "archived";
   const archiveAll = async () => {
     setError(null);
     setNote(null);
     try {
-      const n = await setArchivedMany.mutateAsync({ ids: albums.map((a) => a.id), archived: !unarchive });
-      setNote(`${unarchive ? "Unarchived" : "Archived"} ${plural(n, "album")}.`);
+      await setArchivedMany.mutateAsync({ ids: albums.map((a) => a.id), archived: !unarchive });
     } catch (e) {
       setError(friendlyError(e, unarchive ? "Couldn't unarchive these albums." : "Couldn't archive these albums."));
     }

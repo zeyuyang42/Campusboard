@@ -6,7 +6,9 @@
 -- be in any number of crates.
 CREATE TABLE IF NOT EXISTS crates (
   id INTEGER PRIMARY KEY,
-  name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 100),
+  -- No upper bound here (playlists has none either): length() counts code points, while the
+  -- repo caps names at 100 user-perceived characters, which may be more code points.
+  name TEXT NOT NULL CHECK (length(name) > 0),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

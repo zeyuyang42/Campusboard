@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCore } from "./core";
-import { invalidateGroup } from "./invalidate";
+import { ARCHIVE_KEYS, CRATE_KEYS, invalidateGroup } from "./invalidate";
 import { repos, type DiscoverPage, type DiscoverParams, type HistoryCursor, type Job, type PlayState, type StatsPeriod, isActiveJob } from "@bc/core";
 
 /** Named groups of the prefixes below, for invalidation; `invalidateGroup` works outside React too. */
@@ -61,7 +61,7 @@ export const useAlbums = (sort: string, filter = "all", q = "", tag = "", crate 
     queryFn: async () => (await core()).albums(sort as never, filter as never, q, tag, crate > 0 ? { crate } : {}),
     placeholderData: keepPreviousData,
   });
-/** The library's tags with album counts under the Show filter (#71), so they match the grid. */
+/** The library's tags with album counts under the Show filter (#71). Archived albums (#126) count here: archive only hides from the Albums tab. */
 export const useTags = (filter: repos.AlbumFilter = "all") => useQuery({ queryKey: keys.tags(filter), queryFn: async () => (await core()).tags(filter) });
 
 export type LibraryView = { sort: repos.AlbumSort; filter: repos.AlbumFilter };
@@ -233,11 +233,6 @@ export const useCrates = () => useQuery({ queryKey: keys.crates, queryFn: async 
 export const useCrate = (id: number) => useQuery({ queryKey: keys.crate(id), queryFn: async () => (await core()).crate(id), enabled: id > 0 });
 /** The crates an album is in (the album page). */
 export const useCratesOf = (albumId: number) => useQuery({ queryKey: keys.cratesOf(albumId), queryFn: async () => (await core()).cratesOf(albumId), enabled: albumId > 0 });
-
-/** The prefixes a crate change touches: the crate lists and the Albums grid (a crate view may be on screen). lib/removals.ts spells the same for the Undo note. */
-const CRATE_KEYS = ["crates", "albums"] as const;
-/** The prefixes an archive change touches: the grids, the album page, and the Recently played row. */
-const ARCHIVE_KEYS = ["albums", "album", "history"] as const;
 
 export function useCrateMutations() {
   const qc = useQueryClient();

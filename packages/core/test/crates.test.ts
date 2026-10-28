@@ -60,6 +60,16 @@ describe("crates (#126)", () => {
     expect(await cratesOf(db, a)).toEqual([]);
   });
 
+  it("takes a name of 100 user-perceived characters that is more code points than that", async () => {
+    // "e" + combining acute: two code points per character; SQLite's length() counts code points.
+    const long = "é".repeat(100);
+    const crate = await createCrate(db, long);
+    expect(crate.name).toBe(long);
+    expect(await renameCrate(db, crate.id, `${long} and more`)).toBe(true);
+    expect((await getCrate(db, crate.id))!.name).toBe(long);
+    expect((await listCrates(db)).map((x) => x.name)).toEqual([long]);
+  });
+
   it("lists by name, and the picker's counts say all, some or none", async () => {
     const z = await createCrate(db, "zzz");
     const m = await createCrate(db, "Mmm");
@@ -81,6 +91,13 @@ describe("crates (#126)", () => {
     expect(ids(await listAlbums(db, "added", "all", "snowmelt", "", { crate: crate.id }))).toEqual([]);
     expect((await listAlbumTracks(db, "added", "all", "", "", { crate: crate.id })).every((t) => t.album_id === a)).toBe(true);
     expect(ids(await listAlbums(db, "added", "unplayed", "", "", { crate: crate.id }))).toEqual([a]);
+    // With a tag (#71): the album's own tag keeps it, another album's tag leaves the crate view empty.
+    const aTag = (await listAlbums(db)).find((x) => x.id === a)!.tags[0];
+    const cTag = (await listAlbums(db)).find((x) => x.id === c)!.tags.find((t) => t.toLowerCase() !== aTag.toLowerCase())!;
+    expect(aTag && cTag).toBeTruthy();
+    expect(ids(await listAlbums(db, "added", "all", "", aTag, { crate: crate.id }))).toEqual([a]);
+    expect(ids(await listAlbums(db, "added", "all", "", cTag, { crate: crate.id }))).toEqual([]);
+    expect(ids(await listAlbums(db, "added", "all", "", cTag))).toContain(c);
     await setArchived(db, a, true);
     expect(ids(await listAlbums(db, "added", "all", "", "", { crate: crate.id, archived: "hide" }))).toEqual([]);
     expect(ids(await listAlbums(db, "added", "archived", "", "", { crate: crate.id }))).toEqual([a]);
@@ -196,6 +213,18 @@ describe("crates (#126)", () => {
       const bad = (await listCrates(dst)).find((x) => x.name === "Bad")!;
       expect(bad.album_count).toBe(1);
       expect((await albumIdsByUrl(dst, [ALBUM])).size).toBe(1);
+    });
+
+    it("imports a crate whose name is 100 user-perceived characters, and still queues the albums", async () => {
+      const long = "é".repeat(100);
+      const dst = new NodeDb();
+      const runner = runnerFor(dst);
+      const file = { ...data, crates: [{ key: "x:crate:7", name: long, created_at: "2026-01-01T00:00:00Z", albums: [ALBUM] }] } as LibraryExport;
+      const r = await importLibrary(dst, runner, file);
+      expect(r.queued).toBe(2);
+      expect((await listCrates(dst)).map((x) => x.name)).toEqual([long]);
+      expect((await waitJob(dst, r.job!.id)).status).toBe("done");
+      expect((await listCrates(dst))[0].album_count).toBe(1);
     });
 
     it("older files without the field still import, and a damaged crate is refused with a sentence", () => {

@@ -9,13 +9,10 @@ import { formatReleaseDate, yearOf } from "../lib/format";
 import { useTrackActions } from "../lib/useTrackActions";
 import { reopenMenuAs, useMenu } from "../ui/menu";
 import { invalidateGroup } from "../api/queries";
-import { invalidateQueries } from "../api/invalidate";
-import { archiveAlbumWithUndo, removeAlbumWithUndo } from "../lib/removals";
+import { archiveAlbumWithUndo, removeAlbumWithUndo, unarchiveAlbum } from "../lib/removals";
 
 /** Re-scrape one album, then refresh the library views (what useAlbumMutations().refresh does, without a mutation per card). */
 const refreshAlbum = (id: number) => void getCore().then((c) => c.refreshAlbum(id)).then(() => invalidateGroup("library")).catch(() => undefined);
-/** Unarchive (#126) from a card in the Archived view; no Undo note, Archive is a click away. */
-const unarchiveAlbum = (id: number) => void getCore().then((c) => c.setAlbumArchived(id, false)).then(() => invalidateQueries(["albums", "album", "history"])).catch(() => undefined);
 
 /**
  * `detail` replaces the release year under the title (e.g. a play count); "" shows nothing there.
@@ -43,7 +40,7 @@ export const AlbumCard = memo(function AlbumCard({ album, showArtist = true, det
       content.items.splice(content.items.length - 2, 0,
         { label: "Refresh from Bandcamp", onSelect: () => refreshAlbum(album.id) },
         album.archived
-          ? { label: "Unarchive", onSelect: () => unarchiveAlbum(album.id) }
+          ? { label: "Unarchive", onSelect: () => { void unarchiveAlbum(album.id); } }
           : { label: "Archive", onSelect: () => { void archiveAlbumWithUndo(album); } },
       );
     }

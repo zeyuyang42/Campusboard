@@ -1,8 +1,8 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { AlbumWithTracks } from "@bc/core";
-import { archiveAlbumWithUndo, removeAlbumWithUndo } from "../lib/removals";
+import { archiveAlbumWithUndo, removeAlbumWithUndo, unarchiveAlbum } from "../lib/removals";
 import { getCore } from "../api/core";
-import { isJobActive, useAlbum, useAlbumMutations, useArchiveMutations, useCrateMutations, useCratesOf, useJobs, useOfflineMutations, useOfflineStats } from "../api/queries";
+import { isJobActive, useAlbum, useAlbumMutations, useCrateMutations, useCratesOf, useJobs, useOfflineMutations, useOfflineStats } from "../api/queries";
 import { libraryCratePath } from "../lib/navigation";
 import { ArtImage } from "../components/ArtImage";
 import { TrackList, PlayPauseAll } from "../components/TrackList";
@@ -84,7 +84,6 @@ export function AlbumPage() {
   const id = Number(useParams().id);
   const { data: album, isLoading, error } = useAlbum(id);
   const { refresh } = useAlbumMutations();
-  const { setArchived } = useArchiveMutations();
   const nav = useNavigate();
   const actions = useTrackActions();
   /** The ⋯ menu: the track actions plus "Add to crate…" (#126). */
@@ -127,7 +126,7 @@ export function AlbumPage() {
             <OfflineAction album={album} />
             <button className="btn" onClick={() => refresh.mutate(album.id)} disabled={refresh.isPending}>{refresh.isPending ? "Refreshing…" : "Refresh"}</button>
             {album.archived
-              ? <button className="btn" onClick={() => setArchived.mutate({ id: album.id, archived: false })} disabled={setArchived.isPending}>Unarchive</button>
+              ? <button className="btn" onClick={() => { void unarchiveAlbum(album.id); }}>Unarchive</button>
               : <button className="btn" onClick={() => { void archiveAlbumWithUndo(album); }}>Archive</button>}
             <button className="btn danger" onClick={async () => { if (await removeAlbumWithUndo(album)) nav("/library"); }}>Remove</button>
           </div>

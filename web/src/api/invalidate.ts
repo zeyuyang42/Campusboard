@@ -25,6 +25,11 @@ export const KEY_GROUPS = {
 
 export type KeyGroup = keyof typeof KEY_GROUPS;
 
+/** The prefixes a crate change (#126) touches: the crate lists and the Albums grid (a crate view may be on screen). */
+export const CRATE_KEYS = ["crates", "albums"] as const;
+/** The prefixes an archive change (#126) touches: the grids, the album and artist pages, and the Recently played row. */
+export const ARCHIVE_KEYS = ["albums", "album", "artist", "history"] as const;
+
 let bound: QueryClient | null = null;
 
 /** Called once at boot so code outside React can invalidate queries. */

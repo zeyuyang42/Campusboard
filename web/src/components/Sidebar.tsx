@@ -107,7 +107,9 @@ function Crates({ onScreen }: { onScreen: number }) {
       busy.current = false;
     }
   };
-  const finishRename = () => {
+  // Enter commits, Esc or leaving the field cancels, as the playlist title edit does.
+  const commitRename = (e: React.FormEvent) => {
+    e.preventDefault();
     if (!renaming) return;
     const clean = normalizeCrateName(renaming.name);
     const current = crates?.find((c) => c.id === renaming.id);
@@ -134,8 +136,8 @@ function Crates({ onScreen }: { onScreen: number }) {
         </form>
       )}
       {crates?.map((c) => renaming?.id === c.id ? (
-        <form key={c.id} onSubmit={(e) => { e.preventDefault(); finishRename(); }} style={{ padding: "0 4px 6px" }}>
-          <input autoFocus aria-label={`Rename ${c.name}`} maxLength={CRATE_NAME_MAX} value={renaming.name} onChange={(e) => setRenaming({ id: c.id, name: e.target.value })} onBlur={finishRename} onKeyDown={(e) => { if (e.key === "Escape") setRenaming(null); }} style={{ width: "100%" }} />
+        <form key={c.id} onSubmit={commitRename} style={{ padding: "0 4px 6px" }}>
+          <input autoFocus aria-label={`Rename ${c.name}`} maxLength={CRATE_NAME_MAX} value={renaming.name} onChange={(e) => setRenaming({ id: c.id, name: e.target.value })} onBlur={() => setRenaming(null)} onKeyDown={(e) => { if (e.key === "Escape") setRenaming(null); }} style={{ width: "100%" }} />
         </form>
       ) : (
         <Link key={c.id} to={libraryCratePath(c.id)} title={c.name} className={onScreen === c.id ? "active" : ""} onContextMenu={(e) => menu(e, c)} data-crate={c.id}>
