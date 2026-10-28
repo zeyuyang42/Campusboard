@@ -15,6 +15,8 @@ import { recomputeOwned } from "../db/repos/fanItems.js";
 import { addPending, resolvePending, type PendingRow } from "../db/repos/importPending.js";
 import { normalizePlaylistName } from "../db/repos/playlists.js";
 import { addPendingNotes, exportAlbumNotes, NOTE_MAX, RATING_MAX } from "../db/repos/albumNotes.js";
+import { addPendingArchive, exportArchived } from "../db/repos/albumArchive.js";
+import { addPendingCrateAlbums, exportCrates, normalizeCrateName } from "../db/repos/crates.js";
 import { parseRuleJson, parseSmartRule, SmartRuleSchema } from "../db/repos/smartPlaylists.js";
 import { isBandcampHost, releaseUrlOrNull } from "../scrape/url.js";
 import { normalizeFanUsername } from "../scrape/fan.js";
@@ -98,6 +100,18 @@ const NoteSchema = z.object({
   updated_at: sqlTime,
 });
 
+/** A crate (#126): its name and its albums' URLs in added order. Older builds drop the whole field. */
+const CrateSchema = z.object({
+  /** "<library id>:crate:<crate id>" in the exporting library. */
+  key: str(200),
+  name: str(1000),
+  created_at: str(40),
+  albums: z.array(httpsUrl).max(MAX_ITEMS),
+});
+
+/** An archived album (#126), by URL. Older builds drop the whole field. */
+const ArchivedSchema = z.object({ album_url: httpsUrl, archived_at: sqlTime });
+
 export const LibraryExportSchema = z.object({
   format: z.literal(LIBRARY_FORMAT),
   version: z.literal(LIBRARY_EXPORT_VERSION),
@@ -128,6 +142,9 @@ export const LibraryExportSchema = z.object({
   notes: z.array(NoteSchema).max(MAX_ITEMS).optional(),
   /** Smart playlists (#84), added after version 1 shipped; a separate field so older builds ignore them entirely. */
   smart_playlists: z.array(SmartPlaylistSchema).max(10_000).optional(),
+  /** Crates and archived albums (#126), added after version 1 shipped; optional so older builds ignore them. */
+  crates: z.array(CrateSchema).max(10_000).optional(),
+  archived: z.array(ArchivedSchema).max(MAX_ITEMS).optional(),
   account: z.object({
     username: str(100).nullable().refine((u) => {
       if (u === null) return true;
@@ -262,8 +279,15 @@ export async function exportLibrary(db: Db, opts: { history?: boolean; appVersio
     account: { username: account?.username ?? null },
     notes: await exportAlbumNotes(db),
     smart_playlists: smart,
+    crates: (await exportCrates(db)).map((c) => ({ key: crateKey(lib, c.id), name: c.name, created_at: c.created_at, albums: c.albums })),
+    archived: await exportArchived(db),
   };
 }
+
+/** A crate's key in a library file (#126). */
+const crateKey = (lib: string, id: number) => `${lib}:crate:${id}`;
+/** The crate id in a crateKey from this library, or NaN. */
+const ownCrateId = (key: string) => Number(/:crate:(\d+)$/.exec(key)?.[1] ?? NaN);
 
 interface LibraryState {
   urls: Set<string>;
@@ -280,6 +304,10 @@ interface LibraryState {
   libraryId: string | null;
   playlistIds: Map<number, string>;
   username: string | null;
+  /** Crates (#126): source_key -> id for ones an earlier import created, lower-cased name -> first id, id -> created_at. */
+  crateKeys: Map<string, number>;
+  crateNames: Map<string, number>;
+  crateIds: Map<number, string>;
 }
 
 async function libraryState(db: Db): Promise<LibraryState> {
@@ -295,6 +323,10 @@ async function libraryState(db: Db): Promise<LibraryState> {
   const mapped = await db.select<{ source_key: string; playlist_id: number }>("SELECT source_key, playlist_id FROM imported_playlists WHERE playlist_id IN (SELECT id FROM playlists)");
   const smart = await db.select<{ playlist_id: number; rule_json: string }>("SELECT playlist_id, rule_json FROM smart_playlists");
   const claims = await db.select<{ source_key: string; name: string }>("SELECT source_key, name FROM imported_playlists WHERE playlist_id IS NULL");
+  const crates = await db.select<{ id: number; name: string; created_at: string }>("SELECT id, name, created_at FROM crates ORDER BY id");
+  const crateKeys = await db.select<{ source_key: string; crate_id: number }>("SELECT source_key, crate_id FROM imported_crates WHERE crate_id IN (SELECT id FROM crates)");
+  const crateNames = new Map<string, number>();
+  for (const c of crates) if (!crateNames.has(c.name.toLowerCase())) crateNames.set(c.name.toLowerCase(), c.id);
   return {
     urls: new Set(albums.map((a) => a.url)),
     ids: new Set(albums.map((a) => `${a.item_type}:${a.bandcamp_id}`)),
@@ -307,7 +339,25 @@ async function libraryState(db: Db): Promise<LibraryState> {
     libraryId: await libraryId(db, false),
     playlistIds: new Map(playlists.map((p) => [p.id, p.created_at])),
     username: (await getSetting<{ username?: string }>(db, ACCOUNT_KEY))?.username ?? null,
+    crateKeys: new Map(crateKeys.map((k) => [k.source_key, k.crate_id])),
+    crateNames,
+    crateIds: new Map(crates.map((c) => [c.id, c.created_at])),
   };
+}
+
+/**
+ * The crate here for a crate in the file (#126), or null when it has to be created: one an
+ * earlier import of this library made (imported_crates), the very same crate (importing into
+ * the library that exported it), or the first crate of the same name. Memberships merge into
+ * it; a crate is never duplicated for a name already taken.
+ */
+function crateHere(s: LibraryState, data: LibraryExport, c: LibraryExport["crates"] extends (infer T)[] | undefined ? T : never): number | null {
+  const mapped = s.crateKeys.get(c.key);
+  if (mapped !== undefined) return mapped;
+  const own = data.library_id === s.libraryId ? ownCrateId(c.key) : NaN;
+  if (Number.isInteger(own) && s.crateIds.get(own) === c.created_at) return own;
+  const name = normalizeCrateName(c.name) ?? "Imported crate";
+  return s.crateNames.get(name.toLowerCase()) ?? null;
 }
 
 function hasAlbum(s: LibraryState, a: LibraryExport["albums"][number]): boolean {
@@ -401,6 +451,10 @@ export interface LibraryImportPreview {
   account: { username: string | null; applies: boolean; marks: number };
   /** Album notes and ratings in the file (#73). */
   notes: number;
+  /** Crates in the file (#126) and how many of them would be created here (the rest merge into a crate of the same name). */
+  crates: { total: number; new: number };
+  /** Archived albums in the file (#126). */
+  archived: number;
 }
 
 function accountApplies(s: LibraryState, data: LibraryExport): boolean {
@@ -429,6 +483,8 @@ export async function previewLibraryImport(db: Db, data: LibraryExport): Promise
     newReleases: { muted: data.new_releases.muted.length, dismissed: data.new_releases.dismissed.length },
     account: { username: data.account.username, applies: accountApplies(s, data), marks: data.albums.filter((a) => a.owned || a.wishlisted).length },
     notes: data.notes?.length ?? 0,
+    crates: { total: data.crates?.length ?? 0, new: (data.crates ?? []).filter((c) => crateHere(s, data, c) === null).length },
+    archived: data.archived?.length ?? 0,
   };
 }
 
@@ -541,6 +597,25 @@ export async function importLibrary(db: Db, runner: JobRunner, data: LibraryExpo
     const cap = [now(), ...(Number.isNaN(exported.getTime()) ? [] : [toSqlTime(exported)])].sort()[0];
     await addPendingNotes(db, data.notes.filter((n) => releaseUrlOrNull(n.album_url)).map((n) => (n.updated_at > cap ? { ...n, updated_at: cap } : n)));
   }
+
+  // Crates (#126): found or created, then every membership waits by album URL and merges as
+  // its album arrives (the ones already here in the resolve below). A crate created by this
+  // import is linked to its key, so importing the file again finds it; one of the same name
+  // is reused, never duplicated. Archive marks wait the same way and never unarchive.
+  for (const c of data.crates ?? []) {
+    let id = crateHere(s, data, c);
+    if (id === null) {
+      const name = normalizeCrateName(c.name) ?? "Imported crate";
+      const t = now();
+      id = (await db.get<{ id: number }>("INSERT INTO crates (name, created_at, updated_at) VALUES (?, ?, ?) RETURNING id", [name, t, t]))!.id;
+      await db.run("INSERT INTO imported_crates (source_key, crate_id) VALUES (?, ?) ON CONFLICT(source_key) DO UPDATE SET crate_id = excluded.crate_id", [c.key, id]);
+      s.crateKeys.set(c.key, id);
+      s.crateNames.set(name.toLowerCase(), id);
+    }
+    const t = now();
+    await addPendingCrateAlbums(db, id, c.albums.flatMap((u) => { const url = releaseUrlOrNull(u); return url ? [{ album_url: url, added_at: t }] : []; }));
+  }
+  if (data.archived?.length) await addPendingArchive(db, data.archived.filter((a) => releaseUrlOrNull(a.album_url)));
 
   const resolved = await resolvePending(db);
 

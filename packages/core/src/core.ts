@@ -18,6 +18,8 @@ import * as stats from "./db/repos/stats.js";
 import * as albumNotes from "./db/repos/albumNotes.js";
 import * as resumePositions from "./db/repos/resumePositions.js";
 import * as albumRemoval from "./db/repos/albumRemoval.js";
+import * as albumArchive from "./db/repos/albumArchive.js";
+import * as crates from "./db/repos/crates.js";
 import { artUrl, extractArt, type ArtPalette, type ArtSwatches } from "./palette/index.js";
 import { radioImageUrl } from "./scrape/radio.js";
 import { JobRunner, type ImportRequest, type ImportSelectionRequest } from "./services/jobRunner.js";
@@ -118,10 +120,36 @@ export function createCore(deps: CoreDeps) {
     db,
     queue,
     // library
-    /** Library albums; `opts.limit` keeps the first few (the command palette). */
-    albums: (sort: albums.AlbumSort = "added", filter: albums.AlbumFilter = "all", q = "", tag = "", opts: { limit?: number } = {}) => albums.listAlbums(db, sort, filter, q, tag, opts),
-    /** All tracks of the albums `albums(sort, filter, q, tag)` lists, in that order (for bulk actions). */
-    albumTracks: (sort: albums.AlbumSort = "added", filter: albums.AlbumFilter = "all", q = "", tag = "") => albums.listAlbumTracks(db, sort, filter, q, tag),
+    /**
+     * Library albums, as the Albums tab lists them: archived albums (#126) are left out unless
+     * Show is Archived or `opts.archived` says otherwise (the command palette passes "any").
+     * `opts.crate` narrows to one crate; `opts.limit` keeps the first few (the palette).
+     */
+    albums: (sort: albums.AlbumSort = "added", filter: albums.AlbumFilter = "all", q = "", tag = "", opts: { limit?: number; crate?: number; archived?: albumArchive.ArchiveScope } = {}) =>
+      albums.listAlbums(db, sort, filter, q, tag, { archived: "hide", ...opts }),
+    /** All tracks of the albums `albums(sort, filter, q, tag, opts)` lists, in that order (for bulk actions). */
+    albumTracks: (sort: albums.AlbumSort = "added", filter: albums.AlbumFilter = "all", q = "", tag = "", opts: { crate?: number } = {}) =>
+      albums.listAlbumTracks(db, sort, filter, q, tag, { archived: "hide", ...opts }),
+    // archive (#126)
+    /** Archive or unarchive an album: out of (or back in) the Albums tab. True when it changed. */
+    setAlbumArchived: (id: number, archived: boolean) => albumArchive.setArchived(db, id, archived),
+    /** The same for several albums (the bulk bar). Returns how many changed. */
+    setAlbumsArchived: (ids: number[], archived: boolean) => albumArchive.setArchivedMany(db, ids, archived),
+    // crates (#126)
+    crates: () => crates.listCrates(db),
+    crate: (id: number) => crates.getCrate(db, id),
+    createCrate: (name: string) => crates.createCrate(db, name),
+    renameCrate: (id: number, name: string) => crates.renameCrate(db, id, name),
+    /** Delete a crate and get what restoreCrate needs (#93), or null when there was none. */
+    deleteCrateWithUndo: (id: number) => crates.deleteCrateWithUndo(db, id),
+    /** Recreate a deleted crate (its old id when free); returns its id. */
+    restoreCrate: (snap: crates.DeletedCrate) => crates.restoreCrate(db, snap),
+    /** The crates an album is in. */
+    cratesOf: (albumId: number) => crates.cratesOf(db, albumId),
+    /** crate id -> how many of these albums it holds (crates holding none are absent), for the picker's marks. */
+    cratesContaining: (albumIds: number[]) => crates.cratesContaining(db, albumIds),
+    addToCrate: (id: number, albumIds: number[]) => crates.addToCrate(db, id, albumIds),
+    removeFromCrate: (id: number, albumIds: number[]) => crates.removeFromCrate(db, id, albumIds),
     /** The library's tags with album counts (#71), most used first. */
     tags: (filter: albums.AlbumFilter = "all") => albums.listTags(db, filter),
     album: (id: number) => albums.getAlbumWithTracks(db, id),

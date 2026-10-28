@@ -34,7 +34,7 @@ packages/core/src/
   types.ts                 DTOs shared by core and web (import "@bc/core")
   scrape/                  ALL Bandcamp parsing. url, http (FetchQueue, injected fetch), parseTralbum, parseMusic, search, fan (collection/wishlist), radio (Bandcamp Radio list + episode), discover (results, tag/place search, discover links), discoverGenres (genre/subgenre chips), schemas (zod, with the lenient str/num/items helpers), challenge (bot-check gate), errors (ScrapeError codes, describeError), html (entity decoding, clean, assertNotChallenge); url.ts has releaseUrlOrNull (every URL from markup, Bandcamp JSON or a library file goes through it before it is queued, stored or shown) and hostOf; http.ts has postJson for the JSON APIs
   db/Db.ts                 async Db interface {select,get,run}; SQL uses "?" and toDollar() rewrites to $n for the Tauri plugin; placeholders()/chunks() for IN lists and chunked writes; sqlTime()/now()/sqlTimeIso() for the library's UTC "YYYY-MM-DD HH:MM:SS" timestamps
-  db/repos/                one module per table; booleans stored 0/1, converted at the repo boundary
+  db/repos/                one module per table; booleans stored 0/1, converted at the repo boundary; crates (crates + crate_albums, #126) and albumArchive (album_archive, the ARCHIVED/NOT_ARCHIVED SQL and ArchiveScope) are the user's own grouping and parking of albums
   services/                importService (upsertTralbum, vacuumOrphans; the upsert only vacuums when tracks moved or the album changed artist), time (clock: m:ss / h:mm:ss), streamService, jobRunner (incl. collection sync), pageCache, account (username + identity cookie), releaseWatch (new releases checker), nowPlaying (Media Session mapping), miniPlayer (mini window state/command protocol, throttle), transition (gapless/crossfade scheduling, fade curve, state machine), libraryTransfer (library export/import file, VACUUM INTO backup), radio (episodes, tracklists, stream URLs), discover (preview queue entries + their stream URLs), offline (offline copies: download, local URL, sweep), resume (resume points for long tracks), sleepTimer, playRule (when a play counts), preorder, collectionRefresh (daily sync), idle (when background work may run), audioEvents (routing the two elements' events), playerToggle, volume
   theme/                   schema (zod), presets, color math (OKLCH, contrast), apply (CSS variables)
   palette/                 quantize + pick + extract (canvas) + fitPalette + artUrl; boost (palette v2: raw swatches -> vivid backdrop colours)
@@ -56,7 +56,7 @@ web/src/
   backdrop/                the album-art backdrop (#110): Backdrop.tsx (replaces Ambient), controller (pure rules), engine (loop, GL injected), gl (raw WebGL1), shaders (GLSL strings), swatches (boosted palette store)
   components/Seek.tsx      the presentational scrub bar; SeekBar binds it to the store, the mini window to its seek command
   lib/                     small shared helpers: useDebounced, openExternal, format (plural, formatDateTime, durations), navigation, removals
-  ui/menu.ts + components/MenuHost.tsx   the one context menu / playlist picker for the whole app
+  ui/menu.ts + components/MenuHost.tsx   the one context menu / playlist picker / crate picker for the whole app (reopenMenuAs for a submenu)
   ui/palette.ts + lib/paletteActions.ts   the ⌘K command palette (ui/store.ts holds its open state)
   ui/undo.ts + components/UndoNote.tsx   the one "Removed X. Undo" note; lib/removals.ts starts removals with it
   components/, pages/      plain CSS in styles.css driven by tokens on :root
@@ -634,6 +634,26 @@ src-tauri/
   without importing) go through `albums.albumIdsByUrl`, which carries it; a Radio tracklist
   therefore shows no "Open album" for an album in its Undo window (2026-10-21).
   `ConfirmButton` stays for bulk and irreversible actions.
+- Crates and Archive (#126, migration 0013, 2026-10-28). A crate (`repos/crates.ts`) is the
+  user's own group of albums, separate from Bandcamp's tags; it is listed in the sidebar under
+  the playlists and opens the Library's Albums grid narrowed to it (`?crate=<id>`, the
+  `crate` condition in `albumWhere`), so Sort, Show, the filter text and the bulk bar apply
+  unchanged. Memberships are `crate_albums`; the picker (`cratePicker` in `ui/menu.ts`)
+  toggles and stays open; deleting a crate offers Undo from a snapshot. Archive
+  (`repos/albumArchive.ts`, `album_archive`) hides an album from the **Albums tab only**: the
+  grid, its Recently played row and the bulk bar's track read (`core.albums`/`core.albumTracks`
+  pass `archived: "hide"`; `recentlyPlayedAlbums` skips archived). The repo default is `"any"`:
+  Artists, Tracks, Tags, Stats, smart playlists (unless the rule's `show` is `archived`),
+  playlists, the queue, history, the album page, by-URL lookups and the ⌘K palette (which
+  passes `"any"` and says "archived") all keep it. Show → Archived (`AlbumFilter`
+  `archived`) lists only archived albums; `unplayed` is albums with no counted play. Both
+  are in `SmartRuleSchema.show`. Archiving from a card or the album page offers Undo;
+  the bulk bar's Archive all / Unarchive all use `ConfirmButton`. The library file carries
+  optional `crates` (by `<library id>:crate:<id>` key, matched by `imported_crates`, then
+  the same library's own crate, then a crate of the same name) and `archived` arrays
+  (version still 1); both wait by album URL in `crate_albums_pending` /
+  `album_archive_pending` and merge in `resolvePending` after each imported album. A file
+  only ever marks: it never unarchives or takes an album out of a crate.
 - Jobs that are pending, queued or running are "active": `repos/jobs.ts` exports
   `ACTIVE_SQL`/`activeSql(col)` and `activeJob(db, kind, inputUrl?)` (`core.downloadJobFor`
   wraps it) and `types.ts` exports `isActiveJob`, so no query or component spells the three

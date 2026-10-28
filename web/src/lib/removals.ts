@@ -4,8 +4,36 @@ import { getCore } from "../api/core";
 import { invalidateQueries } from "../api/invalidate";
 import { offerUndo } from "../ui/undo";
 
-const LIBRARY = ["albums", "album", "artists", "artist", "tracks", "search", "playlists", "playlist", "history", "releases"];
+const LIBRARY = ["albums", "album", "artists", "artist", "tracks", "search", "playlists", "playlist", "history", "releases", "crates"];
 const PLAYLISTS = ["playlists", "playlist"];
+// The same prefixes as queries.ts' CRATE_KEYS and ARCHIVE_KEYS (#126).
+const CRATES = ["crates", "albums"];
+const ARCHIVE = ["albums", "album", "history"];
+
+/** Archive an album (#126): it leaves the Albums tab at once; Undo brings it back. */
+export async function archiveAlbumWithUndo(album: { id: number; title: string }): Promise<boolean> {
+  const core = await getCore();
+  if (!(await core.setAlbumArchived(album.id, true))) return false;
+  invalidateQueries(ARCHIVE);
+  offerUndo({
+    text: `Archived "${album.title}".`,
+    undo: async () => { await core.setAlbumArchived(album.id, false); invalidateQueries(ARCHIVE); },
+  });
+  return true;
+}
+
+/** Delete a crate (#126); Undo brings it back with its albums, under its old id when free. */
+export async function deleteCrateWithUndo(crate: { id: number; name: string }): Promise<boolean> {
+  const core = await getCore();
+  const snap = await core.deleteCrateWithUndo(crate.id);
+  invalidateQueries(CRATES);
+  if (!snap) return false;
+  offerUndo({
+    text: `Deleted "${crate.name}".`,
+    undo: async () => { await core.restoreCrate(snap); invalidateQueries(CRATES); },
+  });
+  return true;
+}
 
 /**
  * Remove an album from the library. It disappears at once; the real delete (rows, offline

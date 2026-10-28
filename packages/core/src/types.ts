@@ -43,6 +43,19 @@ export interface Album {
   downloaded_count?: number;
   /** Your 0-5 star rating (#73), 0 when unrated. */
   rating?: number;
+  /** Archived (#126): out of the Library's Albums tab unless Show is Archived; everything else still lists it. */
+  archived: boolean;
+}
+
+/** A crate (#126): the user's own group of albums, listed in the sidebar. */
+export interface Crate {
+  id: number;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  album_count: number;
+  /** Up to four distinct album art ids, in added order, for cover mosaics. */
+  art_ids: number[];
 }
 
 export interface Track {

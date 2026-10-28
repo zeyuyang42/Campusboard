@@ -3,7 +3,7 @@ import { isPreviewTrack, isRadioTrack, type QueuePreview, type Track } from "@bc
 import { getCore } from "../api/core";
 import { navigateTo } from "./navigation";
 import { usePlayer } from "../player/store";
-import { useMenu, type MenuContent, type MenuItem } from "../ui/menu";
+import { reopenMenuAs, type MenuContent, type MenuItem } from "../ui/menu";
 import { openExternal } from "./openExternal";
 
 export interface TrackActionOptions {
@@ -31,10 +31,7 @@ export function useTrackActions() {
       { label: "Add to queue", onSelect: () => player.getState().enqueueLast(playable) },
     ] : [];
     if (library.length) items.push(
-      { label: library.length === 1 ? "Add to playlist…" : `Add ${library.length} tracks to playlist…`, onSelect: () => {
-          const m = useMenu.getState();
-          setTimeout(() => m.show({ x: m.x, y: m.y }, { playlistPicker: { trackIds: library.map((t) => t.id) } }), 0);
-        } },
+      { label: library.length === 1 ? "Add to playlist…" : `Add ${library.length} tracks to playlist…`, onSelect: () => reopenMenuAs({ playlistPicker: { trackIds: library.map((t) => t.id) } }) },
     );
     if (preview) items.push({ kind: "separator" }, { label: "Add album to library", onSelect: () => void addPreviewAlbum(preview.item_url) }, { label: "Go to Discover", onSelect: () => nav("/discover") });
     else if (one && isRadioTrack(one)) items.push({ kind: "separator" }, { label: "Go to Radio", onSelect: () => nav("/radio") });

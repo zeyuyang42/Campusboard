@@ -8,7 +8,11 @@ import { repos, type DiscoverPage, type DiscoverParams, type HistoryCursor, type
 export { KEY_GROUPS, invalidateGroup, type KeyGroup } from "./invalidate";
 
 export const keys = {
-  albums: (sort: string, filter = "all", q = "", tag = "") => ["albums", sort, filter, q, tag] as const,
+  albums: (sort: string, filter = "all", q = "", tag = "", crate = 0) => ["albums", sort, filter, q, tag, crate] as const,
+  // Crates (#126): the list, one crate, and an album's crates (under "crates", so any crate change refreshes them).
+  crates: ["crates"] as const,
+  crate: (id: number) => ["crates", "one", id] as const,
+  cratesOf: (albumId: number) => ["crates", "of", albumId] as const,
   // Under "albums" so an import or a removal refreshes the counts.
   tags: (filter = "all") => ["albums", "tags", filter] as const,
   album: (id: number) => ["album", id] as const,
@@ -50,16 +54,20 @@ export const keys = {
 };
 
 const core = getCore;
-/** Library albums; while the filter text changes, the previous result stays on screen. */
-export const useAlbums = (sort: string, filter = "all", q = "", tag = "") =>
-  useQuery({ queryKey: keys.albums(sort, filter, q.trim(), tag), queryFn: async () => (await core()).albums(sort as never, filter as never, q, tag), placeholderData: keepPreviousData });
+/** Library albums (archived ones only under Show → Archived, #126); `crate` narrows to one crate. While the filter text changes, the previous result stays on screen. */
+export const useAlbums = (sort: string, filter = "all", q = "", tag = "", crate = 0) =>
+  useQuery({
+    queryKey: keys.albums(sort, filter, q.trim(), tag, crate),
+    queryFn: async () => (await core()).albums(sort as never, filter as never, q, tag, crate > 0 ? { crate } : {}),
+    placeholderData: keepPreviousData,
+  });
 /** The library's tags with album counts under the Show filter (#71), so they match the grid. */
 export const useTags = (filter: repos.AlbumFilter = "all") => useQuery({ queryKey: keys.tags(filter), queryFn: async () => (await core()).tags(filter) });
 
 export type LibraryView = { sort: repos.AlbumSort; filter: repos.AlbumFilter };
 const LIBRARY_VIEW_KEY = "library_view";
 const DEFAULT_VIEW: LibraryView = { sort: "added", filter: "all" };
-const FILTERS: readonly string[] = ["all", "purchased", "wishlist", "downloaded", "rated"] satisfies repos.AlbumFilter[];
+const FILTERS: readonly string[] = ["all", "purchased", "wishlist", "downloaded", "rated", "archived", "unplayed"] satisfies repos.AlbumFilter[];
 
 function toLibraryView(v: unknown): LibraryView {
   const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
@@ -217,6 +225,37 @@ export function usePlaylistMutations() {
     /** A smart playlist (#84) from a name and a rule. */
     createSmart: useMutation({ mutationFn: async ({ name, rule }: { name: string; rule: repos.SmartRuleInput }) => (await core()).createSmartPlaylist(name, rule), onSuccess: () => inv() }),
     setRule: useMutation({ mutationFn: async ({ id, rule }: { id: number; rule: repos.SmartRuleInput }) => (await core()).setSmartRule(id, rule), onSuccess: (_d, v) => inv(v.id) }),
+  };
+}
+
+// Crates and archive (#126).
+export const useCrates = () => useQuery({ queryKey: keys.crates, queryFn: async () => (await core()).crates() });
+export const useCrate = (id: number) => useQuery({ queryKey: keys.crate(id), queryFn: async () => (await core()).crate(id), enabled: id > 0 });
+/** The crates an album is in (the album page). */
+export const useCratesOf = (albumId: number) => useQuery({ queryKey: keys.cratesOf(albumId), queryFn: async () => (await core()).cratesOf(albumId), enabled: albumId > 0 });
+
+/** The prefixes a crate change touches: the crate lists and the Albums grid (a crate view may be on screen). lib/removals.ts spells the same for the Undo note. */
+const CRATE_KEYS = ["crates", "albums"] as const;
+/** The prefixes an archive change touches: the grids, the album page, and the Recently played row. */
+const ARCHIVE_KEYS = ["albums", "album", "history"] as const;
+
+export function useCrateMutations() {
+  const qc = useQueryClient();
+  const inv = () => { for (const k of CRATE_KEYS) void qc.invalidateQueries({ queryKey: [k] }); };
+  return {
+    create: useMutation({ mutationFn: async (name: string) => (await core()).createCrate(name), onSuccess: inv }),
+    rename: useMutation({ mutationFn: async ({ id, name }: { id: number; name: string }) => (await core()).renameCrate(id, name), onSuccess: inv }),
+    add: useMutation({ mutationFn: async ({ id, albumIds }: { id: number; albumIds: number[] }) => (await core()).addToCrate(id, albumIds), onSuccess: inv }),
+    remove: useMutation({ mutationFn: async ({ id, albumIds }: { id: number; albumIds: number[] }) => (await core()).removeFromCrate(id, albumIds), onSuccess: inv }),
+  };
+}
+
+export function useArchiveMutations() {
+  const qc = useQueryClient();
+  const inv = () => { for (const k of ARCHIVE_KEYS) void qc.invalidateQueries({ queryKey: [k] }); };
+  return {
+    setArchived: useMutation({ mutationFn: async ({ id, archived }: { id: number; archived: boolean }) => (await core()).setAlbumArchived(id, archived), onSuccess: inv }),
+    setArchivedMany: useMutation({ mutationFn: async ({ ids, archived }: { ids: number[]; archived: boolean }) => (await core()).setAlbumsArchived(ids, archived), onSuccess: inv }),
   };
 }
 

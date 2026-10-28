@@ -1,8 +1,9 @@
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { AlbumWithTracks } from "@bc/core";
-import { removeAlbumWithUndo } from "../lib/removals";
+import { archiveAlbumWithUndo, removeAlbumWithUndo } from "../lib/removals";
 import { getCore } from "../api/core";
-import { isJobActive, useAlbum, useAlbumMutations, useJobs, useOfflineMutations, useOfflineStats } from "../api/queries";
+import { isJobActive, useAlbum, useAlbumMutations, useArchiveMutations, useCrateMutations, useCratesOf, useJobs, useOfflineMutations, useOfflineStats } from "../api/queries";
+import { libraryCratePath } from "../lib/navigation";
 import { ArtImage } from "../components/ArtImage";
 import { TrackList, PlayPauseAll } from "../components/TrackList";
 import { ExternalIcon, MoreIcon } from "../components/Icons";
@@ -12,7 +13,24 @@ import { TagLinks } from "../components/TagLinks";
 import { formatReleaseDate, formatTotal } from "../lib/format";
 import { friendlyError } from "../lib/errors";
 import { useTrackActions } from "../lib/useTrackActions";
-import { openMenuFromEvent } from "../ui/menu";
+import { openMenuFromEvent, reopenMenuAs } from "../ui/menu";
+
+/** The album's crates (#126) as pills that open the crate view, each with a × to take the album out, and a button to add it to one. */
+function CrateLine({ albumId }: { albumId: number }) {
+  const { data: crates } = useCratesOf(albumId);
+  const { remove } = useCrateMutations();
+  return (
+    <div className="crate-line">
+      {crates?.map((c) => (
+        <span key={c.id} className="chip tag-chip">
+          <Link to={libraryCratePath(c.id)}>{c.name}</Link>
+          <button className="icon-btn sm" aria-label={`Take out of ${c.name}`} title={`Take out of ${c.name}`} onClick={() => remove.mutate({ id: c.id, albumIds: [albumId] })}>×</button>
+        </span>
+      ))}
+      <button className="btn sm" onClick={(e) => openMenuFromEvent(e, { cratePicker: { albumIds: [albumId] } })}>{crates?.length ? "Crates…" : "Add to crate…"}</button>
+    </div>
+  );
+}
 
 function offlineCounts(album: AlbumWithTracks) {
   return { saved: album.tracks.filter((t) => t.downloaded).length, streamable: album.tracks.filter((t) => t.streamable).length };
@@ -66,8 +84,15 @@ export function AlbumPage() {
   const id = Number(useParams().id);
   const { data: album, isLoading, error } = useAlbum(id);
   const { refresh } = useAlbumMutations();
+  const { setArchived } = useArchiveMutations();
   const nav = useNavigate();
   const actions = useTrackActions();
+  /** The ⋯ menu: the track actions plus "Add to crate…" (#126). */
+  const more = (e: React.MouseEvent, a: AlbumWithTracks) => {
+    const content = actions(a.tracks, { onAlbumPage: true });
+    if ("items" in content) content.items.push({ label: "Add to crate…", onSelect: () => reopenMenuAs({ cratePicker: { albumIds: [a.id] } }) });
+    openMenuFromEvent(e, content);
+  };
   if (error) return <div className="notice error">Couldn't load this album. {friendlyError(error)}</div>;
   if (isLoading || !album) return <div className="empty">Loading…</div>;
 
@@ -90,15 +115,20 @@ export function AlbumPage() {
             </div>
           )}
           {album.owned && <div className="owned-note">Purchased</div>}
+          {album.archived && <div className="archived-note">Archived</div>}
           <OfflineNote album={album} />
           <TagLinks tags={album.tags} />
+          <CrateLine albumId={album.id} />
           <AlbumNotes key={album.id} albumId={album.id} />
           <div className="actions">
             <PlayPauseAll tracks={album.tracks} />
-            <button className="icon-btn" title="More" aria-label="More actions" onClick={(e) => openMenuFromEvent(e, actions(album.tracks, { onAlbumPage: true }))}><MoreIcon /></button>
+            <button className="icon-btn" title="More" aria-label="More actions" onClick={(e) => more(e, album)}><MoreIcon /></button>
             <ExternalLink className="btn" href={album.url}>Buy on Bandcamp <ExternalIcon /></ExternalLink>
             <OfflineAction album={album} />
             <button className="btn" onClick={() => refresh.mutate(album.id)} disabled={refresh.isPending}>{refresh.isPending ? "Refreshing…" : "Refresh"}</button>
+            {album.archived
+              ? <button className="btn" onClick={() => setArchived.mutate({ id: album.id, archived: false })} disabled={setArchived.isPending}>Unarchive</button>
+              : <button className="btn" onClick={() => { void archiveAlbumWithUndo(album); }}>Archive</button>}
             <button className="btn danger" onClick={async () => { if (await removeAlbumWithUndo(album)) nav("/library"); }}>Remove</button>
           </div>
         </div>

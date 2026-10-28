@@ -7,7 +7,7 @@ import type { QueryClient } from "@tanstack/react-query";
  */
 export const KEY_GROUPS = {
   /** Everything an import, a removal or an edit may have changed. */
-  library: ["albums", "album", "artists", "artist", "tracks", "search", "playlists", "playlist", "history", "releases"],
+  library: ["albums", "album", "artists", "artist", "tracks", "search", "playlists", "playlist", "history", "releases", "crates"],
   /** A pre-order that came out, or tracks that changed: nothing imported, so no artists, search or releases. */
   libraryTracks: ["albums", "album", "artist", "tracks", "playlist", "history"],
   /** Listening history cleared: everything that shows play counts. */

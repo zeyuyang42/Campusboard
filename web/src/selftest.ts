@@ -153,6 +153,35 @@ async function albumNotesCheck(core: Awaited<ReturnType<typeof getCore>>, albumI
 }
 
 /**
+ * Crates and Archive (#126) through the real SQL plugin and migration 0013: a crate is made,
+ * the selftest album goes in (the JSON-parameter writes), the crate view lists it, archiving
+ * takes the album out of the Albums tab but not out of Show → Archived or the artists list,
+ * then everything is put back and the crate deleted. Nothing of the user's is touched.
+ */
+async function cratesArchiveCheck(core: Awaited<ReturnType<typeof getCore>>, albumId: number | undefined) {
+  if (!albumId) return { ok: false, error: "no album" };
+  const wasArchived = (await core.albums("added", "archived")).some((a) => a.id === albumId);
+  const crate = await core.createCrate("selftest crate");
+  try {
+    const added = await core.addToCrate(crate.id, [albumId]);
+    const inCrate = (await core.albums("added", "all", "", "", { crate: crate.id })).some((a) => a.id === albumId);
+    const marks = await core.cratesContaining([albumId]);
+    const onPage = (await core.cratesOf(albumId)).some((c) => c.id === crate.id);
+    const tracks = (await core.albumTracks("added", "all", "", "", { crate: crate.id })).every((t) => t.album_id === albumId);
+    await core.setAlbumArchived(albumId, true);
+    const hidden = !(await core.albums()).some((a) => a.id === albumId);
+    const shown = (await core.albums("added", "archived")).some((a) => a.id === albumId);
+    const stillCounted = (await core.artists()).some((ar) => (ar.album_count ?? 0) > 0);
+    const migrated = !!(await core.db.get("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'imported_crates'"));
+    const ok = added === 1 && inCrate && marks.get(crate.id) === 1 && onPage && tracks && hidden && shown && stillCounted && migrated;
+    return { ok, added, inCrate, marked: marks.get(crate.id) ?? 0, onPage, tracks, hidden, shown, stillCounted, migrated };
+  } finally {
+    await core.setAlbumArchived(albumId, wasArchived);
+    await core.deleteCrateWithUndo(crate.id);
+  }
+}
+
+/**
  * Resume points (#85) through the real SQL plugin: migration 0010's table is there, a point
  * is written, updated, read back and cleared. The row uses an id no track or show has and
  * saved_at 0, so it is the oldest: the cap never removes a real row for it (with the table
@@ -1144,6 +1173,7 @@ export async function runSelfTest() {
     out.libraryFilter = await block("libraryFilter", () => libraryFilterCheck(core, album));
     out.tags = await block("tags", () => tagsCheck(core, album));
     out.albumNotes = await block("albumNotes", () => albumNotesCheck(core, album?.id));
+    out.cratesArchive = await block("cratesArchive", () => cratesArchiveCheck(core, album?.id));
     out.resume = await block("resume", () => resumeCheck(core));
     out.history = await block("history", () => historyCheck(core, album));
     out.audio = await block("audio", async (s) => {

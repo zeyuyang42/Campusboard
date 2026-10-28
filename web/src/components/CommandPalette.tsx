@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getCore } from "../api/core";
-import { useArtists, usePlaylists } from "../api/queries";
+import { useArtists, useCrates, usePlaylists } from "../api/queries";
 import { usePalette } from "../ui/palette";
-import { navigateTo } from "../lib/navigation";
+import { libraryCratePath, navigateTo } from "../lib/navigation";
 import { filterActions, matches, PALETTE_ACTIONS } from "../lib/paletteActions";
 import { useDebounced } from "../lib/useDebounced";
 
@@ -14,7 +14,7 @@ export const PALETTE_DEBOUNCE_MS = 150;
 
 interface Item {
   key: string;
-  group: "Albums" | "Artists" | "Playlists" | "Actions";
+  group: "Albums" | "Artists" | "Playlists" | "Crates" | "Actions";
   label: string;
   detail?: string;
   navigates: boolean;
@@ -36,25 +36,30 @@ function Palette() {
   const term = useDebounced(q, PALETTE_DEBOUNCE_MS).trim();
   const albums = useQuery({
     queryKey: ["albums", "palette", term],
-    queryFn: async () => (await getCore()).albums("title", "all", term, "", { limit: PALETTE_GROUP_MAX }),
+    // Archived albums (#126) are still a jump away from here; the row says so.
+    queryFn: async () => (await getCore()).albums("title", "all", term, "", { limit: PALETTE_GROUP_MAX, archived: "any" }),
     enabled: term.length > 0,
     // The previous term's albums stay until the new ones land, so the list doesn't flicker.
     placeholderData: keepPreviousData,
   });
   const artists = useArtists();
   const playlists = usePlaylists();
+  const crates = useCrates();
 
   const items = useMemo<Item[]>(() => {
     const out: Item[] = [];
     if (term) {
       for (const a of (albums.data ?? []).slice(0, PALETTE_GROUP_MAX)) {
-        out.push({ key: `album:${a.id}`, group: "Albums", label: a.title, detail: a.artist_name, navigates: true, run: () => navigateTo(`/album/${a.id}`) });
+        out.push({ key: `album:${a.id}`, group: "Albums", label: a.title, detail: a.archived ? `${a.artist_name}, archived` : a.artist_name, navigates: true, run: () => navigateTo(`/album/${a.id}`) });
       }
       for (const a of (artists.data ?? []).filter((x) => matches(x.name, term)).slice(0, PALETTE_GROUP_MAX)) {
         out.push({ key: `artist:${a.id}`, group: "Artists", label: a.name, navigates: true, run: () => navigateTo(`/artist/${a.id}`) });
       }
       for (const p of (playlists.data ?? []).filter((x) => matches(x.name, term)).slice(0, PALETTE_GROUP_MAX)) {
         out.push({ key: `playlist:${p.id}`, group: "Playlists", label: p.name, navigates: true, run: () => navigateTo(`/playlists/${p.id}`) });
+      }
+      for (const c of (crates.data ?? []).filter((x) => matches(x.name, term)).slice(0, PALETTE_GROUP_MAX)) {
+        out.push({ key: `crate:${c.id}`, group: "Crates", label: c.name, navigates: true, run: () => navigateTo(libraryCratePath(c.id)) });
       }
     }
     // Actions match the live text, so they answer before the library does.
@@ -67,7 +72,7 @@ function Palette() {
       out.push({ key: "action:search-bandcamp", group: "Actions", label: `Search Bandcamp for “${text}”`, navigates: true, run: search.run });
     }
     return out;
-  }, [term, q, albums.data, artists.data, playlists.data]);
+  }, [term, q, albums.data, artists.data, playlists.data, crates.data]);
 
   // The highlighted row is remembered by key, so results that arrive later (albums after the
   // debounce) don't move it. No key yet means the first row.
@@ -114,15 +119,15 @@ function Palette() {
     e.stopPropagation();
   };
 
-  const groups = (["Albums", "Artists", "Playlists", "Actions"] as const).map((g) => ({ g, rows: items.filter((x) => x.group === g) })).filter((x) => x.rows.length);
+  const groups = (["Albums", "Artists", "Playlists", "Crates", "Actions"] as const).map((g) => ({ g, rows: items.filter((x) => x.group === g) })).filter((x) => x.rows.length);
   return (
     <div className="palette-layer" onMouseDown={(e) => { if (e.target === e.currentTarget) { e.preventDefault(); hide(); } }}>
       <div className="palette" role="dialog" aria-modal="true" aria-label="Command palette">
         <input
           data-palette-input autoFocus type="text" className="palette-input" spellCheck={false} autoComplete="off"
-          placeholder="Jump to an album, artist, playlist or action"
+          placeholder="Jump to an album, artist, playlist, crate or action"
           role="combobox" aria-expanded={items.length > 0} aria-controls="palette-list" aria-autocomplete="list"
-          aria-label="Find an album, artist, playlist or action"
+          aria-label="Find an album, artist, playlist, crate or action"
           aria-activedescendant={current ? optionId(current.key) : undefined}
           value={q} onChange={(e) => { setQ(e.target.value); setActiveKey(null); setEnterQueued(false); }} onKeyDown={onKeyDown}
         />

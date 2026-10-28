@@ -18,7 +18,8 @@ export const SMART_LIMIT_MAX = 10_000;
  * sort order.
  */
 export const SmartRuleSchema = z.object({
-  show: z.enum(["all", "purchased", "wishlist", "downloaded", "rated"]).default("all"),
+  /** Archived albums (#126) count like any other here unless show is "archived" (then only they match). */
+  show: z.enum(["all", "purchased", "wishlist", "downloaded", "rated", "archived", "unplayed"]).default("all"),
   /** 0 for any rating. */
   minRating: z.number().int().min(0).max(RATING_MAX).default(0),
   tag: z.string().trim().max(SMART_TEXT_MAX).optional(),

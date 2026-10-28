@@ -73,8 +73,17 @@ history and can't go into playlists.
   streams one track at a time; saved tracks play without a connection. Settings →
   Storage shows the total, sets a limit and removes everything. These copies are
   for listening in the app, not purchases.
-- Removing an album, playlist or playlist entry shows a few seconds of **Undo**
-  instead of asking first.
+- **Crates**: your own groups of albums, in the sidebar under the playlists (nothing
+  to do with Bandcamp's tags). Right-click an album and choose **Add to crate**, or use
+  the bar above a filtered grid to add every album shown; an album can sit in several.
+  A crate opens the Library grid narrowed to it, so Show, Sort and the filter still
+  apply. Right-click a crate to rename or delete it.
+- **Archive**: **Archive** on an album page or in its menu takes it out of the
+  Albums grid (and the Recently played row) until you unarchive it. Artists, Tracks,
+  Tags, History, playlists and the queue keep it; **Show → Archived** lists the
+  archived ones, and **Show → Unplayed** the albums you never played.
+- Removing an album, playlist or playlist entry, archiving an album or deleting a
+  crate shows a few seconds of **Undo** instead of asking first.
 
 ### Playing
 - **Now playing**: `N` or click the artwork for a full view with queue and
@@ -104,7 +113,7 @@ history and can't go into playlists.
   [files](#theme-files).
 
 ### Keyboard
-`⌘K` opens the command palette (albums, artists, playlists, actions). `Space`
+`⌘K` opens the command palette (albums, artists, playlists, crates, actions). `Space`
 play/pause, `←`/`→` seek 5 s, `Shift+←`/`→` previous/next, `↑`/`↓` volume, `S`
 shuffle, `R` repeat, `Q` queue, `N` now playing, `/` search, `Esc` close. Help →
 Keyboard Shortcuts lists the rest.

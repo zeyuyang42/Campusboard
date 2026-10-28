@@ -1,6 +1,8 @@
 import type { Db } from "../Db.js";
 import { chunks, now, valuesList } from "../Db.js";
 import { mergePendingNotes } from "./albumNotes.js";
+import { mergePendingCrateAlbums } from "./crates.js";
+import { mergePendingArchive } from "./albumArchive.js";
 
 /**
  * What a library file asked for that waits on an album, track or artist arriving here
@@ -56,6 +58,8 @@ const TID = `COALESCE(
  */
 export async function resolvePending(db: Db, albumId?: number): Promise<{ tracks: number; plays: number }> {
   await mergePendingNotes(db, albumId); // album notes wait in their own table (#73)
+  await mergePendingCrateAlbums(db, albumId); // crate memberships and archive marks too (#126)
+  await mergePendingArchive(db, albumId);
   if (!(await db.get("SELECT 1 AS x FROM import_pending LIMIT 1"))) return { tracks: 0, plays: 0 };
   let T = "";
   let tp: unknown[] = [];

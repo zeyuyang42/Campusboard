@@ -1,10 +1,13 @@
-import { NavLink, useNavigate } from "react-router-dom";
-import { useNewReleaseCount, usePlaylists, usePlaylistMutations } from "../api/queries";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { useCrateMutations, useCrates, useNewReleaseCount, usePlaylists, usePlaylistMutations } from "../api/queries";
 import { PlaylistCover } from "./PlaylistCover";
 import { useRef, useState } from "react";
 import { useUi } from "../ui/store";
-import { normalizePlaylistName, PLAYLIST_NAME_MAX } from "@bc/core";
+import { normalizeCrateName, normalizePlaylistName, CRATE_NAME_MAX, PLAYLIST_NAME_MAX, type Crate } from "@bc/core";
 import { friendlyError } from "../lib/errors";
+import { libraryCratePath } from "../lib/navigation";
+import { openMenuFromEvent } from "../ui/menu";
+import { deleteCrateWithUndo } from "../lib/removals";
 
 export function Sidebar({ open }: { open: boolean }) {
   const { data: playlists } = usePlaylists();
@@ -32,10 +35,13 @@ export function Sidebar({ open }: { open: boolean }) {
       busy.current = false;
     }
   };
+  // The crate on screen (#126): the Library grid narrowed to it, which is not the Library entry's own page.
+  const loc = useLocation();
+  const crateOnScreen = loc.pathname.startsWith("/library") ? Number(new URLSearchParams(loc.search).get("crate")) || 0 : 0;
   return (
     <aside className={`sidebar nav ${open ? "open" : ""}`}>
       <div className="brand" data-tauri-drag-region><span className="dot" /><span>Campusboard</span></div>
-      <NavLink to="/library" title="Library"><IconLibrary /><span className="label">Library</span></NavLink>
+      <NavLink to="/library" title="Library" className={({ isActive }) => (isActive && !crateOnScreen ? "active" : "")}><IconLibrary /><span className="label">Library</span></NavLink>
       <NavLink to="/search" title="Search"><IconSearch /><span className="label">Search</span></NavLink>
       <NavLink to="/discover" title="Discover"><IconDiscover /><span className="label">Discover</span></NavLink>
       <NavLink to="/import" title="Import"><IconImport /><span className="label">Import</span></NavLink>
@@ -63,10 +69,84 @@ export function Sidebar({ open }: { open: boolean }) {
           <span className="count">{p.track_count}</span>
         </NavLink>
       ))}
+      <Crates onScreen={crateOnScreen} />
       <div className="bottom">
         <NavLink to="/settings" title="Settings"><IconSettings /><span className="label">Settings</span></NavLink>
       </div>
     </aside>
+  );
+}
+
+/**
+ * Crates (#126): the user's own album groups, under the playlists. A crate opens the Library's
+ * Albums grid narrowed to it. Right-click a crate to rename it in place or delete it (Undo).
+ */
+function Crates({ onScreen }: { onScreen: number }) {
+  const { data: crates } = useCrates();
+  const { create, rename } = useCrateMutations();
+  const nav = useNavigate();
+  const creating = useUi((s) => s.creatingCrate);
+  const setCreating = useUi((s) => s.setCreatingCrate);
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<{ id: number; name: string } | null>(null);
+  const busy = useRef(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (busy.current) return;
+    const clean = normalizeCrateName(name);
+    if (!clean) { setCreating(false); setName(""); return; }
+    busy.current = true;
+    try {
+      const c = await create.mutateAsync(clean);
+      setName(""); setError(null); setCreating(false);
+      nav(libraryCratePath(c.id));
+    } catch (err) {
+      setError(friendlyError(err, "Couldn't create the crate."));
+    } finally {
+      busy.current = false;
+    }
+  };
+  const finishRename = () => {
+    if (!renaming) return;
+    const clean = normalizeCrateName(renaming.name);
+    const current = crates?.find((c) => c.id === renaming.id);
+    if (clean && current && clean !== current.name) rename.mutate({ id: renaming.id, name: clean });
+    setRenaming(null);
+  };
+  const menu = (e: React.MouseEvent, c: Crate) => openMenuFromEvent(e, {
+    items: [
+      { label: "Rename", onSelect: () => setRenaming({ id: c.id, name: c.name }) },
+      { kind: "separator" },
+      { label: "Delete crate", danger: true, onSelect: () => { void deleteCrateWithUndo(c).then((ok) => { if (ok && onScreen === c.id) nav("/library"); }); } },
+    ],
+  });
+  return (
+    <>
+      <div className="section">
+        <span>Crates</span>
+        <button title="New crate" onClick={() => setCreating(true)} aria-label="New crate">+</button>
+      </div>
+      {creating && (
+        <form onSubmit={submit} style={{ padding: "0 4px 6px" }}>
+          <input autoFocus placeholder="Crate name" maxLength={CRATE_NAME_MAX} value={name} onChange={(e) => { setName(e.target.value); setError(null); }} onBlur={() => { if (!normalizeCrateName(name)) { setCreating(false); setName(""); } }} onKeyDown={(e) => { if (e.key === "Escape") { setCreating(false); setName(""); setError(null); } }} style={{ width: "100%" }} />
+          {error && <div className="error" role="alert" style={{ fontSize: 12, padding: "4px 2px 0" }}>{error}</div>}
+        </form>
+      )}
+      {crates?.map((c) => renaming?.id === c.id ? (
+        <form key={c.id} onSubmit={(e) => { e.preventDefault(); finishRename(); }} style={{ padding: "0 4px 6px" }}>
+          <input autoFocus aria-label={`Rename ${c.name}`} maxLength={CRATE_NAME_MAX} value={renaming.name} onChange={(e) => setRenaming({ id: c.id, name: e.target.value })} onBlur={finishRename} onKeyDown={(e) => { if (e.key === "Escape") setRenaming(null); }} style={{ width: "100%" }} />
+        </form>
+      ) : (
+        <Link key={c.id} to={libraryCratePath(c.id)} title={c.name} className={onScreen === c.id ? "active" : ""} onContextMenu={(e) => menu(e, c)} data-crate={c.id}>
+          <PlaylistCover artIds={c.art_ids} size="sm" />
+          <span className="pl-name">{c.name}</span>
+          <span className="spacer" />
+          <span className="count">{c.album_count}</span>
+        </Link>
+      ))}
+      {rename.isError && <div className="error" role="alert" style={{ fontSize: 12, padding: "4px 14px 0" }}>{friendlyError(rename.error, "Couldn't rename the crate.")}</div>}
+    </>
   );
 }
 
