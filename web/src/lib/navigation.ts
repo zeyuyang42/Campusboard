@@ -25,3 +25,5 @@ export function focusFind() {
 
 /** The Library's album grid narrowed to one tag (#71). */
 export const libraryTagPath = (tag: string) => `/library/albums?tag=${encodeURIComponent(tag)}`;
+/** The Library's album grid narrowed to one crate (#126). */
+export const libraryCratePath = (id: number) => `/library/albums?crate=${id}`;

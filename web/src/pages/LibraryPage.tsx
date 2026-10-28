@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useParams, useSearchParams } from "react-router-dom";
 import { repos } from "@bc/core";
-import { useAlbums, useArtists, useLibraryView, useRecentlyPlayed, useTags, useTracks, type LibraryView } from "../api/queries";
+import { useAlbums, useArtists, useCrate, useLibraryView, useRecentlyPlayed, useTags, useTracks, type LibraryView } from "../api/queries";
 import { libraryTagPath } from "../lib/navigation";
 import { useUi } from "../ui/store";
 import { friendlyError } from "../lib/errors";
@@ -39,8 +39,10 @@ const FILTER_EMPTY: Record<string, string> = {
   wishlist: "Nothing from your wishlist here yet. Add your Bandcamp username in Settings and sync your collection.",
   downloaded: "Nothing is available offline yet. Open an album and choose Make available offline.",
   rated: "No rated albums yet. Open an album and give it some stars.",
+  archived: "Nothing is archived. Archive an album from its page or its menu to take it out of the grid for a while.",
+  unplayed: "Every album here has been played.",
 };
-const FILTER_NAME: Record<string, string> = { purchased: "your purchases", wishlist: "your wishlist", downloaded: "your downloads", rated: "your rated albums" };
+const FILTER_NAME: Record<string, string> = { purchased: "your purchases", wishlist: "your wishlist", downloaded: "your downloads", rated: "your rated albums", archived: "your archive", unplayed: "your unplayed albums" };
 
 
 /** A rating as quiet text under a card, e.g. "★★★★"; nothing when unrated. */
@@ -79,20 +81,31 @@ function AlbumGrid({ sort: savedSort, filter, set }: LibraryView & { set: (p: Pa
   const [params, setParams] = useSearchParams();
   const tag = params.get("tag")?.trim() ?? "";
   const clearTag = () => setParams((p) => { p.delete("tag"); return p; });
-  const { data, isLoading, error } = useAlbums(sort, filter, term, tag);
+  // A crate (#126) lives there too (?crate=<id>): the sidebar and album pages link to it.
+  const crateId = Math.max(0, Math.floor(Number(params.get("crate")) || 0));
+  const clearCrate = () => setParams((p) => { p.delete("crate"); return p; });
+  const { data: crate } = useCrate(crateId);
+  const { data, isLoading, error } = useAlbums(sort, filter, term, tag, crateId);
   if (error) return <div className="notice error">Couldn't load your library. {friendlyError(error)}</div>;
   if (isLoading) return <div className="empty">Loading…</div>;
-  if (!data?.length && filter === "all" && !term && !q.trim() && !tag) return <div className="empty">Your library is empty. Paste a Bandcamp album, track or artist link on the Import page to get started.<br /><Link className="btn primary" to="/import">Go to Import</Link></div>;
+  const narrowed = !!term || !!q.trim() || !!tag || crateId > 0;
+  if (!data?.length && filter === "all" && !narrowed) return <div className="empty">Your library is empty. Paste a Bandcamp album, track or artist link on the Import page to get started.<br /><Link className="btn primary" to="/import">Go to Import</Link></div>;
   const n = data?.length ?? 0;
   // The Recently played row sits over the plain library view only: not while filtering, and
   // not when the grid itself is already ordered by listening.
-  const shelf = filter === "all" && !term && !q.trim() && !tag && sort !== "played" && sort !== "plays";
-  // Bulk actions only while the filter, a tag or Show narrows the list (the bar carries the count then).
-  const bulk = (filter !== "all" || !!term || !!tag) && n > 0;
+  const shelf = filter === "all" && !narrowed && sort !== "played" && sort !== "plays";
+  // Bulk actions only while the filter, a tag, a crate or Show narrows the list (the bar carries the count then).
+  const bulk = (filter !== "all" || narrowed) && n > 0;
   return (
     <>
       <div className="toolbar">
         <FilterInput value={q} onChange={setQ} placeholder="Filter albums, artists, tracks" />
+        {crateId > 0 && (
+          <span className="tag-filter">
+            In <span className="selectable">{crate?.name ?? "crate"}</span>
+            <button className="icon-btn sm" onClick={clearCrate} aria-label="Leave the crate" title="Show the whole library">×</button>
+          </span>
+        )}
         {tag && (
           <span className="tag-filter">
             Tagged <span className="selectable">{tag}</span>
@@ -110,20 +123,23 @@ function AlbumGrid({ sort: savedSort, filter, set }: LibraryView & { set: (p: Pa
           {repos.ALBUM_SORTS.map((s) => <option key={s} value={s}>{SORT_LABELS[s]}</option>)}
         </select>
       </div>
-      {bulk && <BulkBar albums={data!} sort={sort} filter={filter} q={term} tag={tag} />}
+      {bulk && <BulkBar albums={data!} sort={sort} filter={filter} q={term} tag={tag} crate={crateId} />}
       {shelf && <RecentlyPlayed libraryCount={n} onShowAll={() => setTempSort("played")} />}
       {n ? <div className="grid">{data!.map((a) => <AlbumCard key={a.id} album={a} detail={sort === "plays" ? (a.play_count ? formatPlays(a.play_count) : "") : sort === "rating" ? starsText(a.rating) : undefined} />)}</div>
-        : term || tag ? (
+        : term || tag || crateId > 0 ? (
           <div className="empty">
             Nothing in {FILTER_NAME[filter] ?? "your library"}
+            {crateId > 0 && <> is in <span className="selectable">{crate?.name ?? "this crate"}</span>{tag || term ? " and" : ""}</>}
             {tag && <> is tagged <span className="selectable">“{tag}”</span>{term ? " and" : ""}</>}
-            {term && <> matches <span className="selectable">“{term}”</span></>}.<br />
+            {term && <> matches <span className="selectable">“{term}”</span></>}.
+            {crateId > 0 && !tag && !term && filter === "all" && <> Right-click an album and choose Add to crate.</>}<br />
             {term && <button className="btn" onClick={() => setQ("")}>Clear filter</button>}
             {tag && <>{term ? " " : ""}<button className="btn" onClick={clearTag}>Clear tag</button></>}
+            {crateId > 0 && (tag || term || filter !== "all") && <> <button className="btn" onClick={clearCrate}>Leave the crate</button></>}
             {filter !== "all" && <> <button className="btn" onClick={() => set({ filter: "all" })}>Search all albums</button></>}
           </div>
         )
-        : <div className="empty">{FILTER_EMPTY[filter]}{filter !== "downloaded" && filter !== "rated" && <><br /><Link className="btn" to="/settings#account">Open Settings</Link></>}</div>}
+        : <div className="empty">{FILTER_EMPTY[filter]}{(filter === "purchased" || filter === "wishlist") && <><br /><Link className="btn" to="/settings#account">Open Settings</Link></>}</div>}
     </>
   );
 }

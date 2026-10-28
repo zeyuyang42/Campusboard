@@ -22,6 +22,7 @@ const fakeCore = {
     [{ id: 7, title: "Boards Album", artist_name: "Boards of Canada" }, { id: 8, title: "Other", artist_name: "X" }].filter((a) => matches(`${a.title} ${a.artist_name}`, q))),
   artists: vi.fn(async () => [{ id: 3, name: "Boards of Canada", album_count: 1 }, { id: 4, name: "Zoë Keating", album_count: 1 }]),
   playlists: vi.fn(async () => [{ id: 5, name: "Bossa evenings" }, { id: 6, name: "Run" }]),
+  crates: vi.fn(async () => [{ id: 9, name: "Bought on tour" }, { id: 10, name: "Late nights" }]),
   search: vi.fn(async () => []),
 };
 
@@ -123,14 +124,15 @@ describe("command palette (#72)", () => {
     expect(useUi.getState().nowPlayingOpen).toBe(true);
   });
 
-  it("lists albums, artists and playlists from the library search, then matching actions", async () => {
+  it("lists albums, artists, playlists and crates from the library search, then matching actions", async () => {
     open();
     type("bo");
     await settle();
-    expect(fakeCore.albums).toHaveBeenCalledWith("title", "all", "bo", "", { limit: 6 });
+    // Archived albums (#126) stay a jump away from here.
+    expect(fakeCore.albums).toHaveBeenCalledWith("title", "all", "bo", "", { limit: 6, archived: "any" });
     // "Keyboard shortcuts" has a "bo" too: actions follow the library results.
-    expect(labels()).toEqual(["Boards Album", "Boards of Canada", "Bossa evenings", "Settings: Keyboard shortcuts", "Search Bandcamp for “bo”"]);
-    expect([...document.querySelectorAll(".palette-group")].map((g) => g.textContent)).toEqual(["Albums", "Artists", "Playlists", "Actions"]);
+    expect(labels()).toEqual(["Boards Album", "Boards of Canada", "Bossa evenings", "Bought on tour", "Settings: Keyboard shortcuts", "Search Bandcamp for “bo”"]);
+    expect([...document.querySelectorAll(".palette-group")].map((g) => g.textContent)).toEqual(["Albums", "Artists", "Playlists", "Crates", "Actions"]);
     type("keating");
     await settle();
     expect(labels()).toEqual(["Zoë Keating", "Search Bandcamp for “keating”"]);
@@ -156,7 +158,7 @@ describe("command palette (#72)", () => {
     expect(input()!.getAttribute("aria-activedescendant")).toBe(options()[1].id);
     key("ArrowUp");
     key("ArrowUp"); // wraps to the last
-    expect(options()[4].getAttribute("aria-selected")).toBe("true");
+    expect(options()[options().length - 1].getAttribute("aria-selected")).toBe("true");
     key("ArrowDown"); // back to the first
     key("Enter");
     expect(input()).toBeNull();

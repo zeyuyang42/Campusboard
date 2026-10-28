@@ -100,6 +100,11 @@ export async function vacuumOrphans(db: Db): Promise<void> {
   await db.run("DELETE FROM resume_positions WHERE item_id > 0 AND item_id NOT IN (SELECT id FROM tracks)");
   // Smart playlist rules (#84) go with their playlist.
   await db.run("DELETE FROM smart_playlists WHERE playlist_id NOT IN (SELECT id FROM playlists)");
+  // Archive marks and crate memberships (#126) go with their album; a crate's bookkeeping with the crate.
+  await db.run("DELETE FROM album_archive WHERE album_id NOT IN (SELECT id FROM albums)");
+  await db.run("DELETE FROM crate_albums WHERE album_id NOT IN (SELECT id FROM albums) OR crate_id NOT IN (SELECT id FROM crates)");
+  await db.run("DELETE FROM crate_albums_pending WHERE crate_id NOT IN (SELECT id FROM crates)");
+  await db.run("DELETE FROM imported_crates WHERE crate_id NOT IN (SELECT id FROM crates)");
 }
 
 async function updateStreamFields(db: Db, p: ParsedTralbum) {

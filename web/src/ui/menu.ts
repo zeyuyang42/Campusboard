@@ -5,7 +5,14 @@ export type MenuItem =
   | { kind: "separator" }
   | { kind: "label"; label: string };
 
-export type MenuContent = { items: MenuItem[] } | { playlistPicker: { trackIds: number[] } };
+/** A list of items, the playlist picker for tracks, or the crate picker for albums (#126). */
+export type MenuContent = { items: MenuItem[] } | { playlistPicker: { trackIds: number[] } } | { cratePicker: { albumIds: number[] } };
+
+/** Reopen the menu where it is with other content (a submenu), on the next tick so the click that chose the item has settled. */
+export function reopenMenuAs(content: MenuContent) {
+  const m = useMenu.getState();
+  setTimeout(() => m.show({ x: m.x, y: m.y }, content), 0);
+}
 
 interface MenuState {
   open: boolean;

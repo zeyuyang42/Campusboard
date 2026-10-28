@@ -2,15 +2,17 @@ import type { Db } from "../Db.js";
 import { chunks, likeContains, placeholders, sqlTime } from "../Db.js";
 import { dismissAlbum } from "./fanItems.js";
 import { NOT_REMOVING } from "./albumRemoval.js";
+import { ARCHIVED, NOT_ARCHIVED, type ArchiveScope } from "./albumArchive.js";
 import { TRACK_SELECT, rowToTrack, type TrackRow } from "./tracks.js";
 import type { Album, AlbumWithTracks, Track } from "../../types.js";
 import { preorderRecheckDue, releaseTime } from "../../services/preorder.js";
 
-export interface AlbumRow extends Omit<Album, "tags" | "is_preorder" | "owned" | "wishlisted"> {
+export interface AlbumRow extends Omit<Album, "tags" | "is_preorder" | "owned" | "wishlisted" | "archived"> {
   tags_json: string;
   is_preorder: number;
   owned: number;
   wishlisted: number;
+  archived: number;
 }
 
 /** tags_json as strings; malformed JSON or entries read as no tags (as listTags does). */
@@ -24,7 +26,7 @@ function parseTags(json: string): string[] {
 }
 
 export function rowToAlbum(r: AlbumRow): Album {
-  return { ...r, tags: parseTags(r.tags_json), is_preorder: !!r.is_preorder, owned: !!r.owned, wishlisted: !!r.wishlisted };
+  return { ...r, tags: parseTags(r.tags_json), is_preorder: !!r.is_preorder, owned: !!r.owned, wishlisted: !!r.wishlisted, archived: !!r.archived };
 }
 
 const WISHLISTED = "EXISTS (SELECT 1 FROM fan_items f WHERE f.list = 'wishlist' AND f.item_type = al.item_type AND f.bandcamp_id = al.bandcamp_id)";
@@ -46,13 +48,20 @@ export const ALBUM_SELECT = `
     ${PLAY_COUNT} AS play_count,
     ${LAST_PLAYED} AS last_played_at,
     (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id AND t.local_path IS NOT NULL) AS downloaded_count,
-    ${RATING} AS rating
+    ${RATING} AS rating,
+    ${ARCHIVED} AS archived
   FROM albums al JOIN artists ar ON ar.id = al.artist_id`;
 
-export type AlbumFilter = "all" | "purchased" | "wishlist" | "downloaded" | "rated";
+/**
+ * The Library's Show filter. "archived" lists only archived albums (#126), the one Show
+ * under which they appear in the Albums tab; "unplayed" is albums with no counted play.
+ */
+export type AlbumFilter = "all" | "purchased" | "wishlist" | "downloaded" | "rated" | "archived" | "unplayed";
 /** Albums with at least one offline copy (#2). */
 const DOWNLOADED = "EXISTS (SELECT 1 FROM tracks t WHERE t.album_id = al.id AND t.local_path IS NOT NULL)";
-const FILTERS: Record<AlbumFilter, string | null> = { all: null, purchased: "al.owned = 1", wishlist: WISHLISTED, downloaded: DOWNLOADED, rated: `${RATING} > 0` };
+const FILTERS: Record<AlbumFilter, string | null> = {
+  all: null, purchased: "al.owned = 1", wishlist: WISHLISTED, downloaded: DOWNLOADED, rated: `${RATING} > 0`, archived: ARCHIVED, unplayed: `${PLAY_COUNT} = 0`,
+};
 
 // Bandcamp release dates are stored as sent ("01 Oct 2021 00:00:00 GMT"), which does not
 // sort as text. This turns them into YYYY + month position + DD; NULL stays NULL (last in DESC).
@@ -98,15 +107,22 @@ const MATCH = `(al.title LIKE ? ESCAPE '\\' OR ar.name LIKE ? ESCAPE '\\'
 const TAGS_OF_AL = "json_each(CASE WHEN json_valid(al.tags_json) THEN al.tags_json ELSE '[]' END)";
 const HAS_TAG = `EXISTS (SELECT 1 FROM ${TAGS_OF_AL} j WHERE j.type = 'text' AND trim(j.value) = ? COLLATE NOCASE)`;
 
+/** Albums in a crate (#126). */
+const IN_CRATE = "EXISTS (SELECT 1 FROM crate_albums ca WHERE ca.crate_id = ? AND ca.album_id = al.id)";
+
 /**
- * Extra album conditions smart playlists add (#84) on top of the Library's Show filter, text
- * and tag: a minimum rating, and a play (of any of the album's tracks) within, or none
- * within, the last N days. Missing, zero or invalid values add nothing.
+ * Extra album conditions on top of the Library's Show filter, text and tag: the smart
+ * playlist ones (#84: a minimum rating, and a play of any of the album's tracks within, or
+ * none within, the last N days), a crate (#126), and how archived albums are treated
+ * (`archived`, by default "any": included like the rest; the Albums tab passes "hide").
+ * Show → Archived always lists only them. Missing, zero or invalid values add nothing.
  */
 export interface AlbumConditions {
   minRating?: number;
   playedWithinDays?: number;
   notPlayedWithinDays?: number;
+  crate?: number;
+  archived?: ArchiveScope;
 }
 
 const DAY_MS = 86_400_000;
@@ -120,6 +136,13 @@ function albumWhere(filter: AlbumFilter, q: string, tag = "", c: AlbumConditions
   const params: unknown[] = [];
   const f = FILTERS[filter];
   if (f) where.push(f);
+  // Show → Archived is the archived view itself; otherwise the caller says whether archived albums are left out.
+  if (filter !== "archived" && c.archived === "hide") where.push(NOT_ARCHIVED);
+  else if (filter !== "archived" && c.archived === "only") where.push(ARCHIVED);
+  if (positive(c.crate)) {
+    where.push(IN_CRATE);
+    params.push(c.crate);
+  }
   const t = tag.trim();
   if (t) {
     where.push(HAS_TAG);
@@ -146,14 +169,20 @@ function albumWhere(filter: AlbumFilter, q: string, tag = "", c: AlbumConditions
   return { sql: where.length ? `WHERE ${where.join(" AND ")}` : "", params };
 }
 
+/** Options for listAlbums: the extra conditions plus a cap on albums. */
+export interface AlbumListOptions extends AlbumConditions {
+  /** Keep only the first this many albums in sort order (a positive integer); all by default. */
+  limit?: number;
+}
+
 /**
  * The library's albums. `q` matches album title, artist name, track titles and track
  * artists as a substring (case-insensitive for ASCII), combined with `filter` and, when
- * given, one tag. `limit` (a positive integer) keeps only the first albums in sort order;
- * by default all are listed.
+ * given, one tag. `opts` adds a crate, the archive scope (#126) and the smart playlist
+ * conditions; `opts.limit` keeps only the first albums in sort order (all by default).
  */
-export async function listAlbums(db: Db, sort: AlbumSort = "added", filter: AlbumFilter = "all", q = "", tag = "", opts: { limit?: number } = {}): Promise<Album[]> {
-  const w = albumWhere(filter, q, tag);
+export async function listAlbums(db: Db, sort: AlbumSort = "added", filter: AlbumFilter = "all", q = "", tag = "", opts: AlbumListOptions = {}): Promise<Album[]> {
+  const w = albumWhere(filter, q, tag, opts);
   const limit = opts.limit !== undefined && Number.isInteger(opts.limit) && opts.limit > 0 ? opts.limit : null;
   const sql = `${ALBUM_SELECT} ${w.sql} ORDER BY ${SORTS[sort] ?? SORTS.added}${limit ? " LIMIT ?" : ""}`;
   return (await db.select<AlbumRow>(sql, limit ? [...w.params, limit] : w.params)).map(rowToAlbum);
@@ -272,8 +301,10 @@ export async function deleteAlbum(db: Db, id: number): Promise<boolean> {
   // A purchased or wishlisted release the user removes stays out on later syncs.
   await dismissAlbum(db, id);
   const r = await db.run("DELETE FROM albums WHERE id = ?", [id]);
-  // The foreign key cascades this; also right with foreign keys off (vacuumOrphans catches the rest).
+  // The foreign key cascades these; also right with foreign keys off (vacuumOrphans catches the rest).
   await db.run("DELETE FROM album_notes WHERE album_id = ?", [id]);
+  await db.run("DELETE FROM album_archive WHERE album_id = ?", [id]);
+  await db.run("DELETE FROM crate_albums WHERE album_id = ?", [id]);
   await db.run("DELETE FROM artists WHERE id NOT IN (SELECT DISTINCT artist_id FROM albums)");
   return r.changes > 0;
 }

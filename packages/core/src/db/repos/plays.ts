@@ -21,21 +21,25 @@ export async function recordPlay(db: Db, trackId: number, seconds: number): Prom
   return r?.id ?? null;
 }
 
-/** Played albums, latest play first, each with play_count and last_played_at. */
+/**
+ * Played albums, latest play first, each with play_count and last_played_at. Archived albums
+ * (#126) are left out: this is the Albums tab's Recently played row.
+ */
 export function recentlyPlayedAlbums(db: Db, limit = 12): Promise<Album[]> {
-  return historyAlbums(db, "h_last DESC, h_seq DESC", limit);
+  return historyAlbums(db, "h_last DESC, h_seq DESC", limit, true);
 }
 
 /** Played albums by total plays (ties: played more recently first). */
 export function mostPlayedAlbums(db: Db, limit = 12): Promise<Album[]> {
-  return historyAlbums(db, "h_n DESC, h_last DESC, h_seq DESC", limit);
+  return historyAlbums(db, "h_n DESC, h_last DESC, h_seq DESC", limit, false);
 }
 
-async function historyAlbums(db: Db, order: string, limit: number): Promise<Album[]> {
+async function historyAlbums(db: Db, order: string, limit: number, hideArchived: boolean): Promise<Album[]> {
   // One pass over plays picks the albums; the rows themselves come from the usual album select.
   const sql = `${ALBUM_SELECT}
     JOIN (SELECT t.album_id AS hid, COUNT(*) AS h_n, MAX(p.played_at) AS h_last, MAX(p.id) AS h_seq
           FROM plays p JOIN tracks t ON t.id = p.track_id
+          ${hideArchived ? "WHERE NOT EXISTS (SELECT 1 FROM album_archive x WHERE x.album_id = t.album_id)" : ""}
           GROUP BY t.album_id ORDER BY ${order} LIMIT ?) h ON h.hid = al.id
     ORDER BY ${order}`;
   return (await db.select<AlbumRow>(sql, [limit])).map(rowToAlbum);

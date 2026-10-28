@@ -9,7 +9,7 @@ export const countStreamable = (t: Track[]) => t.reduce((n, x) => n + (x.streama
 
 
 /** Labels for the Library's Show filter and sorts, in ALBUM_SORTS order (a new sort in core needs one). */
-export const SHOW_LABELS: Record<repos.AlbumFilter, string> = { all: "All", purchased: "Purchased", wishlist: "Wishlist", downloaded: "Downloaded", rated: "Rated" };
+export const SHOW_LABELS: Record<repos.AlbumFilter, string> = { all: "All", purchased: "Purchased", wishlist: "Wishlist", downloaded: "Downloaded", rated: "Rated", unplayed: "Unplayed", archived: "Archived" };
 export const SORT_LABELS: Record<repos.AlbumSort, string> = { added: "Date added", played: "Recently played", plays: "Most played", artist: "Artist", title: "Album title", release: "Release date", rating: "Rating" };
 
 export function shuffled<T>(arr: T[]): T[] {

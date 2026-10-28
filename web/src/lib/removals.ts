@@ -1,11 +1,44 @@
 // Removals that offer Undo (#93). Each one shows the single Undo note; its callbacks run
 // after the page that started it may be gone, so they talk to core and the query cache directly.
 import { getCore } from "../api/core";
-import { invalidateQueries } from "../api/invalidate";
+import { ARCHIVE_KEYS, CRATE_KEYS, invalidateQueries } from "../api/invalidate";
 import { offerUndo } from "../ui/undo";
 
-const LIBRARY = ["albums", "album", "artists", "artist", "tracks", "search", "playlists", "playlist", "history", "releases"];
+const LIBRARY = ["albums", "album", "artists", "artist", "tracks", "search", "playlists", "playlist", "history", "releases", "crates"];
 const PLAYLISTS = ["playlists", "playlist"];
+
+/** Archive an album (#126): it leaves the Albums tab at once; Undo brings it back. */
+export async function archiveAlbumWithUndo(album: { id: number; title: string }): Promise<boolean> {
+  const core = await getCore();
+  if (!(await core.setAlbumArchived(album.id, true))) return false;
+  invalidateQueries(ARCHIVE_KEYS);
+  offerUndo({
+    text: `Archived "${album.title}".`,
+    undo: async () => { await core.setAlbumArchived(album.id, false); invalidateQueries(ARCHIVE_KEYS); },
+  });
+  return true;
+}
+
+/** Unarchive an album (#126) from a card or its page. No Undo note: Archive is a click away. */
+export async function unarchiveAlbum(albumId: number): Promise<boolean> {
+  const core = await getCore();
+  const changed = await core.setAlbumArchived(albumId, false);
+  invalidateQueries(ARCHIVE_KEYS);
+  return changed;
+}
+
+/** Delete a crate (#126); Undo brings it back with its albums, under its old id when free. */
+export async function deleteCrateWithUndo(crate: { id: number; name: string }): Promise<boolean> {
+  const core = await getCore();
+  const snap = await core.deleteCrateWithUndo(crate.id);
+  invalidateQueries(CRATE_KEYS);
+  if (!snap) return false;
+  offerUndo({
+    text: `Deleted "${crate.name}".`,
+    undo: async () => { await core.restoreCrate(snap); invalidateQueries(CRATE_KEYS); },
+  });
+  return true;
+}
 
 /**
  * Remove an album from the library. It disappears at once; the real delete (rows, offline

@@ -2,6 +2,7 @@ import type { Db } from "../Db.js";
 import type { Artist, Album } from "../../types.js";
 import { rowToAlbum, RELEASE_KEY, type AlbumRow } from "./albums.js";
 import { NOT_REMOVING } from "./albumRemoval.js";
+import { ARCHIVED } from "./albumArchive.js";
 
 export async function upsertArtist(db: Db, a: { band_id: number; name: string; url: string; location?: string | null }): Promise<number> {
   const row = await db.get<{ id: number }>(
@@ -32,7 +33,8 @@ export async function getArtist(db: Db, id: number): Promise<(Artist & { albums:
   const rows = await db.select<AlbumRow>(
     `SELECT al.*, ar.name AS artist_name,
        (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id) AS track_count,
-       (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id AND t.streamable = 1) AS streamable_count
+       (SELECT COUNT(*) FROM tracks t WHERE t.album_id = al.id AND t.streamable = 1) AS streamable_count,
+       ${ARCHIVED} AS archived
      FROM albums al JOIN artists ar ON ar.id = al.artist_id
      WHERE al.artist_id = ? AND ${NOT_REMOVING} ORDER BY ${RELEASE_KEY} DESC, al.title COLLATE NOCASE, al.id`,
     [id],

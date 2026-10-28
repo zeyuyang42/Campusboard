@@ -7,7 +7,7 @@ import type { QueryClient } from "@tanstack/react-query";
  */
 export const KEY_GROUPS = {
   /** Everything an import, a removal or an edit may have changed. */
-  library: ["albums", "album", "artists", "artist", "tracks", "search", "playlists", "playlist", "history", "releases"],
+  library: ["albums", "album", "artists", "artist", "tracks", "search", "playlists", "playlist", "history", "releases", "crates"],
   /** A pre-order that came out, or tracks that changed: nothing imported, so no artists, search or releases. */
   libraryTracks: ["albums", "album", "artist", "tracks", "playlist", "history"],
   /** Listening history cleared: everything that shows play counts. */
@@ -24,6 +24,11 @@ export const KEY_GROUPS = {
 } as const satisfies Record<string, readonly string[]>;
 
 export type KeyGroup = keyof typeof KEY_GROUPS;
+
+/** The prefixes a crate change (#126) touches: the crate lists and the Albums grid (a crate view may be on screen). */
+export const CRATE_KEYS = ["crates", "albums"] as const;
+/** The prefixes an archive change (#126) touches: the grids, the album and artist pages, and the Recently played row. */
+export const ARCHIVE_KEYS = ["albums", "album", "artist", "history"] as const;
 
 let bound: QueryClient | null = null;
 

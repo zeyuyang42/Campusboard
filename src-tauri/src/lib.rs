@@ -59,6 +59,7 @@ fn migrations() -> Vec<Migration> {
         migration!(10, "resume points for long tracks and radio episodes", "0010_resume_positions.sql"),
         migration!(11, "smart playlists", "0011_smart_playlists.sql"),
         migration!(12, "raw art swatches for the vivid backdrop", "0012_art_swatches.sql"),
+        migration!(13, "crates and archive", "0013_crates_archive.sql"),
     ]
 }
 
@@ -579,7 +580,7 @@ mod tests {
             assert!(f.starts_with(&format!("{:04}_", i + 1)), "{f}");
         }
         // The newest file's own table: update this with the next migration.
-        assert!(ms.last().unwrap().sql.contains("art_swatches"));
+        assert!(ms.last().unwrap().sql.contains("imported_crates"));
     }
 
     /// The native file-drop handler swallows every drag before WebKit sees it, link text

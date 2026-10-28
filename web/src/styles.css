@@ -467,6 +467,12 @@ details.about-wrap summary { cursor: pointer; color: var(--text-muted); margin-t
 .album-head .preorder-note { font-size: 13px; color: var(--text); margin: -6px 0 12px; }
 .card .sub .preorder { color: var(--text); }
 .album-head .owned-note { font-size: 13px; color: var(--accent); margin: -6px 0 12px; }
+/* Archived (#126): quiet, like the offline note. */
+.album-head .archived-note { font-size: 13px; color: var(--text-muted); margin: -6px 0 12px; }
+/* The album's crates (#126): pills with a × to take it out, and the button that opens the picker. */
+.crate-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 14px; }
+.crate-line .tag-chip a { color: var(--text); }
+.crate-line .tag-chip a:hover { text-decoration: underline; }
 /* Offline copies (#2): quiet, never louder than the Buy link. */
 .album-head .offline-note { font-size: 13px; color: var(--text-muted); margin: -6px 0 12px; }
 .album-head .offline-progress { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }

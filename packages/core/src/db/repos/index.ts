@@ -14,5 +14,7 @@ export * from "./albumNotes.js";
 export * from "./resumePositions.js";
 export * from "./smartPlaylists.js";
 export * from "./albumRemoval.js";
+export * from "./albumArchive.js";
+export * from "./crates.js";
 export * from "./stats.js";
 export * from "./swatches.js";
